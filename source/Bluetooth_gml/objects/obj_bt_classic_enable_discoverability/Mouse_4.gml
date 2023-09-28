@@ -1,0 +1,2 @@
+
+bt_classic_discoverability_enable(300);
