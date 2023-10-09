@@ -167,7 +167,7 @@ function bt_le_advertise_is_active() {}
  * @member {string} type The value `"bt_le_server_notify_value"`
  * @member {real} async_id The unique async identifier that refers to this task.
  * @member {boolean} success `true` if the task completed successfully, `false` otherwise.
- * @member {Array<struct.NotifiedDevice>} devices An array of notified devices and the status of the notification. Note that on mobile this will be a JSON encoded string that needs to be parsed using ${builtin.json_parse}.
+ * @member {Array<struct.NotifiedDevice>} devices An array of notified devices and the status of the notification. Note that on mobile this will be a JSON encoded string that needs to be parsed using ${function.json_parse}.
  * @event_end
  * 
  * @func_end
@@ -177,7 +177,7 @@ function bt_le_server_open() {}
 /** 
  * @func bt_le_server_add_service
  * @desc This function adds a new service to the currently opened server.
- * @param {struct.ServiceData} data A struct representing the service to be added (on mobile this argument needs to be stringified using ${builtin.json_stringify}).
+ * @param {struct.ServiceData} data A struct representing the service to be added (on mobile this argument needs to be stringified using ${function.json_stringify}).
  * @returns {real}
  * 
  * @event social
@@ -319,7 +319,7 @@ function bt_le_peripheral_is_paired(address) {}
  * @member {string} type The value `"bt_le_peripheral_get_services"`
  * @member {real} async_id The unique async identifier that refers to this task
  * @member {boolean} success `true` if the task completed successfully, `false` otherwise.
- * @member {Array<struct.BluetoothService>} services An array of ${struct.BluetoothService} associated with the peripheral. On mobile platforms this will be a JSON encoded string that needs to be parsed using ${builtin.json_parse}.
+ * @member {Array<struct.BluetoothService>} services An array of ${struct.BluetoothService} associated with the peripheral. On mobile platforms this will be a JSON encoded string that needs to be parsed using ${function.json_parse}.
  * @event_end
  * 
  * @func_end
@@ -337,7 +337,7 @@ function bt_le_peripheral_get_services(address) {}
  * @member {string} type The value `"bt_le_service_get_characteristics"`
  * @member {real} async_id The unique async identifier that refers to this task
  * @member {boolean} success `true` if the task completed successfully, `false` otherwise.
- * @member {Array<struct.BluetoothCharacteristic>} characteristics An array of ${struct.BluetoothCharacteristic} associated with the service. On mobile platforms this will be a JSON encoded string that needs to be parsed using ${builtin.json_parse}.
+ * @member {Array<struct.BluetoothCharacteristic>} characteristics An array of ${struct.BluetoothCharacteristic} associated with the service. On mobile platforms this will be a JSON encoded string that needs to be parsed using ${function.json_parse}.
  * @event_end
  * 
  * @func_end
@@ -356,7 +356,7 @@ function bt_le_service_get_characteristics(address, service) {}
  * @member {string} type The value `"bt_le_characteristic_get_descriptors"`
  * @member {real} async_id The unique async identifier that refers to this task
  * @member {boolean} success `true` if the task completed successfully, `false` otherwise.
- * @member {Array<struct.BluetoothDescriptor>} descriptors An array of ${struct.BluetoothDescriptor} associated with the characteristic. On mobile platforms this will be a JSON encoded string that needs to be parsed using ${builtin.json_parse}.
+ * @member {Array<struct.BluetoothDescriptor>} descriptors An array of ${struct.BluetoothDescriptor} associated with the characteristic. On mobile platforms this will be a JSON encoded string that needs to be parsed using ${function.json_parse}.
  * @event_end
  * 
  * @func_end
