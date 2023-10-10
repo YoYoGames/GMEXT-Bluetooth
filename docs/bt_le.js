@@ -3,7 +3,7 @@
 
 /** 
  * @func bt_le_is_supported
- * @desc Returns true if the device has the necessary bluetooth LE features, false otherwise
+ * @desc This function returns `true` if the device has the necessary Bluetooth LE features, `false` otherwise.
  * @returns {boolean}
  * 
  * @func_end
@@ -12,14 +12,14 @@ function bt_le_is_supported() {}
 
 /** 
  * @func bt_le_scan_start
- * @desc Start Bluetooth LE scan with default parameters and no filters. The scan results will be delivered through callback.
+ * @desc This function starts a Bluetooth LE scan with default parameters and no filters. The scan results will be delivered through callback.
  * @returns {real}
  * 
  * @event social
  * @member {string} type The value `"bt_le_scan_start"`
  * @member {real} async_id The unique async identifier that refers to this task
- * @member {boolean} success true if the scan was completed successfully, false otherwise.
- * @member {real} error_code The error code (if scan failed).
+ * @member {boolean} success `true` if the scan completed successfully, `false` otherwise.
+ * @member {real} error_code The error code (if the scan failed).
  * @event_end
  * 
  * @event social
@@ -41,8 +41,8 @@ function bt_le_scan_start(address) {}
  * 
  * @event social
  * @member {string} type The value `"bt_le_scan_stop"`
- * @member {real} async_id The identifier unique of this async task.
- * @member {boolean} success true if the scan has stopped successfully, false otherwise.
+ * @member {real} async_id The unique identifier of this async task.
+ * @member {boolean} success `true` if the scan has stopped successfully, `false` otherwise.
  * @event_end
  * 
  * @func_end
@@ -51,7 +51,7 @@ function bt_le_scan_stop() {}
 
 /** 
  * @func bt_le_scan_is_active
- * @desc Returns whether or not the scan is currently active.
+ * @desc This function returns whether or not the scan is currently active.
  * @returns {boolean}
  * 
  * @func_end
@@ -60,15 +60,15 @@ function bt_le_scan_is_active() {}
 
 /** 
  * @func bt_le_advertise_start
- * @desc Start Bluetooth LE Advertising.
- * @param {struct.AdvertiseSettings} settings Struct containing all the settings to be applied to the advertisement.
- * @param {struct.AdvertiseData} data Struct containing all the data to be applied to the advertisement.
+ * @desc This function starts Bluetooth LE Advertising.
+ * @param {struct.AdvertiseSettings} settings A struct containing all the settings to be applied to the advertisement.
+ * @param {struct.AdvertiseData} data A struct containing all the data to be applied to the advertisement.
  * @returns {real}
  * 
  * @event social
  * @member {string} type The value `"bt_le_advertise_start"`
- * @member {real} async_id The identifier unique of this async task.
- * @member {boolean} success true if the advertisement has started successfully, false otherwise.
+ * @member {real} async_id The unique identifier of this async task.
+ * @member {boolean} success `true` if the advertisement has started successfully, `false` otherwise.
  * @member {real} error_code The error code (if advertise failed).
  * @event_end
  * 
@@ -78,12 +78,12 @@ function bt_le_advertise_start(settings, data) {}
 
 /** 
  * @func bt_le_advertise_stop
- * @desc Stop Bluetooth LE advertising
+ * @desc This function stops Bluetooth LE advertising.
  * 
  * @event social
  * @member {string} type The value `"bt_le_advertise_stop"`
- * @member {real} async_id The identifier unique of this async task.
- * @member {boolean} success true if the advertisement has stopped successfully, false otherwise.
+ * @member {real} async_id The unique identifier of this async task.
+ * @member {boolean} success `true` if the advertisement has stopped successfully, `false` otherwise.
  * @event_end
  * 
  * @func_end
@@ -92,7 +92,7 @@ function bt_le_advertise_stop() {}
 
 /** 
  * @func bt_le_advertise_is_active
- * @desc Checks if advertisement is currently active.
+ * @desc This function checks if advertisement is currently active.
  * @returns {boolean}
  * @func_end
  */
@@ -100,43 +100,43 @@ function bt_le_advertise_is_active() {}
 
 /** 
  * @func bt_le_server_open
- * @desc Initializes the gatt server callback handlers (required before any other `bt_le_server_*` calls).
- * This function call will enable various event callbacks that the user can start listening to.
+ * @desc This function initialises the GATT server callback handlers (required before any other `bt_le_server_*` calls).
+ * The function call will enable various event callbacks that the user can start listening to.
  * @returns {real}
  * 
  * @event social
  * @member {string} type The value `"bt_le_server_open"`
  * @member {real} async_id The unique async identifier that refers to this task
- * @member {boolean} success true if the task was completed successfully, false otherwise.
+ * @member {boolean} success `true` if the task completed successfully, `false` otherwise.
  * @event_end
  * 
  * @event social
- * @description Triggered when a client requests a read from a characteristic (it's up to the user to respond to the request).
+ * @description This event is triggered when a client requests a read from a characteristic (it's up to the user to respond to the request).
  * @member {string} type The value `"bt_le_server_characteristic_read_request"`
  * @member {real} request_id The unique async identifier that refers to this request (use in ${function.bt_le_server_respond_read})
- * @member {string} service_uuid The uuid of the service that hosts the target characteristic.
- * @member {string} characteristic_uuid The uuid of the characteristic to be read.
+ * @member {string} service_uuid The UUID of the service that hosts the target characteristic.
+ * @member {string} characteristic_uuid The UUID of the characteristic to be read.
  * @event_end
  * 
  * @event social
- * @description Triggered when a client requests a write to a characteristic (it's up to the user to accept the write or not).
+ * @description This event is triggered when a client requests a write to a characteristic (it's up to the user to accept the write or not).
  * @member {string} type The value `"bt_le_server_characteristic_write_request"`
  * @member {real} request_id The unique async identifier that refers to this request (use in ${function.bt_le_server_respond_write})
- * @member {string} service_uuid The uuid of the service that hosts the target characteristic.
- * @member {string} characteristic_uuid The uuid of the characteristic to be read.
+ * @member {string} service_uuid The UUID of the service that hosts the target characteristic.
+ * @member {string} characteristic_uuid The UUID of the characteristic to be read.
  * @member {string} value The base64 encoded string of the value to be written.
  * @event_end
  * 
  * @event social
- * @description Triggered when a client commands a write to a characteristic (it's up to the user to accept the write or not).
+ * @description This event is triggered when a client commands a write to a characteristic (it's up to the user to accept the write or not).
  * @member {string} type The value `"bt_le_server_characteristic_write_command"`
- * @member {string} service_uuid The uuid of the service that hosts the target characteristic.
- * @member {string} characteristic_uuid The uuid of the characteristic to be read.
+ * @member {string} service_uuid The UUID of the service that hosts the target characteristic.
+ * @member {string} characteristic_uuid The UUID of the characteristic to be read.
  * @member {string} value The base64 encoded string of the value to be written.
  * @event_end
  * 
  * @event social
- * @description Triggered when the connection of a given device changes.
+ * @description This event is triggered when the connection of a given device changes.
  * @member {string} type The value `"bt_le_server_connection_state_changed"`
  * @member {boolean} success Whether the connection state change was successful.
  * @member {boolean} connected Whether or not the given device has connected or disconnected.
@@ -144,30 +144,30 @@ function bt_le_advertise_is_active() {}
  * @event_end
  * 
  * @event social
- * @description Triggered when a client requests a read from a descriptor (it's up to the user to respond to the request).
+ * @description This event is triggered when a client requests a read from a descriptor (it's up to the user to respond to the request).
  * @member {string} type The value `"bt_le_server_descriptor_read_request"`
  * @member {real} request_id The unique async identifier that refers to this request (use in ${function.bt_le_server_respond_read})
- * @member {string} service_uuid The uuid of the service that hosts the target descriptor.
- * @member {string} characteristic_uuid The uuid of the characteristic that hosts the target descriptor.
- * @member {string} descriptor_uuid The uuid of the descriptor to be read.
+ * @member {string} service_uuid The UUID of the service that hosts the target descriptor.
+ * @member {string} characteristic_uuid The UUID of the characteristic that hosts the target descriptor.
+ * @member {string} descriptor_uuid The UUID of the descriptor to be read.
  * @event_end
  * 
  * @event social
- * @description Triggered when a client requests a write to a descriptor (it's up to the user to accept the write or not).
+ * @description This function is triggered when a client requests a write to a descriptor (it's up to the user to accept the write or not).
  * @member {string} type The value `"bt_le_server_descriptor_write_request"`
  * @member {real} request_id The unique async identifier that refers to this request (use in ${function.bt_le_server_respond_write})
- * @member {string} service_uuid The uuid of the service that hosts the target descriptor.
- * @member {string} characteristic_uuid The uuid of the characteristic that hosts the target descriptor.
- * @member {string} descriptor_uuid The uuid of the descriptor to be read.
+ * @member {string} service_uuid The UUID of the service that hosts the target descriptor.
+ * @member {string} characteristic_uuid The UUID of the characteristic that hosts the target descriptor.
+ * @member {string} descriptor_uuid The UUID of the descriptor to be read.
  * @member {string} value The base64 encoded string of the value to be written.
  * @event_end
  * 
  * @event social
- * @description Triggered as the result of a call to the function ${function.bt_le_server_notify_value}.
+ * @description This event is triggered as the result of a call to the function ${function.bt_le_server_notify_value}.
  * @member {string} type The value `"bt_le_server_notify_value"`
  * @member {real} async_id The unique async identifier that refers to this task.
- * @member {boolean} success true if the task was completed successfully, false otherwise.
- * @member {Array<struct.NotifiedDevice>} devices An array of notified devices and the status of the notification. Note of mobile this will be a JSON encoded string that needs to be parsed using ${builtin.json_parse}.
+ * @member {boolean} success `true` if the task completed successfully, `false` otherwise.
+ * @member {Array<struct.NotifiedDevice>} devices An array of notified devices and the status of the notification. Note that on mobile this will be a JSON encoded string that needs to be parsed using ${function.json_parse}.
  * @event_end
  * 
  * @func_end
@@ -176,16 +176,16 @@ function bt_le_server_open() {}
 
 /** 
  * @func bt_le_server_add_service
- * @desc Adds a new service to the currently opened server.
- * @param {struct.ServiceData} data The a struct representing the service to be added (on mobile this argument needs to be stringified using ${builtin.json_stringify}).
+ * @desc This function adds a new service to the currently opened server.
+ * @param {struct.ServiceData} data A struct representing the service to be added (on mobile this argument needs to be stringified using ${function.json_stringify}).
  * @returns {real}
  * 
  * @event social
  * @member {string} type The value `"bt_le_server_add_service"`
  * @member {real} async_id The unique async identifier that refers to this task
- * @member {boolean} success true if the task was completed successfully, false otherwise.
+ * @member {boolean} success `true` if the task was completed successfully, `false` otherwise.
  * @member {real} error_code The error code (if scan failed).
- * @member {string} service The uuid of the service being added.
+ * @member {string} service The UUID of the service being added.
  * @event_end
  * 
  * @func_end
@@ -194,7 +194,7 @@ function bt_le_server_add_service(data) {}
 
 /** 
  * @func bt_le_server_clear_services
- * @desc Clears all previously added services to the gatt server.
+ * @desc This function clears all previously added services to the GATT server.
  * @returns {boolean}
  * @func_end
  */
@@ -202,13 +202,13 @@ function bt_le_server_clear_services() {}
 
 /** 
  * @func bt_le_server_close
- * @desc Closes the current gatt server and unregisters all the callback handlers regarding it.
+ * @desc This function closes the current GATT server and unregisters all the callback handlers regarding it.
  * @returns {real}
  * 
  * @event social
  * @member {string} type The value `"bt_le_server_close"`
  * @member {real} async_id The unique async identifier that refers to this task
- * @member {boolean} success true if the task was completed successfully, false otherwise.
+ * @member {boolean} success `true` if the task was completed successfully, `false` otherwise.
  * @event_end
  * 
  * @func_end
@@ -217,10 +217,10 @@ function bt_le_server_close() {}
 
 /** 
  * @func bt_le_server_respond_read
- * @desc Use this function to respond to an incoming read request.
+ * @desc You can use this function to respond to an incoming read request.
  * @param {real} request_id The identifier of the request.
  * @param {const.ResponseStatus} status The status of the read attempt.
- * @param {string} value The base64 encoded string with the value requested (if status is failure is ignored).
+ * @param {string} value The base64 encoded string with the value requested (if status is `BT_STATUS_FAILURE` it is ignored).
  * @returns {boolean}
  * @func_end
  */
@@ -228,7 +228,7 @@ function bt_le_server_respond_read(requestId, status, value) {}
 
 /** 
  * @func bt_le_server_respond_write
- * @desc Use this function to respond to an incoming write request.
+ * @desc You can use this function to respond to an incoming write request.
  * @param {real} request_id The identifier of the request.
  * @param {const.ResponseStatus} status The status of the write attempt.
  * @returns {boolean}
@@ -238,18 +238,18 @@ function bt_le_server_respond_write(requestId, status) {}
 
 /** 
  * @func bt_le_server_notify_value
- * @desc Notifies all the subscribers of a given characteristic that its value has changed.
- * @param {string} service_uuid The uuid of the service the characteristic belongs to.
- * @param {string} charactertistic_uuid The uuid of the charactertistic.
+ * @desc This function notifies all the subscribers of a given characteristic that its value has changed.
+ * @param {string} service_uuid The UUID of the service the characteristic belongs to.
+ * @param {string} charactertistic_uuid The UUID of the characteristic.
  * @param {string} value The base64 encoded string with the new value.
  * @returns {boolean}
  * @func_end
  */
-function bt_le_server_notify_value(service, charactertistic, value) {}
+function bt_le_server_notify_value(service, characteristic, value) {}
 
 /** 
  * @func bt_le_peripheral_open
- * @desc Opens a connection between the current client and a peripheral.
+ * @desc This function opens a connection between the current client and a peripheral.
  * @param {string} address The unique address of the device you want to connect to.
  * @returns {real}
  * 
@@ -267,7 +267,7 @@ function bt_le_peripheral_open(address) {}
 
 /** 
  * @func bt_le_peripheral_is_open
- * @desc Checks if a gatt connection with a given peripheral is opened.
+ * @desc This function checks if a GATT connection to a given peripheral is opened.
  * @param {string} address The unique address of the peripheral.
  * @returns {boolean}
  * @func_end
@@ -276,7 +276,7 @@ function bt_le_peripheral_is_open(address) {}
 
 /** 
  * @func bt_le_peripheral_close_all
- * @desc Closes all open gatt connections with all peripherals.
+ * @desc This function closes all open GATT connections to all peripherals.
  * @returns {boolean}
  * @func_end
  */
@@ -284,7 +284,7 @@ function bt_le_peripheral_close_all() {}
 
 /** 
  * @func bt_le_peripheral_close
- * @desc Closes the gatt connection with a given peripheral.
+ * @desc This function closes the GATT connection to a given peripheral.
  * @param {string} address The unique address of the peripheral.
  * @returns {boolean}
  * @func_end
@@ -293,7 +293,7 @@ function bt_le_peripheral_close(address) {}
 
 /** 
  * @func bt_le_peripheral_is_connected
- * @desc Checks if a given peripheral is connected.
+ * @desc This function checks if a given peripheral is connected.
  * @param {string} address The unique address of the peripheral.
  * @returns {boolean}
  * @func_end
@@ -302,7 +302,7 @@ function bt_le_peripheral_is_connected(address) {}
 
 /** 
  * @func bt_le_peripheral_is_paired
- * @desc Checks if a given peripheral is paired.
+ * @desc This function checks if a given peripheral is paired.
  * @param {string} address The unique address of the peripheral.
  * @returns {boolean}
  * @func_end
@@ -311,15 +311,15 @@ function bt_le_peripheral_is_paired(address) {}
 
 /** 
  * @func bt_le_peripheral_get_services
- * @desc Gets the services for a given peripheral.
+ * @desc This function gets the services for a given peripheral.
  * @param {string} address The unique address of the peripheral.
  * @returns {real}
  * 
  * @event social
  * @member {string} type The value `"bt_le_peripheral_get_services"`
  * @member {real} async_id The unique async identifier that refers to this task
- * @member {boolean} success true if the task was completed successfully, false otherwise.
- * @member {Array<struct.BluetoothService>} services An array of ${struct.BluetoothService} associated with the peripheral. On mobile platforms this will be a JSON encoded string that needs to be parsed using ${builtin.json_parse}.
+ * @member {boolean} success `true` if the task completed successfully, `false` otherwise.
+ * @member {Array<struct.BluetoothService>} services An array of ${struct.BluetoothService} associated with the peripheral. On mobile platforms this will be a JSON encoded string that needs to be parsed using ${function.json_parse}.
  * @event_end
  * 
  * @func_end
@@ -328,16 +328,16 @@ function bt_le_peripheral_get_services(address) {}
 
 /** 
  * @func bt_le_service_get_characteristics
- * @desc Gets the charactertistics for a given service.
+ * @desc This function gets the characteristics of a given service.
  * @param {string} address The unique address of the peripheral.
- * @param {string} service_uuid The uuid of the service.
+ * @param {string} service_uuid The UUID of the service.
  * @returns {real}
  * 
  * @event social
  * @member {string} type The value `"bt_le_service_get_characteristics"`
  * @member {real} async_id The unique async identifier that refers to this task
- * @member {boolean} success true if the task was completed successfully, false otherwise.
- * @member {Array<struct.BluetoothCharacteristic>} characteristics An array of ${struct.BluetoothCharacteristic} associated with the service. On mobile platforms this will be a JSON encoded string that needs to be parsed using ${builtin.json_parse}.
+ * @member {boolean} success `true` if the task completed successfully, `false` otherwise.
+ * @member {Array<struct.BluetoothCharacteristic>} characteristics An array of ${struct.BluetoothCharacteristic} associated with the service. On mobile platforms this will be a JSON encoded string that needs to be parsed using ${function.json_parse}.
  * @event_end
  * 
  * @func_end
@@ -346,49 +346,49 @@ function bt_le_service_get_characteristics(address, service) {}
 
 /** 
  * @func bt_le_characteristic_get_descriptors
- * @desc Gets the descriptors for a given charactertistic.
+ * @desc This function gets the descriptors of a given characteristic.
  * @param {string} address The unique address of the peripheral.
- * @param {string} service_uuid The uuid of the service the characteristic belongs to.
- * @param {string} charactertistic_uuid The uuid of the charactertistic.
+ * @param {string} service_uuid The UUID of the service the characteristic belongs to.
+ * @param {string} charactertistic_uuid The UUID of the characteristic.
  * @returns {real}
  * 
  * @event social
  * @member {string} type The value `"bt_le_characteristic_get_descriptors"`
  * @member {real} async_id The unique async identifier that refers to this task
- * @member {boolean} success true if the task was completed successfully, false otherwise.
- * @member {Array<struct.BluetoothDescriptor>} descriptors An array of ${struct.BluetoothDescriptor} associated with the characteristic. On mobile platforms this will be a JSON encoded string that needs to be parsed using ${builtin.json_parse}.
+ * @member {boolean} success `true` if the task completed successfully, `false` otherwise.
+ * @member {Array<struct.BluetoothDescriptor>} descriptors An array of ${struct.BluetoothDescriptor} associated with the characteristic. On mobile platforms this will be a JSON encoded string that needs to be parsed using ${function.json_parse}.
  * @event_end
  * 
  * @func_end
  */
-function bt_le_characteristic_get_descriptors(address, service, charactertistic) {}
+function bt_le_characteristic_get_descriptors(address, service, characteristic) {}
 
 /** 
  * @func bt_le_characteristic_read
- * @desc Requests a read operation on a peripheral's characteristic.
+ * @desc This function requests a read operation on a peripheral's characteristic.
  * @param {string} address The unique address of the peripheral.
- * @param {string} service_uuid The uuid of the service the characteristic belongs to.
- * @param {string} charactertistic_uuid The uuid of the charactertistic.
+ * @param {string} service_uuid The UUID of the service the characteristic belongs to.
+ * @param {string} charactertistic_uuid The UUID of the characteristic.
  * @returns {real}
  * 
  * @event social
  * @member {string} type The value `"bt_le_characteristic_read"`
  * @member {real} async_id The unique async identifier that refers to this task
- * @member {boolean} success true if the task was completed successfully, false otherwise.
+ * @member {boolean} success `true` if the task completed successfully, `false` otherwise.
  * @member {real} error_code The error code if the task was not completed successfully.
  * @member {string} value The base64 encoded string with the read value.
  * @event_end
  * 
  * @func_end
  */
-function bt_le_characteristic_read(address, service, charactertistic) {}
+function bt_le_characteristic_read(address, service, characteristic) {}
 
 /** 
  * @func bt_le_characteristic_write_request
- * @desc Requests a write operation on a peripheral's characteristic.
+ * @desc This function requests a write operation on a peripheral's characteristic.
  * @param {string} address The unique address of the peripheral.
- * @param {string} service_uuid The uuid of the service the characteristic belongs to.
- * @param {string} charactertistic_uuid The uuid of the charactertistic.
+ * @param {string} service_uuid The UUID of the service the characteristic belongs to.
+ * @param {string} charactertistic_uuid The UUID of the characteristic.
  * @param {string} value The base64 encoded string with the new value.
  * @returns {real}
  * 
@@ -401,142 +401,142 @@ function bt_le_characteristic_read(address, service, charactertistic) {}
  * 
  * @func_end
  */
-function bt_le_characteristic_write_request(address, service, charactertistic, value) {}
+function bt_le_characteristic_write_request(address, service, characteristic, value) {}
 
 /** 
  * @func bt_le_characteristic_write_command
- * @desc Commands a write operation on a peripheral's characteristic (might not happen, there is no confirmation).
+ * @desc This function commands a write operation on a peripheral's characteristic (note that this might not happen, there is no confirmation).
  * @param {string} address The unique address of the peripheral.
- * @param {string} service_uuid The uuid of the service the characteristic belongs to.
- * @param {string} charactertistic_uuid The uuid of the charactertistic.
+ * @param {string} service_uuid The UUID of the service the characteristic belongs to.
+ * @param {string} charactertistic_uuid The UUID of the characteristic.
  * @param {string} value The base64 encoded string with the new value.
  * @returns {real}
  * @func_end
  */
-function bt_le_characteristic_write_command(address, service, charactertistic, value) {}
+function bt_le_characteristic_write_command(address, service, characteristic, value) {}
 
 /** 
  * @func bt_le_characteristic_notify
- * @desc Enables notification of characteristic value changes.
+ * @desc This function enables notifications when then value of a characteristic changes.
  * @param {string} address The unique address of the peripheral.
- * @param {string} service_uuid The uuid of the service the characteristic belongs to.
- * @param {string} charactertistic_uuid The uuid of the charactertistic.
+ * @param {string} service_uuid The UUID of the service the characteristic belongs to.
+ * @param {string} charactertistic_uuid The UUID of the characteristic.
  * @returns {real}
  * 
  * @event social
  * @member {string} type The value `"bt_le_characteristic_notify"`
  * @member {real} async_id The unique async identifier that refers to this task
- * @member {boolean} success true if the task was completed successfully, false otherwise.
- * @member {boolean} error_code The error code if the task was not completed successfully.
+ * @member {boolean} success `true` if the task completed successfully, `false` otherwise.
+ * @member {boolean} error_code The error code if the task didn't complete successfully.
  * @event_end
  * 
  * @event social
- * @description Triggered when there is a change in the subscribed characteristic.
+ * @description This event is triggered when there is a change in the subscribed characteristic.
  * @member {string} type The value `"bt_le_characteristic_value_changed"`
- * @member {string} characteristic_uuid The uuid of the characteristic whose value changed.
- * @member {string} service_uuid The uuid of the service the characteristic belongs to.
+ * @member {string} characteristic_uuid The UUID of the characteristic whose value changed.
+ * @member {string} service_uuid The UUID of the service the characteristic belongs to.
  * @member {string} address The unique address of the peripheral we are connecting to.
  * @member {string} value The base64 encoded string with the new value.
  * @event_end
  * 
  * @func_end
  */
-function bt_le_characteristic_notify(address, service, charactertistic) {}
+function bt_le_characteristic_notify(address, service, characteristic) {}
 
 /** 
  * @func bt_le_characteristic_indicate
- * @desc Enables indication of characteristic value changes.
+ * @desc This function enables indication of characteristic value changes.
  * @param {string} address The unique address of the peripheral.
- * @param {string} service The uuid of the service the characteristic belongs to.
- * @param {string} charactertistic The uuid of the charactertistic.
+ * @param {string} service The UUID of the service the characteristic belongs to.
+ * @param {string} characteristic The UUID of the characteristic.
  * @returns {real}
  * 
  * @event social
  * @member {string} type The value `"bt_le_characteristic_indicate"`
  * @member {real} async_id The unique async identifier that refers to this task.
- * @member {boolean} success true if the task was completed successfully, false otherwise.
- * @member {boolean} error_code The error code if the task was not completed successfully.
+ * @member {boolean} success `true` if the task completed successfully, `false` otherwise.
+ * @member {boolean} error_code The error code if the task didn't complete successfully.
  * @event_end
  * 
  * @event social
- * @description Triggered when there is a change in the subscribed characteristic.
+ * @description This event is triggered when there is a change in the subscribed characteristic.
  * @member {string} type The value `"bt_le_characteristic_value_changed"`
- * @member {real} characteristic_uuid The uuid of the characteristic whose value changed.
- * @member {boolean} service_uuid The uuid of the service the characteristic belongs to.
- * @member {string} address The unique address of the peripheral where the change ocurred.
+ * @member {real} characteristic_uuid The UUID of the characteristic whose value changed.
+ * @member {boolean} service_uuid The UUID of the service the characteristic belongs to.
+ * @member {string} address The unique address of the peripheral where the change occurred.
  * @member {string} name The base64 encoded string with the new value.
  * @event_end
  * 
  * @func_end
  */
-function bt_le_characteristic_indicate(address, service, charactertistic) {}
+function bt_le_characteristic_indicate(address, service, characteristic) {}
 
 /** 
  * @func bt_le_characteristic_unsubscribe
- * @desc Unsubscribes from any previous notification|indication on a given characteristic.
+ * @desc This function unsubscribes from any previous notification|indication on a given characteristic.
  * @param {string} address The unique address of the peripheral.
- * @param {string} service The uuid of the service the characteristic belongs to.
- * @param {string} charactertistic The uuid of the charactertistic.
+ * @param {string} service The UUID of the service the characteristic belongs to.
+ * @param {string} characteristic The UUID of the characteristic.
  * @returns {real}
  * 
  * @event social
  * @member {string} type The value `"bt_le_characteristic_unsubscribe"`
  * @member {real} async_id The unique async identifier that refers to this task.
- * @member {boolean} success true if the task was completed successfully, false otherwise.
- * @member {boolean} error_code The error code if the task was not completed successfully.
+ * @member {boolean} success `true` if the task completed successfully, `false` otherwise.
+ * @member {boolean} error_code The error code if the task didn't complete successfully.
  * @event_end
  * 
  * @func_end
  */
-function bt_le_characteristic_unsubscribe(address, service, charactertistic) {}
+function bt_le_characteristic_unsubscribe(address, service, characteristic) {}
 
 /** 
  * @func bt_le_descriptor_read
- * @desc Requests a read operation on a characteristic's descriptor.
+ * @desc This function requests a read operation on a characteristic's descriptor.
  * @param {string} address The unique address of the peripheral.
- * @param {string} service The uuid of the service the characteristic belongs to.
- * @param {string} charactertistic The uuid of the charactertistic the descriptor belongs to.
- * @param {string} descriptor The uuid of the descriptor.
+ * @param {string} service The UUID of the service the characteristic belongs to.
+ * @param {string} characteristic The UUID of the characteristic the descriptor belongs to.
+ * @param {string} descriptor The UUID of the descriptor.
  * @returns {real}
  * 
  * @event social
  * @member {string} type The value `"bt_le_descriptor_read"`
  * @member {real} async_id The unique async identifier that refers to this task
- * @member {boolean} success true if the task was completed successfully, false otherwise.
- * @member {real} error_code The error code if the task was not completed successfully.
+ * @member {boolean} success `true` if the task completed successfully, `false` otherwise.
+ * @member {real} error_code The error code if the task didn't complete successfully.
  * @member {string} value The base64 encoded string with the read value.
  * @event_end
  * 
  * @func_end
  */
-function bt_le_descriptor_read(address, service, charactertistic, descriptor) {}
+function bt_le_descriptor_read(address, service, characteristic, descriptor) {}
 
 /** 
  * @func bt_le_descriptor_write
- * @desc Requests a write operation on a characteristic's descriptor.
+ * @desc This function requests a write operation on a characteristic's descriptor.
  * @param {string} address The unique address of the peripheral.
- * @param {string} service The uuid of the service the characteristic belongs to.
- * @param {string} charactertistic The uuid of the charactertistic the descriptor belongs to.
- * @param {string} descriptor The uuid of the descriptor.
+ * @param {string} service The UUID of the service the characteristic belongs to.
+ * @param {string} characteristic The UUID of the characteristic the descriptor belongs to.
+ * @param {string} descriptor The UUID of the descriptor.
  * @param {string} value The base64 encoded string with the new value.
  * @returns {real}
  * 
  * @event social
  * @member {string} type The value `"bt_le_descriptor_write"`
  * @member {real} async_id The unique async identifier that refers to this task
- * @member {boolean} success true if the task was completed successfully, false otherwise.
- * @member {real} error_code The error code if the task was not completed successfully.
+ * @member {boolean} success `true` if the task completed successfully, `false` otherwise.
+ * @member {real} error_code The error code if the task didn't complete successfully.
  * @event_end
  * 
  * @func_end
  */
-function bt_le_descriptor_write(address, service, charactertistic, descriptor, value) {}
+function bt_le_descriptor_write(address, service, characteristic, descriptor, value) {}
 
 // CONSTANTS
 
 /**
  * @const BluetoothStatus
- * These constants represent the various status response that can be obtained while using Bluetooth LE.
+ * These constants represent the various status responses that can be obtained while using Bluetooth LE.
  * @member BT_STATUS_SUCCESS A GATT operation completed successfully (0)
  * @member BT_STATUS_WRITE_NOT_PERMITTED GATT write operation is not permitted (3)
  * @member BT_STATUS_REQUEST_NOT_SUPPORTED The given request is not supported (6)
@@ -548,7 +548,7 @@ function bt_le_descriptor_write(address, service, charactertistic, descriptor, v
  * @member BT_STATUS_INSUFFICIENT_AUTHENTICATION Insufficient authentication for a given operation (5)
  * @member BT_STATUS_CONNECTION_CONGESTED A remote device connection is congested (143)
  * @member BT_STATUS_FAILURE A GATT operation failed, errors other than the above (257)
- * @member BT_STATUS_ACTION_NOT_STARTED A operation didn't started, for unknown reason (-10)
+ * @member BT_STATUS_ACTION_NOT_STARTED An operation didn't start, for unknown reason (-10)
  * @member BT_STATUS_SERVICE_NOT_FOUND A service with the given UUID was not found (-1)
  * @member BT_STATUS_CHARACTERISTIC_NOT_FOUND A characteristic with the given UUID was not found (-2)
  * @member BT_STATUS_DESCRIPTOR_NOT_FOUND A descriptor with the given UUID was not found (-3)
@@ -615,9 +615,9 @@ function bt_le_descriptor_write(address, service, charactertistic, descriptor, v
 /**
  * @struct AdvertiseSettings
  * This struct represents the collection of settings to apply to the advertisement.
- * @member {constant.AdvertiseMode} advertiseMode Set advertise mode to control the advertising power and latency.
- * @member {boolean} connectable Should the device be connectable.
- * @member {boolean} discoverable Should the device be discoverable (windows and macOS|iOS only)
+ * @member {constant.AdvertiseMode} advertiseMode Set the advertise mode to control the advertising power and latency.
+ * @member {boolean} connectable Whether the device should be connectable.
+ * @member {boolean} discoverable Whether the device should be discoverable (Windows and macOS|iOS only)
  * @member {real} timeout Limit advertising to a given amount of time. May not exceed 180000 milliseconds. A value of 0 will disable the time limit.
  * @member {constant.AdvertiseTxPower} txPowerLevel Set advertise TX power level to control the transmission power level for the advertising.
  * @struct_end
@@ -629,29 +629,29 @@ function bt_le_descriptor_write(address, service, charactertistic, descriptor, v
  * @member {string} name The name to be used.
  * @member {boolean} includeName The visible device name.
  * @member {boolean} includePowerLevel The device unique address.
- * @member {array<struct.AdvertiseServiceData>} services Services to be advertised.
- * @member {struct.AdvertiseManufacturerData} manufacturer Manufacturer information.
+ * @member {array<struct.AdvertiseServiceData>} services The services to be advertised.
+ * @member {struct.AdvertiseManufacturerData} manufacturer The manufacturer information.
  * @struct_end
  */
 
 /**
  * @struct AdvertiseServiceData
  * This struct represents the service data to be included in the advertisement.
- * @member {string} uuid The uuid of the service to be advertised.
+ * @member {string} uuid The UUID of the service to be advertised.
  * @struct_end
  */
 
 /**
  * @struct AdvertiseManufacturerData
  * This struct represents the manufacturer data to be included in the advertisement.
- * @member {real} id The manufacturer unique id.
+ * @member {real} id The manufacturer unique ID.
  * @member {string} data A base64 encoded string with the data associated with the manufacturer.
  * @struct_end
  */
 
 /**
  * @struct BluetoothDevice
- * This struct represents a fetched bluetooth device.
+ * This struct represents a fetched Bluetooth device.
  * @member {string} name The visible device name.
  * @member {string} address The device unique address.
  * @member {boolean} is_paired Whether or not the devices are paired.
@@ -662,7 +662,7 @@ function bt_le_descriptor_write(address, service, charactertistic, descriptor, v
 
 /**
  * @struct BluetoothService
- * This struct represents a fetched bluetooth service.
+ * This struct represents a fetched Bluetooth service.
  * @member {string} uuid The service unique UUID.
  * @member {constant.BluetoothServiceType} type The type of this service (primary/secondary).
  * @struct_end
@@ -670,7 +670,7 @@ function bt_le_descriptor_write(address, service, charactertistic, descriptor, v
 
 /**
  * @struct BluetoothCharacteristic
- * This struct represents a fetched bluetooth characteristic.
+ * This struct represents a fetched Bluetooth characteristic.
  * @member {string} uuid The characteristic unique UUID.
  * @member {constant.BluetoothProperty} properties The properties of this characteristic. The properties contain a bit mask of property flags indicating the features of this characteristic.
  * @member {constant.BluetoothPermission} permissions The permissions for this characteristic.
@@ -679,7 +679,7 @@ function bt_le_descriptor_write(address, service, charactertistic, descriptor, v
 
 /**
  * @struct BluetoothDescriptor
- * This struct represents a fetched bluetooth descriptor.
+ * This struct represents a fetched Bluetooth descriptor.
  * @member {string} uuid The descriptor unique UUID.
  * @struct_end
  */
@@ -688,7 +688,7 @@ function bt_le_descriptor_write(address, service, charactertistic, descriptor, v
  * @struct ServiceData
  * This struct represents a service that is being created.
  * @member {string} uuid The service unique UUID.
- * @member {array<struct.CharacteristicData>} charactertistics An array of all the charactertistics contained in this service.
+ * @member {array<struct.CharacteristicData>} characteristics An array of all the characteristics contained in this service.
  * @struct_end
  */
 
@@ -723,11 +723,11 @@ function bt_le_descriptor_write(address, service, charactertistic, descriptor, v
 /**
  * @module bt_le
  * @title Bluetooth LE
- * @desc This module serves as a comprehensive toolkit, offering an array of functionalities to effectively manage the behavior of Bluetooth Low Energy (LE) in the context of a connection hosted on an Android|iOS|Windows device.
+ * @desc This module serves as a comprehensive toolkit, offering an array of functionalities to effectively manage the behaviour of Bluetooth Low Energy (LE) in the context of a connection hosted on an Android|iOS|Windows device.
  *
  * The module is specifically designed for Bluetooth LE, a power-efficient version of Bluetooth intended for short-range communication between devices, making it an ideal tool for managing connections with low-power peripherals such as fitness monitors, smart home devices, and similar Internet of Things (IoT) devices.
  * 
- * With the module's functionalities, developers can have fine-grained control over various aspects of Bluetooth LE behavior. This could include establishing and managing connections, handling data transmission, scanning for devices, and optimizing power usage, all within the Android environment.
+ * With the module's functionalities, developers can have fine-grained control over various aspects of Bluetooth LE behaviour. This could include establishing and managing connections, handling data transmission, scanning for devices, and optimising power usage, all within the Android environment.
  * 
  * @section_func
  * @ref bt_le_*
