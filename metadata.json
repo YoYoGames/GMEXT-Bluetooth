@@ -1,0 +1,14 @@
+[
+    {
+        "projectFile": "source/Bluetooth_gml/Bluetooth.yyp",
+        "extensionFile": "source/Bluetooth_gml/extensions/Bluetooth/Bluetooth.yy",
+        "packageId": "com.yoyogames.bluetoothext",
+        "packageName": "Bluetooth Ext",
+        "packageVersion": "1.0.0",
+        "includeFolders": null,
+        "includeResources": null,
+        "excludeFolders": null,
+        "excludeResources": null,
+        "format": "AUG23"
+    }
+]
