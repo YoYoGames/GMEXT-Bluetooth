@@ -1,6 +1,6 @@
 
 /**
- * @module main
+ * @module home
  * @title Bluetooth Extension
  * @desc This extension provides you with a cross-platform experience of the Bluetooth technology. It is compatible with Windows|macOS|iOS|Android for Bluetooth Low Energy and with Windows|Android for Bluetooth Classic.
  * 

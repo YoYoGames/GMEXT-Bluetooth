@@ -166,8 +166,8 @@ function bt_le_advertise_is_active() {}
  * @description This event is triggered as the result of a call to the function ${function.bt_le_server_notify_value}.
  * @member {string} type The value `"bt_le_server_notify_value"`
  * @member {real} async_id The unique async identifier that refers to this task.
- * @member {boolean} success `true` if the task completed successfully, `false` otherwise.
- * @member {Array<struct.NotifiedDevice>} devices An array of notified devices and the status of the notification. Note that on mobile this will be a JSON encoded string that needs to be parsed using ${function.json_parse}.
+ * @member {boolean} success true if the task was completed successfully, false otherwise.
+ * @member {Array[struct.NotifiedDevice]} devices An array of notified devices and the status of the notification. Note of mobile this will be a JSON encoded string that needs to be parsed using ${builtin.json_parse}.
  * @event_end
  * 
  * @func_end
@@ -318,8 +318,8 @@ function bt_le_peripheral_is_paired(address) {}
  * @event social
  * @member {string} type The value `"bt_le_peripheral_get_services"`
  * @member {real} async_id The unique async identifier that refers to this task
- * @member {boolean} success `true` if the task completed successfully, `false` otherwise.
- * @member {Array<struct.BluetoothService>} services An array of ${struct.BluetoothService} associated with the peripheral. On mobile platforms this will be a JSON encoded string that needs to be parsed using ${function.json_parse}.
+ * @member {boolean} success true if the task was completed successfully, false otherwise.
+ * @member {Array[struct.BluetoothService]} services An array of ${struct.BluetoothService} associated with the peripheral. On mobile platforms this will be a JSON encoded string that needs to be parsed using ${builtin.json_parse}.
  * @event_end
  * 
  * @func_end
@@ -336,8 +336,8 @@ function bt_le_peripheral_get_services(address) {}
  * @event social
  * @member {string} type The value `"bt_le_service_get_characteristics"`
  * @member {real} async_id The unique async identifier that refers to this task
- * @member {boolean} success `true` if the task completed successfully, `false` otherwise.
- * @member {Array<struct.BluetoothCharacteristic>} characteristics An array of ${struct.BluetoothCharacteristic} associated with the service. On mobile platforms this will be a JSON encoded string that needs to be parsed using ${function.json_parse}.
+ * @member {boolean} success true if the task was completed successfully, false otherwise.
+ * @member {Array[struct.BluetoothCharacteristic]} characteristics An array of ${struct.BluetoothCharacteristic} associated with the service. On mobile platforms this will be a JSON encoded string that needs to be parsed using ${builtin.json_parse}.
  * @event_end
  * 
  * @func_end
@@ -355,8 +355,8 @@ function bt_le_service_get_characteristics(address, service) {}
  * @event social
  * @member {string} type The value `"bt_le_characteristic_get_descriptors"`
  * @member {real} async_id The unique async identifier that refers to this task
- * @member {boolean} success `true` if the task completed successfully, `false` otherwise.
- * @member {Array<struct.BluetoothDescriptor>} descriptors An array of ${struct.BluetoothDescriptor} associated with the characteristic. On mobile platforms this will be a JSON encoded string that needs to be parsed using ${function.json_parse}.
+ * @member {boolean} success true if the task was completed successfully, false otherwise.
+ * @member {Array[struct.BluetoothDescriptor]} descriptors An array of ${struct.BluetoothDescriptor} associated with the characteristic. On mobile platforms this will be a JSON encoded string that needs to be parsed using ${builtin.json_parse}.
  * @event_end
  * 
  * @func_end
@@ -629,8 +629,8 @@ function bt_le_descriptor_write(address, service, characteristic, descriptor, va
  * @member {string} name The name to be used.
  * @member {boolean} includeName The visible device name.
  * @member {boolean} includePowerLevel The device unique address.
- * @member {array<struct.AdvertiseServiceData>} services The services to be advertised.
- * @member {struct.AdvertiseManufacturerData} manufacturer The manufacturer information.
+ * @member {array[struct.AdvertiseServiceData]} services Services to be advertised.
+ * @member {struct.AdvertiseManufacturerData} manufacturer Manufacturer information.
  * @struct_end
  */
 
@@ -688,7 +688,7 @@ function bt_le_descriptor_write(address, service, characteristic, descriptor, va
  * @struct ServiceData
  * This struct represents a service that is being created.
  * @member {string} uuid The service unique UUID.
- * @member {array<struct.CharacteristicData>} characteristics An array of all the characteristics contained in this service.
+ * @member {array[struct.CharacteristicData]} charactertistics An array of all the charactertistics contained in this service.
  * @struct_end
  */
 
@@ -698,7 +698,7 @@ function bt_le_descriptor_write(address, service, characteristic, descriptor, va
  * @member {string} uuid The characteristic unique UUID.
  * @member {constant.BluetoothProperty} properties The properties to be applied to this characteristic.
  * @member {constant.BluetoothPermission} permissions The permissions to be applied to this characteristic.
- * @member {array<struct.DescriptorData>} descriptors An array of all the descriptors contained in this characteristic.
+ * @member {array[struct.DescriptorData]} descriptors An array of all the descriptors contained in this characteristic.
  * @struct_end
  */
 

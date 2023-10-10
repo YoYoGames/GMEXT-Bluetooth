@@ -120,8 +120,8 @@ function bt_classic_server_stop() {}
  * @func bt_classic_socket_receive
  * @desc This function reads incoming data sent by a given open socket.
  * @param {real} socketId The unique identifier of the socket you want to read the data from.
- * @param {Id.Buffer} bufferId The buffer the incoming data will be written to. Data is written in chunks. You should make sure that your buffer is at least the size of a chunk, as no resizing will occur.
- * @param {real} offset The byte offset to be used when writing to the buffer.
+ * @param {buffer} bufferId The buffer where the incoming data will be written. Data is written in chuncks, make sure that your buffer is at least the size of a chunck. No resizing will occur.
+ * @param {real} offset The byte offset to be used when writting to the buffer.
  * @func_end
  */
 function bt_classic_socket_receive(socket, buff, offset) {}
@@ -130,7 +130,7 @@ function bt_classic_socket_receive(socket, buff, offset) {}
  * @func bt_classic_socket_send
  * @desc This function sends data to a given remotely connected device.
  * @param {real} socketId The unique identifier of the socket you want to send data to.
- * @param {Id.Buffer} bufferId The buffer where the outgoing data is stored.
+ * @param {buffer} bufferId The buffer where the outgoing data is stored.
  * @param {real} offset The byte offset to be used when reading from the buffer.
  * @param {real} length The length of the buffer data to be sent.
  * @func_end
