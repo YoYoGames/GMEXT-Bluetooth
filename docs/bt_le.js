@@ -167,7 +167,7 @@ function bt_le_advertise_is_active() {}
  * @member {string} type The value `"bt_le_server_notify_value"`
  * @member {real} async_id The unique async identifier that refers to this task.
  * @member {boolean} success true if the task was completed successfully, false otherwise.
- * @member {Array[struct.NotifiedDevice]} devices An array of notified devices and the status of the notification. Note of mobile this will be a JSON encoded string that needs to be parsed using ${builtin.json_parse}.
+ * @member {Array[struct.NotifiedDevice]} devices An array of notified devices and the status of the notification. Note of mobile this will be a JSON encoded string that needs to be parsed using ${function.json_parse}.
  * @event_end
  * 
  * @func_end
@@ -219,7 +219,7 @@ function bt_le_server_close() {}
  * @func bt_le_server_respond_read
  * @desc You can use this function to respond to an incoming read request.
  * @param {real} request_id The identifier of the request.
- * @param {const.ResponseStatus} status The status of the read attempt.
+ * @param {constant.BluetoothStatus} status The status of the read attempt.
  * @param {string} value The base64 encoded string with the value requested (if status is `BT_STATUS_FAILURE` it is ignored).
  * @returns {boolean}
  * @func_end
@@ -230,7 +230,7 @@ function bt_le_server_respond_read(requestId, status, value) {}
  * @func bt_le_server_respond_write
  * @desc You can use this function to respond to an incoming write request.
  * @param {real} request_id The identifier of the request.
- * @param {const.ResponseStatus} status The status of the write attempt.
+ * @param {constant.BluetoothStatus} status The status of the write attempt.
  * @returns {boolean}
  * @func_end
  */
@@ -319,7 +319,7 @@ function bt_le_peripheral_is_paired(address) {}
  * @member {string} type The value `"bt_le_peripheral_get_services"`
  * @member {real} async_id The unique async identifier that refers to this task
  * @member {boolean} success true if the task was completed successfully, false otherwise.
- * @member {Array[struct.BluetoothService]} services An array of ${struct.BluetoothService} associated with the peripheral. On mobile platforms this will be a JSON encoded string that needs to be parsed using ${builtin.json_parse}.
+ * @member {Array[struct.BluetoothService]} services An array of ${struct.BluetoothService} associated with the peripheral. On mobile platforms this will be a JSON encoded string that needs to be parsed using ${function.json_parse}.
  * @event_end
  * 
  * @func_end
@@ -337,7 +337,7 @@ function bt_le_peripheral_get_services(address) {}
  * @member {string} type The value `"bt_le_service_get_characteristics"`
  * @member {real} async_id The unique async identifier that refers to this task
  * @member {boolean} success true if the task was completed successfully, false otherwise.
- * @member {Array[struct.BluetoothCharacteristic]} characteristics An array of ${struct.BluetoothCharacteristic} associated with the service. On mobile platforms this will be a JSON encoded string that needs to be parsed using ${builtin.json_parse}.
+ * @member {Array[struct.BluetoothCharacteristic]} characteristics An array of ${struct.BluetoothCharacteristic} associated with the service. On mobile platforms this will be a JSON encoded string that needs to be parsed using ${function.json_parse}.
  * @event_end
  * 
  * @func_end
@@ -356,7 +356,7 @@ function bt_le_service_get_characteristics(address, service) {}
  * @member {string} type The value `"bt_le_characteristic_get_descriptors"`
  * @member {real} async_id The unique async identifier that refers to this task
  * @member {boolean} success true if the task was completed successfully, false otherwise.
- * @member {Array[struct.BluetoothDescriptor]} descriptors An array of ${struct.BluetoothDescriptor} associated with the characteristic. On mobile platforms this will be a JSON encoded string that needs to be parsed using ${builtin.json_parse}.
+ * @member {Array[struct.BluetoothDescriptor]} descriptors An array of ${struct.BluetoothDescriptor} associated with the characteristic. On mobile platforms this will be a JSON encoded string that needs to be parsed using ${function.json_parse}.
  * @event_end
  * 
  * @func_end
@@ -737,11 +737,24 @@ function bt_le_descriptor_write(address, service, characteristic, descriptor, va
  * @ref BluetoothStatus
  * @ref BluetoothProperty
  * @ref BluetoothPermission
+ * @ref BluetoothServiceType
+ * @ref AdvertiseMode
+ * @ref AdvertiseTxPower
  * @section_end
  * 
  * @section_struct
- * @ref NotifiedDevice
+ * @ref AdvertiseSettings
+ * @ref AdvertiseData
+ * @ref AdvertiseServiceData
+ * @ref AdvertiseManufacturerData
+ * @ref BluetoothDevice
+ * @ref BluetoothService
  * @ref BluetoothCharacteristic
+ * @ref BluetoothDescriptor
+ * @ref ServiceData
+ * @ref CharacteristicData
+ * @ref DescriptorData
+ * @ref NotifiedDevice
  * @section_end
  * 
  * @module_end
