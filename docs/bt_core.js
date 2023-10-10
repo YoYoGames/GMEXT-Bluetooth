@@ -42,7 +42,7 @@ function bt_get_address() {}
 /** 
  * @func bt_paired_devices
  * @desc This function returns an array of ${struct.BluetoothDevice} objects that are bonded (paired) to the local adapter.
- * @returns {string}
+ * @returns {array[struct.BluetoothDevice]}
  * @func_end
  */
 function bt_paired_devices() {}

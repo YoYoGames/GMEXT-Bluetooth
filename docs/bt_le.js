@@ -627,8 +627,8 @@ function bt_le_descriptor_write(address, service, characteristic, descriptor, va
  * @struct AdvertiseData
  * This struct represents the data to be included in the advertisement.
  * @member {string} name The name to be used.
- * @member {boolean} includeName The visible device name.
- * @member {boolean} includePowerLevel The device unique address.
+ * @member {boolean} includeName Whether to include the device name.
+ * @member {boolean} includePowerLevel Whether to include the power level.
  * @member {array[struct.AdvertiseServiceData]} services Services to be advertised.
  * @member {struct.AdvertiseManufacturerData} manufacturer Manufacturer information.
  * @struct_end
