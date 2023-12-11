@@ -1339,7 +1339,6 @@ public class Bluetooth extends RunnerSocial {
 
 			@Override
 			public void onCharacteristicReadRequest(BluetoothDevice device, int requestId, int offset, BluetoothGattCharacteristic characteristic) {
-
 				// Data offset (not supported)
 				if (offset != 0) {
 					sendResponse(device, requestId, BluetoothGatt.GATT_INVALID_OFFSET, offset, null);
@@ -1660,9 +1659,10 @@ public class Bluetooth extends RunnerSocial {
 			if (uuid == null) {
 				throw new Exception("Invalid characteristic uuid: '" + uuidString + "'.");
 			}
-
 			int properties = gattCharacteristicJSON.optInt("properties", 0);
 			int permissions = gattCharacteristicJSON.optInt("permissions", 0);
+
+			Log.e(LOG_TAG, "Properties: " + properties + ", permissions: " + permissions);
 
 			BluetoothGattCharacteristic gattCharacteristic = new BluetoothGattCharacteristic(uuid, properties, permissions);
 
@@ -1673,6 +1673,7 @@ public class Bluetooth extends RunnerSocial {
 					if (descriptorData == null) {
 						throw new Exception("Invalid descriptor structure (a descriptor must be a struct).");
 					}
+					Log.e(LOG_TAG, "Creating GattDescriptor");
 					gattCharacteristic.addDescriptor(createGattDescriptor(descriptorData, functionName));
 				}
 			}
@@ -1703,6 +1704,7 @@ public class Bluetooth extends RunnerSocial {
 					if (characteristicData == null) {
 						throw new Exception("Invalid characteristic structure (a characteristic must be a struct).");
 					}
+					Log.e(LOG_TAG, "Creating GattCharacteristic");
 					gattService.addCharacteristic(createGattCharacteristic(characteristicData, functionName));
 				}
 			}
@@ -1742,6 +1744,7 @@ public class Bluetooth extends RunnerSocial {
 
 			BluetoothGattService bluetoothGattService;
 			try {
+				Log.e(LOG_TAG, "Creating GattService");
 				bluetoothGattService = createGattService(serviceData, functionName);
 			} catch (Exception e) {
 				Log.e(LOG_TAG, functionName + " :: " + e.getMessage());
@@ -1950,6 +1953,19 @@ public class Bluetooth extends RunnerSocial {
 				this.gattManager = gattManager;
 			}
 
+			// For API < 33
+			@Override
+			public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
+				
+				notifyOperation("bt_le_characteristic_value_changed", Map.of(
+					"characteristic_uuid", characteristic.getUuid(),
+					"service_uuid", characteristic.getService().getUuid(),
+					"address", gatt.getDevice().getAddress(),
+					"value", characteristic.getValue()
+				));
+			}
+
+			// For API >= 33
 			@Override
 			public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, byte[] value) {
 				
@@ -1961,6 +1977,16 @@ public class Bluetooth extends RunnerSocial {
 				));
 			}
 
+			// For API < 33
+			@Override
+			public void onCharacteristicRead (BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+				handleTaskQueue(gattManager.characteristicReadTasks, status, Map.of(
+					"value", characteristic.getValue()
+					));
+
+			}
+
+			// For API >= 33
 			@Override
 			public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, byte[] value, int status) {
 				handleTaskQueue(gattManager.characteristicReadTasks, status, Map.of(
@@ -2008,6 +2034,15 @@ public class Bluetooth extends RunnerSocial {
 				}
 			}
 			
+			// For API < 33
+			@Override
+			public void onDescriptorRead (BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {
+				handleTaskQueue(gattManager.descriptorReadTasks, status, Map.of(
+					"value", descriptor.getValue()
+					));
+			}
+
+			// For API >= 33
 			@Override
 			public void onDescriptorRead(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status, byte[] value) {
 				handleTaskQueue(gattManager.descriptorReadTasks, status, Map.of(
@@ -2191,7 +2226,6 @@ public class Bluetooth extends RunnerSocial {
 		// PUBLIC API
 
 		public double characteristicReadAsync(String address, String service, String characteristic, String functionName) {
-
 			BluetoothGatt gatt = getBluetoothGatt(address, functionName);
 			if (gatt == null) return -1;
 
