@@ -695,7 +695,7 @@ void characteristicSetRequestEvents(GattLocalCharacteristic characteristic, winr
 
 						if (request.Option() == GattWriteOption::WriteWithResponse) {
 							DsMapAddString(map, "type", "bt_le_server_characteristic_write_request");
-							DsMapAddInt64(map, "request_id", 0);
+							DsMapAddInt64(map, "request_id", async_id);
 
 							std::lock_guard<std::mutex> guard(pendingWriteRequestResponsesMutex);
 							pendingWriteRequestResponses.insert({ async_id, PendingWriteRequestResponse(deferral, request) });
