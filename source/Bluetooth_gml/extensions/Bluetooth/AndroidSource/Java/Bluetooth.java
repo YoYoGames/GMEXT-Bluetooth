@@ -1986,7 +1986,7 @@ public class Bluetooth extends RunnerSocial {
 
 			}
 
-			// For API >= 33
+			// For API >= 33 (TIRAMISU)
 			@Override
 			public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, byte[] value, int status) {
 				handleTaskQueue(gattManager.characteristicReadTasks, status, Map.of(
@@ -2120,7 +2120,7 @@ public class Bluetooth extends RunnerSocial {
 		// INTERNAL
 
 		private int setCharacteristicValue(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, byte[] value, int writeType) {
-			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
 				return gatt.writeCharacteristic(characteristic, value, writeType);
 			} else {
 				characteristic.setValue(value);
@@ -2129,7 +2129,7 @@ public class Bluetooth extends RunnerSocial {
 		}
 	
 		private int setDescriptorValue(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, byte[] value) {
-			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
 				return gatt.writeDescriptor(descriptor, value);
 			} else {
 				descriptor.setValue(value);
