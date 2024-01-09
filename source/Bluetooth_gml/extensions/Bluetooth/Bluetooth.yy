@@ -25,7 +25,7 @@
   "date": "2023-05-25T20:50:43.056408+01:00",
   "description": "",
   "exportToGame": true,
-  "extensionVersion": "1.0.0",
+  "extensionVersion": "1.0.1",
   "files": [
     {"resourceType":"GMExtensionFile","resourceVersion":"1.0","name":"Bluetooth.ext","constants":[
         {"resourceType":"GMExtensionConstant","resourceVersion":"1.0","name":"BT_STATUS_SUCCESS","hidden":false,"value":"0",},
