@@ -1,14 +1,18 @@
-[
-    {
-        "projectFile": "source/Bluetooth_gml/Bluetooth.yyp",
-        "extensionFile": "source/Bluetooth_gml/extensions/Bluetooth/Bluetooth.yy",
-        "packageId": "com.yoyogames.bluetoothext",
-        "packageName": "Bluetooth Ext",
-        "packageVersion": "1.0.1",
-        "includeFolders": null,
-        "includeResources": null,
-        "excludeFolders": null,
-        "excludeResources": null,
-        "format": "LTS22"
-    }
-]
+{
+    "gitHubUrl": "https://github.com/YoYoGames/GMEXT-Bluetooth",
+    "projectFile": "source/Bluetooth_gml/Bluetooth.yyp",
+    "projectVersion": "LTS22",
+    "releaseTemplate": "templates/release_body.md",
+    "extensionMetaData": [
+        {
+            "extensionFile": "source/Bluetooth_gml/extensions/Bluetooth/Bluetooth.yy",
+            "packageId": "com.yoyogames.bluetoothext",
+            "packageName": "Bluetooth Ext",
+            "packageVersion": "1.0.1",
+            "packageFormat": "LTS22",
+            "includeFolders": null,
+            "includeResources": null,
+            "excludeResources": null
+        }
+    ]
+}
