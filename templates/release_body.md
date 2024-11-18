@@ -1,33 +1,32 @@
+
 ## IMPORTANT
 
-- This extension version will be compatible with the GM 2022.0.1 LTSr1 (upon release)
-- This extension is to be used with GM 2023.1 and future releases.
-- Requires Steamworks SDK version 1.55 (or recent)
-- Works with **Windows**, **macOS** and **Ubuntu**.
-- macOS (VM) not supported
-
-## CHANGES SINCE ${releaseOldVersion}
-
-https://github.com/YoYoGames/GMEXT-Steamworks/compare/${releaseOldVersion}...${releaseNewVersion}
+- GameMaker 2023.8 (LTSr2 supported)
+- Bluetooth classic is compatible with Windows and Android.
+- Bluetooth low energy is compatible with iOS, macOS, Windows and Android.
 
 ## DESCRIPTION
 
-Steamworks is a set of tools and services that help game developers and publishers build their games and get the most out of distributing on Steam.
+This extension provides you with a cross-platform experience of the Bluetooth technology. It is compatible with Windows|macOS|iOS|Android for Bluetooth Low Energy and with Windows|Android for Bluetooth Classic.
+
+## CHANGES SINCE ${releaseOldVersion}
+
+https://github.com/YoYoGames/GMEXT-Bluetooth/compare/${releaseOldVersion}...${releaseNewVersion}
 
 ## FEATURES 
 
-- General API
-- Achievements
-- Statistics
-- Leaderboards
-- Cloud Storage
-- DLC
-- UGC
-- Network
-- Matchmaking
-- Lobby
-- Inventory
-- Input
+### Bluetooth classic (Windows|Android)
+- Create client and server
+- Connect to single or multiple servers
+- Servers allow multiple connections
+- Manage all connections and data flow.
+
+### Bluetooth LE (Windows|Android|macOS|iOS)
+- Create server (peripheral)
+- Create clients (central)
+- Add services (manager properties and permissions)
+- Add characteristics and descriptors
+- Read and Write operations
 
 ## DOCUMENTATION
 
