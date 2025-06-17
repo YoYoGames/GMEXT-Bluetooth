@@ -1,6 +1,6 @@
 /// @description Receive data
 
-var _bytes = bt_classic_socket_receive(global.socket, buffer_in, 0);
+var _bytes = bt_classic_socket_receive(global.socket, real(buffer_in), 0);
 
 if (_bytes > 0)
 {

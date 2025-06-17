@@ -1,11 +1,13 @@
 {
-  "resourceType": "GMScript",
-  "resourceVersion": "1.0",
-  "name": "BLE_UUID",
-  "isCompatibility": false,
-  "isDnD": false,
-  "parent": {
-    "name": "Bluetooth",
-    "path": "Bluetooth.yyp",
+  "$GMScript":"v1",
+  "%Name":"BLE_UUID",
+  "isCompatibility":false,
+  "isDnD":false,
+  "name":"BLE_UUID",
+  "parent":{
+    "name":"Bluetooth",
+    "path":"Bluetooth.yyp",
   },
+  "resourceType":"GMScript",
+  "resourceVersion":"2.0",
 }

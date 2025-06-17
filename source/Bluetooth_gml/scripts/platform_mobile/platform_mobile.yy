@@ -1,11 +1,13 @@
 {
-  "resourceType": "GMScript",
-  "resourceVersion": "1.0",
-  "name": "platform_mobile",
-  "isCompatibility": false,
-  "isDnD": false,
-  "parent": {
-    "name": "Utils",
-    "path": "folders/Bluetooth Demo/Utils.yy",
+  "$GMScript":"v1",
+  "%Name":"platform_mobile",
+  "isCompatibility":false,
+  "isDnD":false,
+  "name":"platform_mobile",
+  "parent":{
+    "name":"Utils",
+    "path":"folders/Bluetooth Demo/Utils.yy",
   },
+  "resourceType":"GMScript",
+  "resourceVersion":"2.0",
 }

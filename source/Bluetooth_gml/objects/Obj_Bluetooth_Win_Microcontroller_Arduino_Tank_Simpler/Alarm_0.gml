@@ -38,9 +38,9 @@ if(_value > 255)
 
 var ang
 if(y < ystart)
-	ang = point_direction((xstart-x)/3,(ystart-y)/1,0,0,)
+	ang = point_direction((xstart-x)/3,(ystart-y)/1,0,0)
 else
-	ang = point_direction((x-xstart)/3,(ystart-y)/1,0,0,)
+	ang = point_direction((x-xstart)/3,(ystart-y)/1,0,0)
 
 arduino_analog_write(pins_right_pwd[0],abs(lengthdir_y(_value,ang+135)),buff)
 arduino_analog_write(pins_right_pwd[1],abs(lengthdir_y(_value,ang+135)),buff)
