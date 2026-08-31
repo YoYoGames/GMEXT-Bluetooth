@@ -11,7 +11,7 @@
   "overriddenProperties":[],
   "parent":{
     "name":"Characteristics",
-    "path":"folders/Bluetooth Demo/LE/Join/Characteristics.yy",
+    "path":"folders/OLD/Bluetooth Demo/LE/Join/Characteristics.yy",
   },
   "parentObjectId":null,
   "persistent":false,

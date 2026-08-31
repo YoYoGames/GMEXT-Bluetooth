@@ -11,7 +11,7 @@
   "overriddenProperties":[],
   "parent":{
     "name":"Services",
-    "path":"folders/Bluetooth Demo/LE/Join/Services.yy",
+    "path":"folders/OLD/Bluetooth Demo/LE/Join/Services.yy",
   },
   "parentObjectId":null,
   "persistent":false,

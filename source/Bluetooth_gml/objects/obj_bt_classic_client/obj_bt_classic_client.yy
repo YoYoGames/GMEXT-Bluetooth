@@ -10,7 +10,7 @@
   "overriddenProperties":[],
   "parent":{
     "name":"Client",
-    "path":"folders/Bluetooth Demo/Classic/Examples/Client-Server/Waitrooms/Client.yy",
+    "path":"folders/OLD/Bluetooth Demo/Classic/Examples/Client-Server/Waitrooms/Client.yy",
   },
   "parentObjectId":null,
   "persistent":false,

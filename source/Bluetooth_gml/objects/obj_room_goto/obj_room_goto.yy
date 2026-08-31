@@ -10,7 +10,7 @@
   "overriddenProperties":[],
   "parent":{
     "name":"Utils",
-    "path":"folders/Bluetooth Demo/Utils.yy",
+    "path":"folders/OLD/Bluetooth Demo/Utils.yy",
   },
   "parentObjectId":{
     "name":"Obj_YoYo_button",

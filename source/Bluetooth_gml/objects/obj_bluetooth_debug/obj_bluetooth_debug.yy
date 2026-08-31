@@ -9,7 +9,7 @@
   "overriddenProperties":[],
   "parent":{
     "name":"Bluetooth Demo",
-    "path":"folders/Bluetooth Demo.yy",
+    "path":"folders/OLD/Bluetooth Demo.yy",
   },
   "parentObjectId":null,
   "persistent":true,

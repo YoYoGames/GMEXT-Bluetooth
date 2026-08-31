@@ -1,0 +1,31 @@
+{
+  "$schema": "./extgen.schema.json",
+  "input": "spec.gmidl",
+  "root": "./",
+  "gamemaker": {
+    "wrappers": {
+      "outputFile": "../../../scripts/GMBluetooth_API/GMBluetooth_API.gml"
+    },
+    "extension": {
+      "mode": "patch",
+      "outputFile": "../../../extensions/GMBluetooth/GMBluetooth.yy"
+    },
+    "injectors": { }
+  },
+  "targets": {
+    "windows":{},
+    "macos":{},
+    "linux":{},
+    "android":{
+      "mode": "jni"
+    },
+    "ios":{
+      "mode": "native"
+    }
+  },
+  "extras": {
+    "docs": { 
+      "outputFile": "../../../../../docs/extgen_docs.js"
+    }
+  }
+}

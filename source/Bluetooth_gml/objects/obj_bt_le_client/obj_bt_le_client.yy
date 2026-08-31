@@ -11,7 +11,7 @@
   "overriddenProperties":[],
   "parent":{
     "name":"Client",
-    "path":"folders/Bluetooth Demo/LE/Waitrooms/Client.yy",
+    "path":"folders/OLD/Bluetooth Demo/LE/Waitrooms/Client.yy",
   },
   "parentObjectId":null,
   "persistent":false,

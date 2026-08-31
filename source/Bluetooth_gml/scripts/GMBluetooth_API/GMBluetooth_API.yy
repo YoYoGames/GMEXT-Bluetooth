@@ -1,0 +1,13 @@
+{
+  "$GMScript":"v1",
+  "%Name":"GMBluetooth_API",
+  "isCompatibility":false,
+  "isDnD":false,
+  "name":"GMBluetooth_API",
+  "parent":{
+    "name":"Bluetooth",
+    "path":"Bluetooth.yyp",
+  },
+  "resourceType":"GMScript",
+  "resourceVersion":"2.0",
+}

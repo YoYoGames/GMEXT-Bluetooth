@@ -6,7 +6,7 @@
   "name":"platform_mobile",
   "parent":{
     "name":"Utils",
-    "path":"folders/Bluetooth Demo/Utils.yy",
+    "path":"folders/OLD/Bluetooth Demo/Utils.yy",
   },
   "resourceType":"GMScript",
   "resourceVersion":"2.0",

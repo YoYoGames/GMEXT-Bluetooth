@@ -5,8 +5,8 @@
   "isDnD":false,
   "name":"BLE_UUID",
   "parent":{
-    "name":"Bluetooth",
-    "path":"Bluetooth.yyp",
+    "name":"OLD",
+    "path":"folders/OLD.yy",
   },
   "resourceType":"GMScript",
   "resourceVersion":"2.0",

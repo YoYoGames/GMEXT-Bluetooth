@@ -1,0 +1,155 @@
+[gml_api]
+module GMBluetooth;
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+[global, bind = typed_gml]
+enum BluetoothError : int32 {
+    Ok                = 0,
+    Unknown           = 1,
+    NotSupported      = 2,
+    NotInitialized    = 3,
+    BluetoothDisabled = 4,
+    PermissionDenied  = 5,
+    InvalidArgument   = 6,
+    InvalidHandle     = 7,
+    Busy              = 8,
+    Timeout           = 9,
+    NotFound          = 10,
+    ConnectionFailed  = 11,
+    Disconnected      = 12,
+    OperationFailed   = 13
+}
+
+[global, bind = typed_gml]
+enum BluetoothTransport : int32 {
+    Unknown   = 0,
+    Classic   = 1,
+    LowEnergy = 2
+}
+
+// =============================================================================
+// Lifecycle / event pump
+// =============================================================================
+
+/// Initializes the platform Bluetooth backend.
+[global, bind = typed_gml]
+function bluetooth_initialize(): bool;
+
+/// Stops active work and releases the backend.
+[global, bind = typed_gml]
+function bluetooth_shutdown(): unit;
+
+/// Dispatches queued native Bluetooth events to registered GML callbacks.
+/// Call once per Step. Returns the number of events dispatched.
+[global, bind = typed_gml]
+function bluetooth_update(): int32;
+
+[global, bind = typed_gml]
+function bluetooth_is_initialized(): bool;
+
+// =============================================================================
+// Error state
+// =============================================================================
+
+[global, bind = typed_gml]
+function bluetooth_last_error_code(): int32;
+
+[global, bind = typed_gml]
+function bluetooth_last_error_message(): string;
+
+// =============================================================================
+// Capabilities
+// =============================================================================
+
+/// True when the current extension backend implements BLE.
+[global, bind = typed_gml]
+function bluetooth_le_is_supported(): bool;
+
+/// Reserved for the Classic backend milestone. Currently false.
+[global, bind = typed_gml]
+function bluetooth_classic_is_supported(): bool;
+
+// =============================================================================
+// BLE scan
+// =============================================================================
+
+/// Starts BLE scanning. active=true requests scan responses as well as passive
+/// advertisements where supported.
+/// Returns BluetoothError.
+[global, bind = typed_gml]
+function bluetooth_le_scan_start(active: bool): int32;
+
+/// Stops BLE scanning. Returns BluetoothError.
+[global, bind = typed_gml]
+function bluetooth_le_scan_stop(): int32;
+
+[global, bind = typed_gml]
+function bluetooth_le_scan_is_running(): bool;
+
+/// Clears the discovered-device cache. Safe while scanning.
+[global, bind = typed_gml]
+function bluetooth_device_clear(): unit;
+
+// =============================================================================
+// Discovered devices
+// =============================================================================
+
+[global, bind = typed_gml]
+function bluetooth_device_get_count(): int32;
+
+/// Returns a packed native device handle, or 0 for an invalid index.
+[global, bind = typed_gml, type_hint=`uint64`]
+function bluetooth_device_get_at(index: int32): gmval;
+
+[global, bind = typed_gml]
+function bluetooth_device_is_valid([type_hint=`uint64`] device: gmval): bool;
+
+[global, bind = typed_gml]
+function bluetooth_device_get_transport([type_hint=`uint64`] device: gmval): int32;
+
+/// Opaque cross-platform identifier. Do not assume this is a MAC address.
+[global, bind = typed_gml]
+function bluetooth_device_get_id([type_hint=`uint64`] device: gmval): string;
+
+[global, bind = typed_gml]
+function bluetooth_device_get_name([type_hint=`uint64`] device: gmval): string;
+
+[global, bind = typed_gml]
+function bluetooth_device_has_address([type_hint=`uint64`] device: gmval): bool;
+
+/// Returns the platform address when available; empty otherwise.
+[global, bind = typed_gml]
+function bluetooth_device_get_address([type_hint=`uint64`] device: gmval): string;
+
+[global, bind = typed_gml]
+function bluetooth_device_has_rssi([type_hint=`uint64`] device: gmval): bool;
+
+[global, bind = typed_gml]
+function bluetooth_device_get_rssi([type_hint=`uint64`] device: gmval): int32;
+
+[global, bind = typed_gml]
+function bluetooth_device_is_connectable([type_hint=`uint64`] device: gmval): bool;
+
+// =============================================================================
+// Callbacks
+// =============================================================================
+
+/// callback(device)
+/// Fired once when a new device is inserted into the discovery cache.
+/// The device's cached RSSI/name can continue to update after this callback.
+[global, bind = typed_gml]
+function bluetooth_set_callback_device_found(callback: func): bool;
+
+[global, bind = typed_gml]
+function bluetooth_remove_callback_device_found(): bool;
+
+/// callback(error_code, message)
+/// Fired when the native scan watcher stops, including manual stop.
+[global, bind = typed_gml]
+function bluetooth_set_callback_scan_stopped(callback: func): bool;
+
+[global, bind = typed_gml]
+function bluetooth_remove_callback_scan_stopped(): bool;

@@ -12,7 +12,7 @@
   "overriddenProperties":[],
   "parent":{
     "name":"Microcontroller",
-    "path":"folders/Bluetooth Demo/Classic/Examples/Microcontroller.yy",
+    "path":"folders/OLD/Bluetooth Demo/Classic/Examples/Microcontroller.yy",
   },
   "parentObjectId":{
     "name":"Obj_YoYo_button",

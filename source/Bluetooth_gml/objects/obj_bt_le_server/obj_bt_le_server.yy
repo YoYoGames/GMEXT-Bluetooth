@@ -11,7 +11,7 @@
   "overriddenProperties":[],
   "parent":{
     "name":"Server",
-    "path":"folders/Bluetooth Demo/LE/Waitrooms/Server.yy",
+    "path":"folders/OLD/Bluetooth Demo/LE/Waitrooms/Server.yy",
   },
   "parentObjectId":null,
   "persistent":false,

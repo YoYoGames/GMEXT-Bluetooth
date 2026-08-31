@@ -1,0 +1,2 @@
+
+#export __ext_core_buffer_unmarshal_value, __ext_core_buffer_marshal_value, __ext_core_get_args_buffer, __ext_core_get_ret_buffer, __ext_core_get_async_buffer, __ext_core_function_map, __GMNativeFunctionDispatcher, __ext_core_function_register, __ext_core_function_dispatch_calls

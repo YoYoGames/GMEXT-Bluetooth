@@ -11,7 +11,7 @@
   "overriddenProperties":[],
   "parent":{
     "name":"Match",
-    "path":"folders/Bluetooth Demo/Classic/Examples/Client-Server/Match.yy",
+    "path":"folders/OLD/Bluetooth Demo/Classic/Examples/Client-Server/Match.yy",
   },
   "parentObjectId":null,
   "persistent":false,

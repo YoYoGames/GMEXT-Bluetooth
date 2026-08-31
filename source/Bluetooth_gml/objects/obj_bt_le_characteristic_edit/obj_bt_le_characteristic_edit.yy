@@ -11,7 +11,7 @@
   "overriddenProperties":[],
   "parent":{
     "name":"CharacteristicEdit",
-    "path":"folders/Bluetooth Demo/LE/Join/CharacteristicEdit.yy",
+    "path":"folders/OLD/Bluetooth Demo/LE/Join/CharacteristicEdit.yy",
   },
   "parentObjectId":null,
   "persistent":false,
