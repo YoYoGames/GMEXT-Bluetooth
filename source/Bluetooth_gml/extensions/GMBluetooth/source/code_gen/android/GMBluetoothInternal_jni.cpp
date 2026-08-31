@@ -129,6 +129,19 @@ static jdouble __JNI_WRAPPER__GMBluetooth_invocation_handler(JNIEnv* env, jclass
     double __ret = __EXT_NATIVE__GMBluetooth_invocation_handler((char *)__ret_buffer_ptr, static_cast<double>(__ret_buffer_length));
     return static_cast<jdouble>(__ret);
 }
+// __GMBluetooth_queue_buffer JNI wrapper signature: (Ljava/nio/ByteBuffer;D)D
+static jdouble __JNI_WRAPPER__GMBluetooth_queue_buffer(JNIEnv* env, jclass /* GMBluetoothBridge */, jobject __arg_buffer, jdouble __arg_buffer_length)
+{
+    void* __arg_buffer_ptr = env->GetDirectBufferAddress(__arg_buffer);
+    jlong __arg_buffer_cap = env->GetDirectBufferCapacity(__arg_buffer);
+    if (!__arg_buffer_ptr || __arg_buffer_cap <= 0) {
+        throwIAE(env, "__arg_buffer must be a DIRECT ByteBuffer");
+        return 0.0;
+    }
+
+    double __ret = __EXT_NATIVE__GMBluetooth_queue_buffer((char *)__arg_buffer_ptr, static_cast<double>(__arg_buffer_length));
+    return static_cast<jdouble>(__ret);
+}
 // bluetooth_initialize JNI wrapper signature: ()D
 static jdouble __JNI_WRAPPER__bluetooth_initialize_31278774638F(JNIEnv* /* env */, jclass /* GMBluetoothBridge */)
 {
@@ -186,6 +199,27 @@ static jdouble __JNI_WRAPPER__bluetooth_classic_is_supported_8C08342122F2(JNIEnv
     return static_cast<jdouble>(__ret);
 }
 
+// bluetooth_classic_server_is_supported JNI wrapper signature: ()D
+static jdouble __JNI_WRAPPER__bluetooth_classic_server_is_supported_3F96654103F9(JNIEnv* /* env */, jclass /* GMBluetoothBridge */)
+{
+    double __ret = __EXT_NATIVE__bluetooth_classic_server_is_supported();
+    return static_cast<jdouble>(__ret);
+}
+
+// bluetooth_permission_get_status JNI wrapper signature: ()D
+static jdouble __JNI_WRAPPER__bluetooth_permission_get_status_66FEEFFF6DD8(JNIEnv* /* env */, jclass /* GMBluetoothBridge */)
+{
+    double __ret = __EXT_NATIVE__bluetooth_permission_get_status();
+    return static_cast<jdouble>(__ret);
+}
+
+// bluetooth_permission_request JNI wrapper signature: ()D
+static jdouble __JNI_WRAPPER__bluetooth_permission_request_D3672F4B5CE4(JNIEnv* /* env */, jclass /* GMBluetoothBridge */)
+{
+    double __ret = __EXT_NATIVE__bluetooth_permission_request();
+    return static_cast<jdouble>(__ret);
+}
+
 // bluetooth_le_scan_start JNI wrapper signature: (D)D
 static jdouble __JNI_WRAPPER__bluetooth_le_scan_start_1AE9D454FB1D(JNIEnv* /* env */, jclass /* GMBluetoothBridge */, jdouble active)
 {
@@ -204,6 +238,27 @@ static jdouble __JNI_WRAPPER__bluetooth_le_scan_stop_26B949DAA99B(JNIEnv* /* env
 static jdouble __JNI_WRAPPER__bluetooth_le_scan_is_running_9447537BE162(JNIEnv* /* env */, jclass /* GMBluetoothBridge */)
 {
     double __ret = __EXT_NATIVE__bluetooth_le_scan_is_running();
+    return static_cast<jdouble>(__ret);
+}
+
+// bluetooth_classic_scan_start JNI wrapper signature: ()D
+static jdouble __JNI_WRAPPER__bluetooth_classic_scan_start_859735CD039D(JNIEnv* /* env */, jclass /* GMBluetoothBridge */)
+{
+    double __ret = __EXT_NATIVE__bluetooth_classic_scan_start();
+    return static_cast<jdouble>(__ret);
+}
+
+// bluetooth_classic_scan_stop JNI wrapper signature: ()D
+static jdouble __JNI_WRAPPER__bluetooth_classic_scan_stop_37EA259A1BB1(JNIEnv* /* env */, jclass /* GMBluetoothBridge */)
+{
+    double __ret = __EXT_NATIVE__bluetooth_classic_scan_stop();
+    return static_cast<jdouble>(__ret);
+}
+
+// bluetooth_classic_scan_is_running JNI wrapper signature: ()D
+static jdouble __JNI_WRAPPER__bluetooth_classic_scan_is_running_F61B8D25ACD9(JNIEnv* /* env */, jclass /* GMBluetoothBridge */)
+{
+    double __ret = __EXT_NATIVE__bluetooth_classic_scan_is_running();
     return static_cast<jdouble>(__ret);
 }
 
@@ -354,6 +409,145 @@ static jdouble __JNI_WRAPPER__bluetooth_device_is_connectable_F20DD641A8FD(JNIEn
     return static_cast<jdouble>(__ret);
 }
 
+// bluetooth_classic_connect JNI wrapper signature: (Ljava/nio/ByteBuffer;DLjava/nio/ByteBuffer;D)D
+static jdouble __JNI_WRAPPER__bluetooth_classic_connect_076CD6CDD691(JNIEnv* env, jclass /* GMBluetoothBridge */, jobject __arg_buffer, jdouble __arg_buffer_length, jobject __ret_buffer, jdouble __ret_buffer_length)
+{
+    void* __arg_buffer_ptr = env->GetDirectBufferAddress(__arg_buffer);
+    jlong __arg_buffer_cap = env->GetDirectBufferCapacity(__arg_buffer);
+    if (!__arg_buffer_ptr || __arg_buffer_cap <= 0) {
+        throwIAE(env, "__arg_buffer must be a DIRECT ByteBuffer");
+        return 0.0;
+    }
+    void* __ret_buffer_ptr = env->GetDirectBufferAddress(__ret_buffer);
+    jlong __ret_buffer_cap = env->GetDirectBufferCapacity(__ret_buffer);
+    if (!__ret_buffer_ptr || __ret_buffer_cap <= 0) {
+        throwIAE(env, "__ret_buffer must be a DIRECT ByteBuffer");
+        return 0.0;
+    }
+    double __ret = __EXT_NATIVE__bluetooth_classic_connect((char *)__arg_buffer_ptr, static_cast<double>(__arg_buffer_length), (char *)__ret_buffer_ptr, static_cast<double>(__ret_buffer_length));
+    return static_cast<jdouble>(__ret);
+}
+
+// bluetooth_classic_disconnect JNI wrapper signature: (Ljava/nio/ByteBuffer;D)D
+static jdouble __JNI_WRAPPER__bluetooth_classic_disconnect_4A9FA344AB8E(JNIEnv* env, jclass /* GMBluetoothBridge */, jobject __arg_buffer, jdouble __arg_buffer_length)
+{
+    void* __arg_buffer_ptr = env->GetDirectBufferAddress(__arg_buffer);
+    jlong __arg_buffer_cap = env->GetDirectBufferCapacity(__arg_buffer);
+    if (!__arg_buffer_ptr || __arg_buffer_cap <= 0) {
+        throwIAE(env, "__arg_buffer must be a DIRECT ByteBuffer");
+        return 0.0;
+    }
+    double __ret = __EXT_NATIVE__bluetooth_classic_disconnect((char *)__arg_buffer_ptr, static_cast<double>(__arg_buffer_length));
+    return static_cast<jdouble>(__ret);
+}
+
+// bluetooth_classic_connection_is_valid JNI wrapper signature: (Ljava/nio/ByteBuffer;D)D
+static jdouble __JNI_WRAPPER__bluetooth_classic_connection_is_valid_7C22EF4BF3EC(JNIEnv* env, jclass /* GMBluetoothBridge */, jobject __arg_buffer, jdouble __arg_buffer_length)
+{
+    void* __arg_buffer_ptr = env->GetDirectBufferAddress(__arg_buffer);
+    jlong __arg_buffer_cap = env->GetDirectBufferCapacity(__arg_buffer);
+    if (!__arg_buffer_ptr || __arg_buffer_cap <= 0) {
+        throwIAE(env, "__arg_buffer must be a DIRECT ByteBuffer");
+        return 0.0;
+    }
+    double __ret = __EXT_NATIVE__bluetooth_classic_connection_is_valid((char *)__arg_buffer_ptr, static_cast<double>(__arg_buffer_length));
+    return static_cast<jdouble>(__ret);
+}
+
+// bluetooth_classic_connection_is_connected JNI wrapper signature: (Ljava/nio/ByteBuffer;D)D
+static jdouble __JNI_WRAPPER__bluetooth_classic_connection_is_connected_B0E230892239(JNIEnv* env, jclass /* GMBluetoothBridge */, jobject __arg_buffer, jdouble __arg_buffer_length)
+{
+    void* __arg_buffer_ptr = env->GetDirectBufferAddress(__arg_buffer);
+    jlong __arg_buffer_cap = env->GetDirectBufferCapacity(__arg_buffer);
+    if (!__arg_buffer_ptr || __arg_buffer_cap <= 0) {
+        throwIAE(env, "__arg_buffer must be a DIRECT ByteBuffer");
+        return 0.0;
+    }
+    double __ret = __EXT_NATIVE__bluetooth_classic_connection_is_connected((char *)__arg_buffer_ptr, static_cast<double>(__arg_buffer_length));
+    return static_cast<jdouble>(__ret);
+}
+
+// bluetooth_classic_connection_get_device JNI wrapper signature: (Ljava/nio/ByteBuffer;DLjava/nio/ByteBuffer;D)D
+static jdouble __JNI_WRAPPER__bluetooth_classic_connection_get_device_ADAFFB11D8C3(JNIEnv* env, jclass /* GMBluetoothBridge */, jobject __arg_buffer, jdouble __arg_buffer_length, jobject __ret_buffer, jdouble __ret_buffer_length)
+{
+    void* __arg_buffer_ptr = env->GetDirectBufferAddress(__arg_buffer);
+    jlong __arg_buffer_cap = env->GetDirectBufferCapacity(__arg_buffer);
+    if (!__arg_buffer_ptr || __arg_buffer_cap <= 0) {
+        throwIAE(env, "__arg_buffer must be a DIRECT ByteBuffer");
+        return 0.0;
+    }
+    void* __ret_buffer_ptr = env->GetDirectBufferAddress(__ret_buffer);
+    jlong __ret_buffer_cap = env->GetDirectBufferCapacity(__ret_buffer);
+    if (!__ret_buffer_ptr || __ret_buffer_cap <= 0) {
+        throwIAE(env, "__ret_buffer must be a DIRECT ByteBuffer");
+        return 0.0;
+    }
+    double __ret = __EXT_NATIVE__bluetooth_classic_connection_get_device((char *)__arg_buffer_ptr, static_cast<double>(__arg_buffer_length), (char *)__ret_buffer_ptr, static_cast<double>(__ret_buffer_length));
+    return static_cast<jdouble>(__ret);
+}
+
+// bluetooth_classic_receive_available JNI wrapper signature: (Ljava/nio/ByteBuffer;D)D
+static jdouble __JNI_WRAPPER__bluetooth_classic_receive_available_2E75E109CF3B(JNIEnv* env, jclass /* GMBluetoothBridge */, jobject __arg_buffer, jdouble __arg_buffer_length)
+{
+    void* __arg_buffer_ptr = env->GetDirectBufferAddress(__arg_buffer);
+    jlong __arg_buffer_cap = env->GetDirectBufferCapacity(__arg_buffer);
+    if (!__arg_buffer_ptr || __arg_buffer_cap <= 0) {
+        throwIAE(env, "__arg_buffer must be a DIRECT ByteBuffer");
+        return 0.0;
+    }
+    double __ret = __EXT_NATIVE__bluetooth_classic_receive_available((char *)__arg_buffer_ptr, static_cast<double>(__arg_buffer_length));
+    return static_cast<jdouble>(__ret);
+}
+
+// bluetooth_classic_send JNI wrapper signature: (Ljava/nio/ByteBuffer;D)D
+static jdouble __JNI_WRAPPER__bluetooth_classic_send_FB63F58FEB35(JNIEnv* env, jclass /* GMBluetoothBridge */, jobject __arg_buffer, jdouble __arg_buffer_length)
+{
+    void* __arg_buffer_ptr = env->GetDirectBufferAddress(__arg_buffer);
+    jlong __arg_buffer_cap = env->GetDirectBufferCapacity(__arg_buffer);
+    if (!__arg_buffer_ptr || __arg_buffer_cap <= 0) {
+        throwIAE(env, "__arg_buffer must be a DIRECT ByteBuffer");
+        return 0.0;
+    }
+    double __ret = __EXT_NATIVE__bluetooth_classic_send((char *)__arg_buffer_ptr, static_cast<double>(__arg_buffer_length));
+    return static_cast<jdouble>(__ret);
+}
+
+// bluetooth_classic_receive JNI wrapper signature: (Ljava/nio/ByteBuffer;D)D
+static jdouble __JNI_WRAPPER__bluetooth_classic_receive_EA38EDCA30A3(JNIEnv* env, jclass /* GMBluetoothBridge */, jobject __arg_buffer, jdouble __arg_buffer_length)
+{
+    void* __arg_buffer_ptr = env->GetDirectBufferAddress(__arg_buffer);
+    jlong __arg_buffer_cap = env->GetDirectBufferCapacity(__arg_buffer);
+    if (!__arg_buffer_ptr || __arg_buffer_cap <= 0) {
+        throwIAE(env, "__arg_buffer must be a DIRECT ByteBuffer");
+        return 0.0;
+    }
+    double __ret = __EXT_NATIVE__bluetooth_classic_receive((char *)__arg_buffer_ptr, static_cast<double>(__arg_buffer_length));
+    return static_cast<jdouble>(__ret);
+}
+
+// bluetooth_classic_server_start JNI wrapper signature: (Ljava/lang/String;Ljava/lang/String;)D
+static jdouble __JNI_WRAPPER__bluetooth_classic_server_start_7142D1D8C721(JNIEnv* env, jclass /* GMBluetoothBridge */, jstring name, jstring service_uuid)
+{
+    UtfChars __pin_name(env, name);
+    UtfChars __pin_service_uuid(env, service_uuid);
+    double __ret = __EXT_NATIVE__bluetooth_classic_server_start((char *)__pin_name.c_str(), (char *)__pin_service_uuid.c_str());
+    return static_cast<jdouble>(__ret);
+}
+
+// bluetooth_classic_server_stop JNI wrapper signature: ()D
+static jdouble __JNI_WRAPPER__bluetooth_classic_server_stop_813316F49299(JNIEnv* /* env */, jclass /* GMBluetoothBridge */)
+{
+    double __ret = __EXT_NATIVE__bluetooth_classic_server_stop();
+    return static_cast<jdouble>(__ret);
+}
+
+// bluetooth_classic_server_is_running JNI wrapper signature: ()D
+static jdouble __JNI_WRAPPER__bluetooth_classic_server_is_running_05FC537F17F4(JNIEnv* /* env */, jclass /* GMBluetoothBridge */)
+{
+    double __ret = __EXT_NATIVE__bluetooth_classic_server_is_running();
+    return static_cast<jdouble>(__ret);
+}
+
 // bluetooth_set_callback_device_found JNI wrapper signature: (Ljava/nio/ByteBuffer;D)D
 static jdouble __JNI_WRAPPER__bluetooth_set_callback_device_found_A555A075C2AF(JNIEnv* env, jclass /* GMBluetoothBridge */, jobject __arg_buffer, jdouble __arg_buffer_length)
 {
@@ -394,6 +588,66 @@ static jdouble __JNI_WRAPPER__bluetooth_remove_callback_scan_stopped_66E80AC1F8D
     return static_cast<jdouble>(__ret);
 }
 
+// bluetooth_set_callback_classic_client_connected JNI wrapper signature: (Ljava/nio/ByteBuffer;D)D
+static jdouble __JNI_WRAPPER__bluetooth_set_callback_classic_client_connected_BF79C79880C0(JNIEnv* env, jclass /* GMBluetoothBridge */, jobject __arg_buffer, jdouble __arg_buffer_length)
+{
+    void* __arg_buffer_ptr = env->GetDirectBufferAddress(__arg_buffer);
+    jlong __arg_buffer_cap = env->GetDirectBufferCapacity(__arg_buffer);
+    if (!__arg_buffer_ptr || __arg_buffer_cap <= 0) {
+        throwIAE(env, "__arg_buffer must be a DIRECT ByteBuffer");
+        return 0.0;
+    }
+    double __ret = __EXT_NATIVE__bluetooth_set_callback_classic_client_connected((char *)__arg_buffer_ptr, static_cast<double>(__arg_buffer_length));
+    return static_cast<jdouble>(__ret);
+}
+
+// bluetooth_remove_callback_classic_client_connected JNI wrapper signature: ()D
+static jdouble __JNI_WRAPPER__bluetooth_remove_callback_classic_client_connected_0EBB948BD6B4(JNIEnv* /* env */, jclass /* GMBluetoothBridge */)
+{
+    double __ret = __EXT_NATIVE__bluetooth_remove_callback_classic_client_connected();
+    return static_cast<jdouble>(__ret);
+}
+
+// bluetooth_set_callback_classic_data JNI wrapper signature: (Ljava/nio/ByteBuffer;D)D
+static jdouble __JNI_WRAPPER__bluetooth_set_callback_classic_data_5FA3564F0327(JNIEnv* env, jclass /* GMBluetoothBridge */, jobject __arg_buffer, jdouble __arg_buffer_length)
+{
+    void* __arg_buffer_ptr = env->GetDirectBufferAddress(__arg_buffer);
+    jlong __arg_buffer_cap = env->GetDirectBufferCapacity(__arg_buffer);
+    if (!__arg_buffer_ptr || __arg_buffer_cap <= 0) {
+        throwIAE(env, "__arg_buffer must be a DIRECT ByteBuffer");
+        return 0.0;
+    }
+    double __ret = __EXT_NATIVE__bluetooth_set_callback_classic_data((char *)__arg_buffer_ptr, static_cast<double>(__arg_buffer_length));
+    return static_cast<jdouble>(__ret);
+}
+
+// bluetooth_remove_callback_classic_data JNI wrapper signature: ()D
+static jdouble __JNI_WRAPPER__bluetooth_remove_callback_classic_data_DAD117C345DF(JNIEnv* /* env */, jclass /* GMBluetoothBridge */)
+{
+    double __ret = __EXT_NATIVE__bluetooth_remove_callback_classic_data();
+    return static_cast<jdouble>(__ret);
+}
+
+// bluetooth_set_callback_classic_disconnected JNI wrapper signature: (Ljava/nio/ByteBuffer;D)D
+static jdouble __JNI_WRAPPER__bluetooth_set_callback_classic_disconnected_1248D100FB13(JNIEnv* env, jclass /* GMBluetoothBridge */, jobject __arg_buffer, jdouble __arg_buffer_length)
+{
+    void* __arg_buffer_ptr = env->GetDirectBufferAddress(__arg_buffer);
+    jlong __arg_buffer_cap = env->GetDirectBufferCapacity(__arg_buffer);
+    if (!__arg_buffer_ptr || __arg_buffer_cap <= 0) {
+        throwIAE(env, "__arg_buffer must be a DIRECT ByteBuffer");
+        return 0.0;
+    }
+    double __ret = __EXT_NATIVE__bluetooth_set_callback_classic_disconnected((char *)__arg_buffer_ptr, static_cast<double>(__arg_buffer_length));
+    return static_cast<jdouble>(__ret);
+}
+
+// bluetooth_remove_callback_classic_disconnected JNI wrapper signature: ()D
+static jdouble __JNI_WRAPPER__bluetooth_remove_callback_classic_disconnected_B25340A705FB(JNIEnv* /* env */, jclass /* GMBluetoothBridge */)
+{
+    double __ret = __EXT_NATIVE__bluetooth_remove_callback_classic_disconnected();
+    return static_cast<jdouble>(__ret);
+}
+
 // nativeRegister(Class callbackClass): cache callback + register all JNI wrappers
 extern "C" {
     JNIEXPORT void JNICALL Java_com_gamemaker_ExtensionCore_ExtBridge_GMBluetoothBridge_nativeRegister(JNIEnv* env, jclass bridgeClass)
@@ -429,6 +683,7 @@ extern "C" {
         // Registers all the native methods
         static const JNINativeMethod methods[] = {
             { "__EXT_JNI__GMBluetooth_invocation_handler", "(Ljava/nio/ByteBuffer;D)D", (void*)__JNI_WRAPPER__GMBluetooth_invocation_handler },
+            { "__EXT_JNI__GMBluetooth_queue_buffer", "(Ljava/nio/ByteBuffer;D)D", (void*)__JNI_WRAPPER__GMBluetooth_queue_buffer },
             { "__EXT_JNI__bluetooth_initialize", "()D", (void*)__JNI_WRAPPER__bluetooth_initialize_31278774638F },
             { "__EXT_JNI__bluetooth_shutdown", "()D", (void*)__JNI_WRAPPER__bluetooth_shutdown_378D48E1C138 },
             { "__EXT_JNI__bluetooth_update", "()D", (void*)__JNI_WRAPPER__bluetooth_update_3688EFA154F7 },
@@ -437,9 +692,15 @@ extern "C" {
             { "__EXT_JNI__bluetooth_last_error_message", "()Ljava/lang/String;", (void*)__JNI_WRAPPER__bluetooth_last_error_message_838BF9608693 },
             { "__EXT_JNI__bluetooth_le_is_supported", "()D", (void*)__JNI_WRAPPER__bluetooth_le_is_supported_DCB49501EB8B },
             { "__EXT_JNI__bluetooth_classic_is_supported", "()D", (void*)__JNI_WRAPPER__bluetooth_classic_is_supported_8C08342122F2 },
+            { "__EXT_JNI__bluetooth_classic_server_is_supported", "()D", (void*)__JNI_WRAPPER__bluetooth_classic_server_is_supported_3F96654103F9 },
+            { "__EXT_JNI__bluetooth_permission_get_status", "()D", (void*)__JNI_WRAPPER__bluetooth_permission_get_status_66FEEFFF6DD8 },
+            { "__EXT_JNI__bluetooth_permission_request", "()D", (void*)__JNI_WRAPPER__bluetooth_permission_request_D3672F4B5CE4 },
             { "__EXT_JNI__bluetooth_le_scan_start", "(D)D", (void*)__JNI_WRAPPER__bluetooth_le_scan_start_1AE9D454FB1D },
             { "__EXT_JNI__bluetooth_le_scan_stop", "()D", (void*)__JNI_WRAPPER__bluetooth_le_scan_stop_26B949DAA99B },
             { "__EXT_JNI__bluetooth_le_scan_is_running", "()D", (void*)__JNI_WRAPPER__bluetooth_le_scan_is_running_9447537BE162 },
+            { "__EXT_JNI__bluetooth_classic_scan_start", "()D", (void*)__JNI_WRAPPER__bluetooth_classic_scan_start_859735CD039D },
+            { "__EXT_JNI__bluetooth_classic_scan_stop", "()D", (void*)__JNI_WRAPPER__bluetooth_classic_scan_stop_37EA259A1BB1 },
+            { "__EXT_JNI__bluetooth_classic_scan_is_running", "()D", (void*)__JNI_WRAPPER__bluetooth_classic_scan_is_running_F61B8D25ACD9 },
             { "__EXT_JNI__bluetooth_device_clear", "()D", (void*)__JNI_WRAPPER__bluetooth_device_clear_79019385A38F },
             { "__EXT_JNI__bluetooth_device_get_count", "()D", (void*)__JNI_WRAPPER__bluetooth_device_get_count_86A7D6934F06 },
             { "__EXT_JNI__bluetooth_device_get_at", "(DLjava/nio/ByteBuffer;D)D", (void*)__JNI_WRAPPER__bluetooth_device_get_at_8979E9445DD3 },
@@ -452,10 +713,27 @@ extern "C" {
             { "__EXT_JNI__bluetooth_device_has_rssi", "(Ljava/nio/ByteBuffer;D)D", (void*)__JNI_WRAPPER__bluetooth_device_has_rssi_C6880AF7571F },
             { "__EXT_JNI__bluetooth_device_get_rssi", "(Ljava/nio/ByteBuffer;D)D", (void*)__JNI_WRAPPER__bluetooth_device_get_rssi_A437977AEF8C },
             { "__EXT_JNI__bluetooth_device_is_connectable", "(Ljava/nio/ByteBuffer;D)D", (void*)__JNI_WRAPPER__bluetooth_device_is_connectable_F20DD641A8FD },
+            { "__EXT_JNI__bluetooth_classic_connect", "(Ljava/nio/ByteBuffer;DLjava/nio/ByteBuffer;D)D", (void*)__JNI_WRAPPER__bluetooth_classic_connect_076CD6CDD691 },
+            { "__EXT_JNI__bluetooth_classic_disconnect", "(Ljava/nio/ByteBuffer;D)D", (void*)__JNI_WRAPPER__bluetooth_classic_disconnect_4A9FA344AB8E },
+            { "__EXT_JNI__bluetooth_classic_connection_is_valid", "(Ljava/nio/ByteBuffer;D)D", (void*)__JNI_WRAPPER__bluetooth_classic_connection_is_valid_7C22EF4BF3EC },
+            { "__EXT_JNI__bluetooth_classic_connection_is_connected", "(Ljava/nio/ByteBuffer;D)D", (void*)__JNI_WRAPPER__bluetooth_classic_connection_is_connected_B0E230892239 },
+            { "__EXT_JNI__bluetooth_classic_connection_get_device", "(Ljava/nio/ByteBuffer;DLjava/nio/ByteBuffer;D)D", (void*)__JNI_WRAPPER__bluetooth_classic_connection_get_device_ADAFFB11D8C3 },
+            { "__EXT_JNI__bluetooth_classic_receive_available", "(Ljava/nio/ByteBuffer;D)D", (void*)__JNI_WRAPPER__bluetooth_classic_receive_available_2E75E109CF3B },
+            { "__EXT_JNI__bluetooth_classic_send", "(Ljava/nio/ByteBuffer;D)D", (void*)__JNI_WRAPPER__bluetooth_classic_send_FB63F58FEB35 },
+            { "__EXT_JNI__bluetooth_classic_receive", "(Ljava/nio/ByteBuffer;D)D", (void*)__JNI_WRAPPER__bluetooth_classic_receive_EA38EDCA30A3 },
+            { "__EXT_JNI__bluetooth_classic_server_start", "(Ljava/lang/String;Ljava/lang/String;)D", (void*)__JNI_WRAPPER__bluetooth_classic_server_start_7142D1D8C721 },
+            { "__EXT_JNI__bluetooth_classic_server_stop", "()D", (void*)__JNI_WRAPPER__bluetooth_classic_server_stop_813316F49299 },
+            { "__EXT_JNI__bluetooth_classic_server_is_running", "()D", (void*)__JNI_WRAPPER__bluetooth_classic_server_is_running_05FC537F17F4 },
             { "__EXT_JNI__bluetooth_set_callback_device_found", "(Ljava/nio/ByteBuffer;D)D", (void*)__JNI_WRAPPER__bluetooth_set_callback_device_found_A555A075C2AF },
             { "__EXT_JNI__bluetooth_remove_callback_device_found", "()D", (void*)__JNI_WRAPPER__bluetooth_remove_callback_device_found_9348AD38A881 },
             { "__EXT_JNI__bluetooth_set_callback_scan_stopped", "(Ljava/nio/ByteBuffer;D)D", (void*)__JNI_WRAPPER__bluetooth_set_callback_scan_stopped_BCDC66A28F45 },
             { "__EXT_JNI__bluetooth_remove_callback_scan_stopped", "()D", (void*)__JNI_WRAPPER__bluetooth_remove_callback_scan_stopped_66E80AC1F8D4 },
+            { "__EXT_JNI__bluetooth_set_callback_classic_client_connected", "(Ljava/nio/ByteBuffer;D)D", (void*)__JNI_WRAPPER__bluetooth_set_callback_classic_client_connected_BF79C79880C0 },
+            { "__EXT_JNI__bluetooth_remove_callback_classic_client_connected", "()D", (void*)__JNI_WRAPPER__bluetooth_remove_callback_classic_client_connected_0EBB948BD6B4 },
+            { "__EXT_JNI__bluetooth_set_callback_classic_data", "(Ljava/nio/ByteBuffer;D)D", (void*)__JNI_WRAPPER__bluetooth_set_callback_classic_data_5FA3564F0327 },
+            { "__EXT_JNI__bluetooth_remove_callback_classic_data", "()D", (void*)__JNI_WRAPPER__bluetooth_remove_callback_classic_data_DAD117C345DF },
+            { "__EXT_JNI__bluetooth_set_callback_classic_disconnected", "(Ljava/nio/ByteBuffer;D)D", (void*)__JNI_WRAPPER__bluetooth_set_callback_classic_disconnected_1248D100FB13 },
+            { "__EXT_JNI__bluetooth_remove_callback_classic_disconnected", "()D", (void*)__JNI_WRAPPER__bluetooth_remove_callback_classic_disconnected_B25340A705FB },
         };
 
         env->RegisterNatives(bridgeClass, methods, sizeof(methods)/sizeof(methods[0]));

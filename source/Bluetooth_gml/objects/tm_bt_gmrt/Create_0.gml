@@ -1,10 +1,24 @@
 // ============================================================
-// Bluetooth test - Create Event
+// Bluetooth mobile test - Create Event
 // ============================================================
 
 show_debug_message("========================================");
-show_debug_message("GMBluetooth TEST");
+show_debug_message("GMBluetooth MOBILE TEST");
 show_debug_message("========================================");
+
+
+// ------------------------------------------------------------
+// UI / runtime state
+// ------------------------------------------------------------
+
+bt_ready = false;
+permission_request_sent = false;
+auto_scan_after_permission = true;
+last_permission_status = BluetoothPermissionStatus.Unknown;
+
+ui_margin = 24;
+ui_gap = 12;
+ui_button_h = 64;
 
 
 // ------------------------------------------------------------
@@ -20,6 +34,26 @@ bluetooth_transport_to_string = function(_transport)
 
         case BluetoothTransport.LowEnergy:
             return "BLE";
+
+        default:
+            return "Unknown";
+    }
+};
+
+
+// ------------------------------------------------------------
+// Helper: permission -> string
+// ------------------------------------------------------------
+
+bluetooth_permission_to_string = function(_status)
+{
+    switch (_status)
+    {
+        case BluetoothPermissionStatus.Granted:
+            return "Granted";
+
+        case BluetoothPermissionStatus.Denied:
+            return "Denied";
 
         default:
             return "Unknown";
@@ -108,100 +142,167 @@ bluetooth_print_all_devices = function()
 
 
 // ------------------------------------------------------------
+// Helper: request Android Bluetooth permissions
+// ------------------------------------------------------------
+
+bluetooth_request_permissions = function()
+{
+    if (!bt_ready)
+        return;
+
+    var _status =
+        bluetooth_permission_get_status();
+
+    if (_status == BluetoothPermissionStatus.Granted)
+    {
+        permission_request_sent = false;
+        return;
+    }
+
+    var _error =
+        bluetooth_permission_request();
+
+    permission_request_sent =
+        (_error == BluetoothError.Ok);
+
+    show_debug_message(
+        $"bluetooth_permission_request() = {_error}"
+    );
+
+    if (_error != BluetoothError.Ok)
+    {
+        show_debug_message(
+            $"Permission request error: " +
+            $"{bluetooth_last_error_code()} - " +
+            $"{bluetooth_last_error_message()}"
+        );
+    }
+};
+
+
+// ------------------------------------------------------------
+// Helper: start BLE scan
+// ------------------------------------------------------------
+
+bluetooth_start_ble_scan = function()
+{
+    if (!bt_ready)
+        return;
+
+    if (bluetooth_permission_get_status() != BluetoothPermissionStatus.Granted)
+    {
+        bluetooth_request_permissions();
+        return;
+    }
+
+    if (bluetooth_le_scan_is_running())
+        return;
+
+    bluetooth_device_clear();
+
+    var _error =
+        bluetooth_le_scan_start(true);
+
+    show_debug_message(
+        $"bluetooth_le_scan_start() = {_error}"
+    );
+
+    if (_error != BluetoothError.Ok)
+    {
+        show_debug_message(
+            $"Scan error: " +
+            $"{bluetooth_last_error_code()} - " +
+            $"{bluetooth_last_error_message()}"
+        );
+    }
+    else
+    {
+        show_debug_message("BLE scanning started...");
+    }
+};
+
+
+// ------------------------------------------------------------
 // Initialize
 // ------------------------------------------------------------
 
-var _initialized =
+bt_ready =
     bluetooth_initialize();
 
-show_debug_message($"Initialized: {_initialized}");
+show_debug_message($"Initialized: {bt_ready}");
 
-if (!_initialized)
+if (!bt_ready)
 {
     show_debug_message(
         $"Bluetooth initialization failed: " +
         $"{bluetooth_last_error_code()} - " +
         $"{bluetooth_last_error_message()}"
     );
-
-    exit;
-}
-
-
-// ------------------------------------------------------------
-// Capabilities
-// ------------------------------------------------------------
-
-show_debug_message(
-    $"BLE supported: {bluetooth_le_is_supported()}"
-);
-
-show_debug_message(
-    $"Classic supported: {bluetooth_classic_is_supported()}"
-);
-
-
-// ------------------------------------------------------------
-// Device discovered callback
-// ------------------------------------------------------------
-
-bluetooth_set_callback_device_found(
-    function(_device)
-    {
-        show_debug_message("");
-        show_debug_message(">>> NEW BLUETOOTH DEVICE <<<");
-
-        bluetooth_print_device(_device);
-    }
-);
-
-
-// ------------------------------------------------------------
-// Scan stopped callback
-// ------------------------------------------------------------
-
-bluetooth_set_callback_scan_stopped(
-    function(_error, _message)
-    {
-        show_debug_message("");
-        show_debug_message(">>> BLE SCAN STOPPED <<<");
-
-        show_debug_message($"Error:   {_error}");
-        show_debug_message($"Message: {_message}");
-
-        // Print final state of every discovered device.
-        bluetooth_print_all_devices();
-    }
-);
-
-
-// ------------------------------------------------------------
-// Clear devices from previous scan
-// ------------------------------------------------------------
-
-bluetooth_device_clear();
-
-
-// ------------------------------------------------------------
-// Start ACTIVE BLE scan
-// ------------------------------------------------------------
-
-var _error =
-    bluetooth_le_scan_start(true);
-
-show_debug_message(
-    $"bluetooth_le_scan_start() = {_error}"
-);
-
-if (_error != BluetoothError.Ok)
-{
-    show_debug_message(
-        $"Scan error: " +
-        $"{bluetooth_last_error_code()} - " +
-        $"{bluetooth_last_error_message()}"
-    );
 }
 else
 {
-    show_debug_message("BLE scanning started...");
+    show_debug_message(
+        $"BLE supported: {bluetooth_le_is_supported()}"
+    );
+
+    show_debug_message(
+        $"Classic supported: {bluetooth_classic_is_supported()}"
+    );
+
+
+    // --------------------------------------------------------
+    // Device discovered callback
+    // --------------------------------------------------------
+
+    bluetooth_set_callback_device_found(
+        function(_device)
+        {
+            show_debug_message("");
+            show_debug_message(">>> NEW BLUETOOTH DEVICE <<<");
+
+            bluetooth_print_device(_device);
+        }
+    );
+
+
+    // --------------------------------------------------------
+    // Scan stopped callback
+    // --------------------------------------------------------
+
+    bluetooth_set_callback_scan_stopped(
+        function(_error, _message)
+        {
+            show_debug_message("");
+            show_debug_message(">>> BLUETOOTH SCAN STOPPED <<<");
+            show_debug_message($"Error:   {_error}");
+            show_debug_message($"Message: {_message}");
+
+            bluetooth_print_all_devices();
+        }
+    );
+
+
+    bluetooth_device_clear();
+
+    last_permission_status =
+        bluetooth_permission_get_status();
+
+    show_debug_message(
+        $"Bluetooth permission: " +
+        $"{bluetooth_permission_to_string(last_permission_status)}"
+    );
+
+
+    // Mobile: request permissions immediately.
+    // The Android system dialog is asynchronous, so Step waits until
+    // bluetooth_permission_get_status() becomes Granted before scanning.
+    if (last_permission_status == BluetoothPermissionStatus.Granted)
+    {
+        bluetooth_start_ble_scan();
+        auto_scan_after_permission = false;
+    }
+    else
+    {
+        bluetooth_request_permissions();
+    }
 }

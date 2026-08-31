@@ -17,7 +17,7 @@
     "macos":{},
     "linux":{},
     "android":{
-      "mode": "jni"
+      "mode": "java"
     },
     "ios":{
       "mode": "native"
