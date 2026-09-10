@@ -79,10 +79,17 @@ elseif(APPLE)
         PRIVATE
             "${_GMBLUETOOTH_APPLE_MM}")
 
-    # Use explicit framework linking for Apple platforms
-    # (find_library may not work reliably for iOS SDKs)
+    # Link frameworks directly to the extension target for iOS
+    # Using both interface library and direct linking for maximum compatibility
     target_link_libraries(ext_third_party
         INTERFACE
+            "-framework CoreBluetooth"
+            "-framework Foundation"
+            "-framework CoreLocation")
+
+    # Also link directly to the main target to ensure Xcode picks them up
+    target_link_libraries(${EXT_MAIN_TARGET}
+        PRIVATE
             "-framework CoreBluetooth"
             "-framework Foundation"
             "-framework CoreLocation")
