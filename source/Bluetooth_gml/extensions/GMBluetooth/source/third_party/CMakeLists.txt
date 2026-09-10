@@ -79,13 +79,11 @@ elseif(APPLE)
         PRIVATE
             "${_GMBLUETOOTH_APPLE_MM}")
 
-    find_library(COREBLUETOOTH_FRAMEWORK CoreBluetooth REQUIRED)
-    find_library(FOUNDATION_FRAMEWORK Foundation REQUIRED)
-    find_library(CORELOCATION_FRAMEWORK CoreLocation REQUIRED)
-
+    # Use explicit framework linking for Apple platforms
+    # (find_library may not work reliably for iOS SDKs)
     target_link_libraries(ext_third_party
         INTERFACE
-            "${COREBLUETOOTH_FRAMEWORK}"
-            "${FOUNDATION_FRAMEWORK}"
-            "${CORELOCATION_FRAMEWORK}")
+            "-framework CoreBluetooth"
+            "-framework Foundation"
+            "-framework CoreLocation")
 endif()
