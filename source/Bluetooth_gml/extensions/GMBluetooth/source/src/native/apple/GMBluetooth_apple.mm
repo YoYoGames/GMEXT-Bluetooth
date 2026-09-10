@@ -9,8 +9,8 @@
 
 #if TARGET_OS_IOS
 #import <UIKit/UIKit.h>
-#elif TARGET_OS_MAC
-#import <Foundation/NSHost.h>
+#else
+// macOS only - NSHost is part of Foundation (already imported above)
 #endif
 
 #include <cstdint>
