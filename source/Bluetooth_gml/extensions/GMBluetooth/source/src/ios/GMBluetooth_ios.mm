@@ -1,5 +1,5 @@
 #import "GMBluetooth_ios.h"
-#include "../native/GMBluetooth_native.h"
+#include "../native/GMBluetooth_native_declarations.h"
 
 @implementation GMBluetooth
 
