@@ -95,6 +95,11 @@ elseif(APPLE)
 
     # Add framework search paths for iOS SDK
     if(CMAKE_OSX_SYSROOT MATCHES "iphone")
+        # Set for Xcode generator to properly link frameworks
+        set_target_properties(${EXT_MAIN_TARGET} PROPERTIES
+            XCODE_ATTRIBUTE_FRAMEWORK_SEARCH_PATHS "${CMAKE_OSX_SYSROOT}/System/Library/Frameworks")
+
+        # Also set as linker option for non-Xcode generators
         target_link_options(${EXT_MAIN_TARGET}
             PRIVATE
                 "-F${CMAKE_OSX_SYSROOT}/System/Library/Frameworks")
