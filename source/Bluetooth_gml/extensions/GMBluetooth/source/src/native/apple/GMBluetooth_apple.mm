@@ -9,8 +9,7 @@
 
 #if TARGET_OS_IOS
 #import <UIKit/UIKit.h>
-#endif
-#if TARGET_OS_MAC
+#elif TARGET_OS_MAC
 #import <Foundation/NSHost.h>
 #endif
 

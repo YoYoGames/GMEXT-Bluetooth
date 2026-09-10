@@ -1,8 +1,10 @@
 #import "GMBluetooth_ios.h"
 
-// Native header included only for function declarations (enums already defined by iOS header)
-#define GMBLUETOOTH_NATIVE_H_SKIP_ENUMS
+// Suppress enum redefinition warnings (both iOS and native headers define the same enums)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wredeclared-class-typedef"
 #include "../native/GMBluetooth_native.h"
+#pragma clang diagnostic pop
 
 @implementation GMBluetooth
 
