@@ -93,4 +93,11 @@ elseif(APPLE)
             "-framework CoreBluetooth"
             "-framework Foundation"
             "-framework CoreLocation")
+
+    # Add framework search paths for iOS SDK
+    if(CMAKE_OSX_SYSROOT MATCHES "iphone")
+        target_link_options(${EXT_MAIN_TARGET}
+            PRIVATE
+                "-F${CMAKE_OSX_SYSROOT}/System/Library/Frameworks")
+    endif()
 endif()
