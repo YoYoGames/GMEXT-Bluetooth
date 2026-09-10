@@ -81,9 +81,11 @@ elseif(APPLE)
 
     find_library(COREBLUETOOTH_FRAMEWORK CoreBluetooth REQUIRED)
     find_library(FOUNDATION_FRAMEWORK Foundation REQUIRED)
+    find_library(CORELOCATION_FRAMEWORK CoreLocation REQUIRED)
 
     target_link_libraries(ext_third_party
         INTERFACE
             "${COREBLUETOOTH_FRAMEWORK}"
-            "${FOUNDATION_FRAMEWORK}")
+            "${FOUNDATION_FRAMEWORK}"
+            "${CORELOCATION_FRAMEWORK}")
 endif()
