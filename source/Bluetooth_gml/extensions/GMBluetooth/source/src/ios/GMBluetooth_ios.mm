@@ -1,5 +1,7 @@
 #import "GMBluetooth_ios.h"
 
+// Native header included only for function declarations (enums already defined by iOS header)
+#define GMBLUETOOTH_NATIVE_H_SKIP_ENUMS
 #include "../native/GMBluetooth_native.h"
 
 @implementation GMBluetooth

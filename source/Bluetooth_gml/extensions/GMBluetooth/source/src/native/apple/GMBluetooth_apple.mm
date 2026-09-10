@@ -7,6 +7,13 @@
 #import <CoreLocation/CoreLocation.h>
 #include <TargetConditionals.h>
 
+#if TARGET_OS_IOS
+#import <UIKit/UIKit.h>
+#endif
+#if TARGET_OS_MAC
+#import <Foundation/NSHost.h>
+#endif
+
 #include <cstdint>
 #include <memory>
 #include <mutex>
