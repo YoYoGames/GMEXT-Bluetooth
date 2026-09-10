@@ -50,4 +50,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 target_compile_definitions(${PROJECT_NAME} PRIVATE OS_IOS EXTGEN_HAS_JNI=0)
 
 # Link Apple frameworks required for Bluetooth
-target_link_frameworks(${PROJECT_NAME} PRIVATE CoreBluetooth CoreLocation)
+target_link_libraries(${PROJECT_NAME} PRIVATE
+  "-framework CoreBluetooth"
+  "-framework CoreLocation"
+)
