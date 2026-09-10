@@ -133,7 +133,7 @@
   "installdir":"",
   "iosCocoaPodDependencies":"",
   "iosCocoaPods":"",
-  "ioscodeinjection":"<YYIosPlist>\n<key>NSBluetoothPeripheralUsageDescription</key><string>Advertisement would like to use bluetooth.</string>\n<key>NSBluetoothAlwaysUsageDescription</key><string>This app uses Bluetooth for multiplayer features or electronic devices communication</string>\n</YYIosPlist>",
+  "ioscodeinjection":"<YYIosPlist>\r\n  <!-- BLE Central (scanning/connecting to devices) - REQUIRED -->\r\n  <key>NSBluetoothCentralUsageDescription</key>\r\n  <string>This app needs Bluetooth access to discover and connect to nearby devices</string>\r\n  \r\n  <!-- BLE Peripheral (advertising) - Required if doing advertisement -->\r\n  <key>NSBluetoothPeripheralUsageDescription</key>\r\n  <string>This app uses Bluetooth to advertise itself to other devices</string>\r\n  \r\n  <!-- Location (CRITICAL - needed for BLE scanning on iOS 12+) -->\r\n  <key>NSLocationWhenInUseUsageDescription</key>\r\n  <string>Location access is required to scan for Bluetooth devices (iOS requirement)</string>\r\n  \r\n  <!-- Optional: Always available background mode -->\r\n  <key>NSBluetoothAlwaysAndWhenInUseUsageDescription</key>\r\n  <string>This app uses Bluetooth for multiplayer features or electronic devices communication</string>\r\n</YYIosPlist>\r\n",
   "iosdelegatename":"",
   "iosplistinject":"\n<key>NSBluetoothPeripheralUsageDescription</key><string>Advertisement would like to use bluetooth.</string>\n<key>NSBluetoothAlwaysUsageDescription</key><string>This app uses Bluetooth for multiplayer features or electronic devices communication</string>\n",
   "iosProps":true,

@@ -48,3 +48,6 @@ target_include_directories(${PROJECT_NAME} PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/code_gen/core
 )
 target_compile_definitions(${PROJECT_NAME} PRIVATE OS_IOS EXTGEN_HAS_JNI=0)
+
+# Link Apple frameworks required for Bluetooth
+target_link_frameworks(${PROJECT_NAME} PRIVATE CoreBluetooth CoreLocation)

@@ -20,6 +20,9 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 )
 target_compile_definitions(${PROJECT_NAME} PRIVATE OS_MACOS EXTGEN_HAS_JNI=0)
 
+# Link Apple frameworks required for Bluetooth
+target_link_frameworks(${PROJECT_NAME} PRIVATE CoreBluetooth CoreLocation)
+
 set_target_properties(${PROJECT_NAME} PROPERTIES
   MACOSX_RPATH        ON
   BUILD_WITH_INSTALL_RPATH ON
