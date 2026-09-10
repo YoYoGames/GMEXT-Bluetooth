@@ -65,19 +65,10 @@ elseif(ANDROID)
 # Apple: iOS + macOS
 # -----------------------------------------------------------------------------
 elseif(APPLE)
-    # ExtGen's macOS native build already discovers src/native/*.cpp. The iOS
-    # native-framework path does not, so add the shared common core explicitly
-    # for iOS only.
-    if(CMAKE_OSX_SYSROOT MATCHES "iphone")
-        target_sources(${EXT_MAIN_TARGET}
-            PRIVATE
-                "${_GMBLUETOOTH_COMMON_CPP}")
-    endif()
-
-    # Both iOS and macOS use the mature old-extension CoreBluetooth transport.
-    target_sources(${EXT_MAIN_TARGET}
-        PRIVATE
-            "${_GMBLUETOOTH_APPLE_MM}")
+    # Source files are handled by src/CMakeLists.txt, which properly includes:
+    # - GMBluetooth_native.cpp (for iOS)
+    # - GMBluetooth_apple.mm (for both iOS and macOS)
+    # This file only handles framework linking and include paths.
 
     # Link frameworks directly to the extension target for iOS
     # Using both interface library and direct linking for maximum compatibility
