@@ -1,2200 +1,3115 @@
 package ${YYAndroidPackageName};
 
+import ${YYAndroidPackageName}.R;
 import ${YYAndroidPackageName}.GMExtWire.GMFunction;
 
-import android.Manifest;
 import android.app.Activity;
+
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothSocket;
+import android.bluetooth.BluetoothProfile;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothServerSocket;
-import android.bluetooth.BluetoothSocket;
-import android.bluetooth.le.BluetoothLeScanner;
+import android.bluetooth.BluetoothGattServerCallback;
+
+import android.bluetooth.BluetoothGatt;
+import android.bluetooth.BluetoothGattCharacteristic;
+import android.bluetooth.BluetoothGattCallback;
+import android.bluetooth.BluetoothGattDescriptor;
 import android.bluetooth.le.ScanCallback;
+import android.bluetooth.le.ScanRecord;
+import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanResult;
+import android.bluetooth.le.BluetoothLeAdvertiser;
+import android.bluetooth.le.AdvertisingSetParameters;
+import android.bluetooth.le.AdvertisingSetCallback;
+import android.bluetooth.le.AdvertiseData;
+import android.bluetooth.le.AdvertisingSet;
+import android.bluetooth.le.AdvertiseCallback;
+import android.bluetooth.le.AdvertiseSettings;
+import android.bluetooth.BluetoothGattService;
+import android.bluetooth.BluetoothGattServer;
+import android.bluetooth.BluetoothStatusCodes;
+
+import android.os.ParcelUuid;
+
+
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.pm.PackageManager;
 import android.os.Build;
+import android.content.pm.PackageManager;
+import android.Manifest;
 
+import java.util.HashMap;
+import java.util.Set;
+import java.util.UUID;
+import java.util.Iterator;
+import java.util.concurrent.ConcurrentHashMap;
+
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
+
+import android.util.Log;
+import java.util.List;
+import java.util.Map;
+import java.lang.Thread;
+import java.lang.Exception;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+
+// JSON imports
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import java.nio.ByteBuffer;
+
+import java.util.Arrays;
+
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.Deque;
 import java.util.concurrent.atomic.AtomicLong;
+import android.util.Base64;
+
+import android.os.Handler;
+import java.util.Map.Entry;
+
+public class GMBluetooth extends GMBluetoothInternal {
+
+	public GMBluetooth() { }
+
+	private Activity activity = null;
+
+	private BluetoothManager bluetoothManager = null;
+
+	private AtomicInteger asyncTokenGenerator = new AtomicInteger(0);
+	private AtomicInteger socketIdGenerator = new AtomicInteger(0);
+
+	private static final int REQUEST_ENABLE_BT = 2134;
+
+	private static final String LOG_TAG = "yoyo";
+
+	private static final int EVENT_OTHER_SOCIAL = 70;
+
+	private static final double TRUE = 1.0;
+	private static final double FALSE = 0.0;
+	
+	private static final class ExtEvent {
+		final String type;
+		final JSONObject data;
+		ExtEvent(String type, JSONObject data) {
+			this.type = type;
+			this.data = data;
+		}
+	}
+
+	private final ConcurrentLinkedQueue<ExtEvent> extEventQueue = new ConcurrentLinkedQueue<>();
+	private volatile boolean isClassicScanning = false;
+
+	// java.util.mapOf() is not available on every Android API level we target.
+	// Keep the old transport event code source-compatible with Android 5+ / API 21.
+	private Map<String, Object> mapOf(Object... entries) {
+		Map<String, Object> result = new HashMap<>();
+		if (entries == null) return result;
+		for (int i = 0; i + 1 < entries.length; i += 2) {
+			result.put(String.valueOf(entries[i]), entries[i + 1]);
+		}
+		return result;
+	}
+
+	private Object jsonValue(Object value) {
+		if (value == null) return JSONObject.NULL;
+		if (value instanceof byte[]) return Base64.encodeToString((byte[])value, Base64.NO_WRAP);
+		if (value instanceof UUID) return value.toString();
+		if (value instanceof JSONArray || value instanceof JSONObject || value instanceof String || value instanceof Number || value instanceof Boolean)
+			return value;
+		return String.valueOf(value);
+	}
+
+	public void notifyOperation(String functionName, Map<String, Object> extraParams) {
+		JSONObject json = new JSONObject();
+		try {
+			if (extraParams != null) {
+				for (Map.Entry<String, Object> entry : extraParams.entrySet()) {
+					json.put(entry.getKey(), jsonValue(entry.getValue()));
+				}
+			}
+		} catch (JSONException error) {
+			Log.e(LOG_TAG, "GMBluetooth event serialization failed", error);
+		}
+		extEventQueue.offer(new ExtEvent(functionName, json));
+		Log.i(LOG_TAG, "notifyOperation: QUEUED event type=" + functionName + " queue_size=" + extEventQueue.size());
+	}
+
+	public void notifyAsyncOperation(String functionName, int asyncId, Map<String, Object> extraParams) {
+
+		Map<String, Object> params = new HashMap<>();
+		params.put("async_id", asyncId);
+		
+		if (extraParams != null) {
+			params.putAll(extraParams);
+		}
+
+		notifyOperation(functionName, params);
+	}
+
+	public void notifyAsyncOperationError(String functionName, int asyncId, int errorCode, Map<String, Object> extraParams) {
+
+		Map<String, Object> params = new HashMap<>();
+		params.put("success", false);
+		params.put("error_code", errorCode);
+
+		if (extraParams != null) {
+			params.putAll(extraParams);
+		}
+
+		notifyAsyncOperation(functionName, asyncId, params);
+	}
+
+	public void notifyAsyncOperationSuccess(String functionName, int asyncId, Map<String, Object> extraParams) {
+		
+		Map<String, Object> params = new HashMap<>();
+		params.put("success", true);
+	
+		if (extraParams != null) {
+			params.putAll(extraParams);
+		}
+
+		notifyAsyncOperation(functionName, asyncId, params);
+	}
+
+	// INTERNAL
+
+	public double bt_init() {
+		registerBroadcastReceiver();
+		return 0;
+	}
+
+	public double bt_end() {
+		unregisterBroadcastReceiver();
+		return 0;
+	}
+
+	//#region Bluetooth Core
+
+	public String bt_get_address() {
+		BluetoothAdapter bluetoothAdapter = getBluetoothAdapter("bt_get_address");
+		if (bluetoothAdapter == null)
+			return "";
+	
+		return bluetoothAdapter.getAddress();
+	}
+	
+	public String bt_get_name() {
+		BluetoothAdapter bluetoothAdapter = getBluetoothAdapter("bt_get_name");
+		if (bluetoothAdapter == null)
+			return "";
+	
+		return bluetoothAdapter.getName();
+	}
+	
+	public String bt_get_paired_devices() {
+		BluetoothAdapter bluetoothAdapter = getBluetoothAdapter("bt_get_paired_devices");
+		if (bluetoothAdapter == null)
+			return "[]";
+	
+		Set<BluetoothDevice> pairedDevices = bluetoothAdapter.getBondedDevices();
+		if (pairedDevices == null) {
+			Log.i(LOG_TAG, "bt_get_paired_devices :: Unable to retrieve bounded devices.");
+			return "[]";
+		}
+	
+		JSONArray devicesJsonArray = new JSONArray();
+		// Try to build return data
+		for (BluetoothDevice device : pairedDevices) {
+			devicesJsonArray.put(createBluetoothDeviceJson(device));
+		}
+	
+		// Finally return the JSONArray as a string
+		return devicesJsonArray.toString();
+	}	
+
+	public double bt_is_enabled() {
+		return isBluetoothEnabled("bt_is_enabled") ? TRUE : FALSE;
+	}
+
+	public double bt_request_enable() {
+		if (!isBluetoothSupported("bt_request_enable"))
+			return FALSE;
+	
+		Intent enableBluetoothIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
+		activity.startActivityForResult(enableBluetoothIntent, REQUEST_ENABLE_BT);
+
+		return TRUE;
+	}
+	
+	public void onActivityResult(int requestCode, int resultCode, Intent data) {
+		switch (requestCode) {
+			case REQUEST_ENABLE_BT:
+				notifyOperation("bt_request_enable", mapOf(
+					"success", resultCode == Activity.RESULT_OK
+				));
+				break;
+		}
+	}
+
+	public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+		if (requestCode == REQUEST_BT_PERMISSIONS) {
+			// Permission dialog was handled by the system.
+			// The next call to bluetooth_permission_get_status() will reflect the new state.
+			boolean allGranted = true;
+			if (grantResults != null) {
+				for (int result : grantResults) {
+					if (result != PackageManager.PERMISSION_GRANTED) {
+						allGranted = false;
+						break;
+					}
+				}
+			}
+			Log.i(LOG_TAG, "onRequestPermissionsResult: REQUEST_BT_PERMISSIONS result=" + (allGranted ? "GRANTED" : "DENIED"));
+		}
+	}
+
+	//#endregion
+
+	//#region Bluetooth Classic
+
+	private BroadcastReceiver bluetoothEventReceiver = null;
+
+	private ConcurrentHashMap<Integer, BluetoothSocket> activeSockets = new ConcurrentHashMap<>();
+	private ConcurrentHashMap<Integer, ConcurrentLinkedQueue<byte[]>> socketDataQueues = new ConcurrentHashMap<>();
+	private ConcurrentHashMap<Integer, Thread> activeThreads = new ConcurrentHashMap<>();
+	
+	private BluetoothServerSocket serverSocket = null;
+	private volatile Thread serverThread = null;
+	private volatile boolean isServerRunning = false;
+	
+	public double bt_classic_is_supported() {
+		return isBluetoothSupported("bt_classic_is_supported") ? TRUE : FALSE;
+	}
+
+	public double bt_classic_scan_start() {
+		BluetoothAdapter bluetoothAdapter = getBluetoothAdapter("bt_classic_scan_start");
+		if (bluetoothAdapter == null)
+			return -1;
+
+		if (isClassicScanning) {
+			Log.i(LOG_TAG, "bt_classic_scan_start :: Discovery has already started.");
+			return -1;
+		}
+
+		int asyncId = asyncTokenGenerator.getAndIncrement();
+		isClassicScanning = true;
+		Log.i(LOG_TAG, "bt_classic_scan_start :: isClassicScanning SET TO TRUE IMMEDIATELY");
+
+		RunnerActivity.ViewHandler.post(new Runnable() {
+			public void run() {
+				try {
+					Log.i(LOG_TAG, "bt_classic_scan_start :: Checking BluetoothAdapter state...");
+					Log.i(LOG_TAG, "bt_classic_scan_start :: isEnabled=" + bluetoothAdapter.isEnabled());
+					Log.i(LOG_TAG, "bt_classic_scan_start :: isDiscovering=" + bluetoothAdapter.isDiscovering());
+
+					Boolean discoveryStarted = bluetoothAdapter.startDiscovery();
+					Log.i(LOG_TAG, "bt_classic_scan_start :: startDiscovery() returned: " + discoveryStarted);
+
+					if (!discoveryStarted) {
+						isClassicScanning = false;
+						Log.i(LOG_TAG, "bt_classic_scan_start :: startDiscovery FAILED - check if Bluetooth is enabled or another scan is running");
+						notifyAsyncOperationError("bt_classic_scan_start", asyncId, ERROR_OPERATION_NOT_STARTED, null);
+					} else {
+						Log.i(LOG_TAG, "bt_classic_scan_start :: Discovery started successfully");
+						notifyAsyncOperationSuccess("bt_classic_scan_start", asyncId, null);
+					}
+
+				} catch (Exception e) {
+					isClassicScanning = false;
+					Log.i(LOG_TAG, "bt_classic_scan_start :: Exception: " + e.getMessage());
+					notifyAsyncOperationError("bt_classic_scan_start", asyncId, e.hashCode(), null);
+				}
+			}
+		});
+	
+		return asyncId;
+	}
+	
+	public double bt_classic_scan_is_active() {
+		return isClassicScanning ? TRUE : FALSE;
+	}
+	
+	public double bt_classic_scan_stop() {
+		BluetoothAdapter bluetoothAdapter = getBluetoothAdapter("bt_classic_scan_stop");
+		if (bluetoothAdapter == null)
+			return -1;
+
+		if (!bluetoothAdapter.cancelDiscovery()) return -1;
+
+		isClassicScanning = false;
+		Log.i(LOG_TAG, "bt_classic_scan_stop :: isClassicScanning set to false");
+
+		int asyncId = asyncTokenGenerator.getAndIncrement();
+
+		notifyAsyncOperationSuccess("bt_classic_scan_stop", asyncId, null);
+
+		return asyncId;
+	}
+	
+	public double bt_classic_discoverability_enable(double seconds) {
+		RunnerActivity.ViewHandler.post(new Runnable() {
+			public void run() {
+				Intent discoverableIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE);
+				discoverableIntent.putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, (int) seconds);
+				activity.startActivity(discoverableIntent);
+			}
+		});
+		return TRUE;
+	}
+	
+	public double bt_classic_discoverability_is_active() {
+		BluetoothAdapter bluetoothAdapter = getBluetoothAdapter("bt_classic_discoverability_is_active");
+		
+		if (bluetoothAdapter == null) return FALSE;
+	
+		int mode = bluetoothAdapter.getScanMode();
+		return mode == bluetoothAdapter.SCAN_MODE_CONNECTABLE_DISCOVERABLE ? TRUE: FALSE;
+	}
+	
+	public double bt_classic_server_start(String name, String uuidString, double insecure) {
+		BluetoothServerSocket temporarySocket = null;
+	
+		BluetoothAdapter bluetoothAdapter = getBluetoothAdapter("bt_classic_server_start");
+		if (bluetoothAdapter == null) return -1;
+	
+		if (isServerRunning) {
+			Log.i(LOG_TAG, "bt_classic_server_start :: Server is already running");
+			return -1; // Server already running
+		}
+	
+		UUID uuid = getUUIDFromString(uuidString, "bt_classic_server_start");
+		if (uuid == null) return -1;
+
+		try {	
+			if (insecure > .5) {
+				temporarySocket = bluetoothAdapter.listenUsingInsecureRfcommWithServiceRecord(name, uuid);
+			} else {
+				temporarySocket = bluetoothAdapter.listenUsingRfcommWithServiceRecord(name, uuid);
+			}
+		} catch (IOException e) {
+			Log.e(LOG_TAG, "bt_classic_server_start :: Error creating socket", e);
+			return -1; // Socket creation failed
+		}
+	
+		int asyncId = asyncTokenGenerator.getAndIncrement();
+
+		notifyAsyncOperationSuccess("bt_classic_server_start", asyncId, null);
+
+		serverSocket = temporarySocket;
+		isServerRunning = true;
+	
+		// Store the server thread this will allow to interrupt it later (if needed)
+		serverThread = new Thread(new Runnable() {
+			public void run() {
+				while (isServerRunning) {
+	
+					Map<String, Object> extraParams = new HashMap<String,Object>();
+					
+					try {
+						BluetoothSocket socket = serverSocket.accept();
+	
+						if (socket != null) {
+
+							int socketId = socketIdGenerator.getAndIncrement();
+
+							extraParams.put("success", true);
+							extraParams.put("socket_id", socketId);
+							handleBluetoothSocket(socket, socketId);
+	
+						} else {
+							extraParams.put("success", false);
+						}
+					} catch (Exception e) {
+						extraParams.put("success", false);
+					}
+	
+					notifyOperation("bt_classic_server_accept", extraParams);
+				}
+			}
+		});
+		serverThread.start();
+
+		return asyncId;
+	}
+	
+	public double bt_classic_server_stop() {
+		try {
+			// Set flag to false to signal the server thread to stop accepting connections
+			isServerRunning = false;
+	
+			// Interrupt the server thread to stop accepting new connections immediately
+			if (serverThread != null) {
+				serverThread.interrupt();
+			}
+	
+			// Close the server socket
+			if (serverSocket != null) {
+				serverSocket.close();
+			} else {
+				Log.i(LOG_TAG, "bt_classic_server_stop :: There was no previously opened connection.");
+			}
+	
+			int asyncId = asyncTokenGenerator.getAndIncrement();
+			notifyAsyncOperationSuccess("bt_classic_server_stop", asyncId, null);
+
+			return asyncId;
+		} catch (Exception e) {
+			Log.e(LOG_TAG, "bt_classic_server_stop :: Error when closing server.", e);
+			return -1;
+		}
+	}
+	
+	public double bt_classic_socket_receive(double socketIndex, double bufferId, double offset) {
+		// TODO: Legacy GameMaker buffer bridge intentionally disabled.
+		// The ExtGen public bluetooth_classic_receive() wrapper also remains TODO
+		// until the project-specific GameMaker buffer convention is supplied.
+		return -1.0;
+	}
+
+	public double bt_classic_socket_send(double socketIndex, double bufferId, double offset, double length) {
+		// TODO: Legacy GameMaker buffer bridge intentionally disabled.
+		// RFCOMM socket transport remains implemented, but no GameMaker buffer copy
+		// is guessed here.
+		return -1.0;
+	}
+
+	public double bt_classic_socket_open(final String address, final String uuidString, double insecure) {
+		BluetoothSocket temporarySocket = null;
+	
+		// Check if socket is already opened for the given address
+		for (BluetoothSocket socket : activeSockets.values()) {
+			if (socket.getRemoteDevice().getAddress().equalsIgnoreCase(address)) {
+				temporarySocket = socket;
+				break;
+			}
+		}
+
+		// Socket is already opened
+		if (temporarySocket != null) return -1;
+
+		BluetoothDevice device = getBluetoothDevice(address, "bt_classic_socket_open");
+		if (device == null) return -1; // Device not found
+	
+
+		// If device is currently discovering stop it (this is good practice)
+		if (bt_classic_scan_is_active() == TRUE) {
+			bt_classic_scan_stop();
+		}
+
+		UUID uuid = getUUIDFromString(uuidString, "bt_classic_socket_open");
+		if (uuid == null) return -1;
+
+		try {
+			if (insecure > .5) {
+				temporarySocket = device.createInsecureRfcommSocketToServiceRecord(uuid);
+			} else {
+				temporarySocket = device.createRfcommSocketToServiceRecord(uuid);
+			}
+		} catch (IOException e) {
+			Log.e(LOG_TAG, "bt_classic_socket_open :: Error creating socket", e);
+			return -1; // Socket creation failed
+		}
+
+		final BluetoothSocket socket = temporarySocket;
+		final int asyncId = asyncTokenGenerator.getAndIncrement();
+
+		new Thread(new Runnable() {
+			public void run() {
+				Map<String, Object> extraParams = new HashMap<String,Object>();
+				
+				// Publish the Async Event to the runner
+				extraParams.putAll(mapOf(
+					"address", address,
+					"uuid", uuidString
+				));
+				
+				try {
+					// Try to connect
+					socket.connect();
+					int socketId = socketIdGenerator.getAndIncrement();
+
+					// Connection was successful
+					extraParams.put("socket_id", socketId);
+
+					notifyAsyncOperationSuccess("bt_classic_socket_open", asyncId, extraParams);
+
+					// Store socket onto HashMap
+					handleBluetoothSocket(socket, socketId);
+				} catch (IOException connectException) {
+					// Connection failed
+					extraParams.put("error_message", connectException.getMessage());
+					notifyAsyncOperationError("bt_classic_socket_open", asyncId, connectException.hashCode(), extraParams);
+				}
+			}
+		}).start();
+
+		return asyncId; // Process started successfully
+	}
+		
+	public double bt_classic_socket_close(double socketIndex) {
+		try {
+			// Close the socket and remove it from activeSockets
+			BluetoothSocket socket = activeSockets.remove((int) socketIndex);
+			if (socket != null) {
+				socket.close();
+			}
+	
+			// Remove the socket's buffer queue from socketDataQueues
+			socketDataQueues.remove((int) socketIndex);
+	
+			// Interrupt the handling thread for this socket
+			Thread thread = activeThreads.remove((int) socketIndex);
+			if (thread != null) {
+				thread.interrupt();
+			}
+	
+			return TRUE;
+		} catch (IOException e) {
+			Log.e(LOG_TAG, "bt_classic_socket_close :: Error closing Bluetooth socket", e);
+			return -1.0; // return -1 for IOException
+		} catch (Exception e) {
+			Log.e(LOG_TAG, "bt_classic_socket_close :: Unknown error", e);
+			return -2.0; // return -2 for other exceptions
+		}
+	}
+	
+	public double bt_classic_socket_close_all() {
+		for (Integer socketIndex : activeSockets.keySet()) {
+			bt_classic_socket_close(socketIndex);
+		}
+		return TRUE;
+	}
+	
+	// PRIVATE METHODS
+	
+	private void registerBroadcastReceiver() {
+		bluetoothEventReceiver = new BroadcastReceiver() {
+			public void onReceive(Context context, Intent intent) {
+		
+				String action = intent.getAction();
+				BluetoothDevice device;
+	
+				switch (action) {
+					case BluetoothAdapter.ACTION_DISCOVERY_STARTED:
+						isClassicScanning = true;
+						Log.i(LOG_TAG, "ACTION_DISCOVERY_STARTED :: isClassicScanning set to true");
+						notifyOperation("bt_classic_scan_started", null);
+						break;
+
+					case BluetoothDevice.ACTION_FOUND:
+	
+						// Get Device information from intent
+						device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+	
+						String name = device.getName();
+
+						// Publish the Async Event to the runner
+						notifyOperation("bt_classic_scan_result", mapOf(
+							"success", true,
+							"name", name == null ? "" : name,
+							"address", device.getAddress(),
+							"connected", false,
+							"authenticated", device.getBondState() == BluetoothDevice.BOND_BONDED,
+							"remembered", device.getBondState() == BluetoothDevice.BOND_BONDED
+						));
+						break;
+	
+					case BluetoothDevice.ACTION_PAIRING_REQUEST:
+	
+						// Publish the Async Event to the runner
+						notifyOperation("bt_classic_pairing_request", null);
+						break;
+	
+					case BluetoothDevice.ACTION_ACL_CONNECTED:
+	
+						// Get Device information from intent
+						device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+	
+						// Publish the Async Event to the runner
+						notifyOperation("bt_classic_socket_state_changed", mapOf(
+							"connected", true,
+							"device", createBluetoothDeviceJson(device)
+						));
+						break;
+	
+					case BluetoothDevice.ACTION_ACL_DISCONNECTED:
+	
+						// Get Device information from intent
+						device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+	
+						// Publish the Async Event to the runner
+						notifyOperation("bt_classic_socket_state_changed", mapOf(
+							"connected", false,
+							"device", createBluetoothDeviceJson(device)
+						));
+						break;
+	
+					case BluetoothDevice.ACTION_ACL_DISCONNECT_REQUESTED:
+
+						// Publish the Async Event to the runner
+						// notifyOperation("bt_classic_receiver_acl_disconnect_requested", null);
+						break;
+
+					case BluetoothAdapter.ACTION_DISCOVERY_FINISHED:
+
+						isClassicScanning = false;
+						Log.i(LOG_TAG, "ACTION_DISCOVERY_FINISHED :: isClassicScanning set to false");
+						// Publish the Async Event to the runner
+						notifyOperation("bt_classic_scan_finished", null);
+						break;
+				}
+			}
+		};
+	
+		IntentFilter filter = new IntentFilter();
+		filter.addAction(BluetoothDevice.ACTION_FOUND);
+		filter.addAction(BluetoothDevice.ACTION_PAIRING_REQUEST);
+		filter.addAction(BluetoothDevice.ACTION_ACL_CONNECTED);
+		filter.addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED);
+		filter.addAction(BluetoothDevice.ACTION_ACL_DISCONNECT_REQUESTED);
+		filter.addAction(BluetoothAdapter.ACTION_DISCOVERY_STARTED);
+		filter.addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED);
+
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+			// Bluetooth broadcasts originate from the Android system.
+			activity.registerReceiver(bluetoothEventReceiver, filter, Context.RECEIVER_EXPORTED);
+		} else {
+			activity.registerReceiver(bluetoothEventReceiver, filter);
+		}
+
+	}
+	
+	private void unregisterBroadcastReceiver() {
+		try {
+			activity.unregisterReceiver(bluetoothEventReceiver);
+		} catch (Exception e) {
+			Log.e(LOG_TAG, "unregisterBroadcastReceiver :: Error while unregistering from the events", e);
+		}
+	}
+	
+	private Boolean isBluetoothSupported(final String methodNamge) {
+		if (activity.getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH))
+			return true;
+	
+		Log.i(LOG_TAG, methodNamge + " :: Your device doesn't support bluetooth.");
+		return false;
+	}
+		
+	private void handleBluetoothSocket(final BluetoothSocket socket, final int socketId) {
+	
+		activeSockets.put(socketId, socket);
+		ConcurrentLinkedQueue<byte[]> bufferQueue = new ConcurrentLinkedQueue<>();
+		socketDataQueues.put(socketId, bufferQueue);
+	
+		Thread thread = new Thread(new Runnable() {
+			public void run() {
+				try {
+					// Run while the socket is opened or thread was not interrupted
+					while (socketDataQueues.containsKey(socketId) && !Thread.currentThread().isInterrupted()) {
+						byte[] buffer = new byte[1024];
+	
+						// Read from the socket's InputStream (this will lock execution)
+						int numBytes = socket.getInputStream().read(buffer);
+						if (numBytes == -1) {
+							notifyOperation("bt_classic_socket_remotely_closed", mapOf(
+								"socket_id", socketId
+							));
+							break;
+						}
+
+						// Copy the read bytes into a new buffer and add it to the queue
+						byte[] receivedBytes = Arrays.copyOfRange(buffer, 0, numBytes);
+	
+						socketDataQueues.get(socketId).add(receivedBytes);
+						notifyOperation("bt_classic_socket_data", mapOf("socket_id", socketId));
+					}
+				} catch (Exception e) {
+					// If there's an error, log the error message and report to runner
+					notifyOperation("bt_classic_socket_error", mapOf(
+						"socket_id", socketId
+					));
+				}
+			}
+		});
+		thread.start();
+		activeThreads.put(socketId, thread);
+	}
+	
+	//#endregion
+
+	//#region Bluetooth Low Energy
+
+	private static final int ERROR_OPERATION_NOT_STARTED = -10;
+
+	private static final String CCCD_UUID_STRING = "00002902-0000-1000-8000-00805f9b34fb";
+	private static final UUID CCCD_UUID = UUID.fromString(CCCD_UUID_STRING);
+
+	// TASK SYSTEM
+
+	public abstract class QueueableTask {
+		String functionName;
+		int asyncId;
+
+		public QueueableTask(String functionName, int asyncId) {
+			this.functionName = functionName;
+			this.asyncId = asyncId;
+		}
+
+		public abstract int run();
+	}
+
+	public abstract class BLEGattTask<G, T> extends QueueableTask {
+		G gatt;
+		T target;
+	
+		public BLEGattTask(G gatt, T target, String functionName, int asyncId) {
+			super(functionName, asyncId);
+			this.gatt = gatt;
+			this.target = target;
+		}
+	}
+
+	public abstract class BLEGattDataTask<G, T> extends BLEGattTask<G, T> {
+		byte[] data;
+
+		public BLEGattDataTask(G gatt, T target, byte[] data, String functionName, int asyncId) {
+			super(gatt, target, functionName, asyncId);
+			this.data = data;
+		}
+	}
+
+	private <T extends QueueableTask> void handleTaskQueue(ConcurrentLinkedQueue<T> taskQueue, int status, Map<String, Object> data) {
+		T task = taskQueue.remove();
+
+		String functionName = task.functionName;
+		int asyncId = task.asyncId;
+
+		if (status == BluetoothGatt.GATT_SUCCESS) {
+			notifyAsyncOperationSuccess(functionName, asyncId, data);
+		}
+		else notifyAsyncOperationError(functionName, asyncId, status, null);
+
+		handleNextTask(taskQueue);
+	}
+
+	private <T extends QueueableTask> void handleNextTask(ConcurrentLinkedQueue<T> queue) {
+		T task = queue.peek();
+		while (task != null) {
+			int errorCode = task.run();
+			if (errorCode == BluetoothStatusCodes.SUCCESS) break;
+			
+			// Publish the Async Event to the runner
+			notifyAsyncOperationError(task.functionName, task.asyncId, errorCode, null);
+			
+			queue.poll();
+			task = queue.peek();
+		}
+	}
+
+	private <T extends QueueableTask> double createTaskAndHandleQueue(ConcurrentLinkedQueue<T> taskQueue, Supplier<T> taskSupplier) {
+		// Generate a new async identifier
+		T task = taskSupplier.get();
+		taskQueue.add(task);
+
+		if (taskQueue.size() == 1) {
+			handleNextTask(taskQueue);
+		}
+
+		return (double)task.asyncId;
+	}
+
+	// GENERAL
+
+	public double bt_le_is_supported() {
+		return isBluetoothLeSupported("bluetoothle_android_is_supported") ? TRUE : FALSE;
+	}
+
+	// SCANNER
+
+	private class ScanManager {
+
+		private boolean isScanning = false;
+
+		// TASKS
+
+		public class BLEScanStartTask extends QueueableTask {
+
+			private BluetoothLeScanner bluetoothLeScanner;
+			private ScanCallback scanCallback;
+
+			public BLEScanStartTask(BluetoothLeScanner bluetoothLeScanner, ScanCallback scanCallback, String functionName, int asyncId) {
+				super(functionName, asyncId);
+				this.bluetoothLeScanner = bluetoothLeScanner;
+				this.scanCallback = scanCallback;
+			}
+
+			public int run() {
+				Log.i(LOG_TAG, "BLEScanStartTask.run(): Calling bluetoothLeScanner.startScan()");
+				bluetoothLeScanner.startScan(scanCallback);
+				Log.i(LOG_TAG, "BLEScanStartTask.run(): startScan() returned");
+				return 0;
+			}
+		}
+
+		public ConcurrentLinkedQueue<BLEScanStartTask> scanStartTasks = new ConcurrentLinkedQueue<>();
+
+		// CALLBACK HANDLER
+
+		private class ScanCallbackHandler extends ScanCallback {
+
+			private ScanManager manager;
+
+			public ScanCallbackHandler(ScanManager manager) {
+				this.manager = manager;
+			}
+
+			@Override
+			public void onScanResult(int callbackType, ScanResult result) {
+				Log.i(LOG_TAG, "onScanResult: DEVICE DISCOVERED!");
+
+				if (manager.scanStartTasks.size() > 0) {
+					handleTaskQueue(manager.scanStartTasks, 0, null);
+				}
+
+				BluetoothDevice device = result.getDevice();
+
+				JSONArray uuids = new JSONArray();
+				ScanRecord scanRecord = result.getScanRecord();
+				if (scanRecord != null) {
+					List<ParcelUuid> parcelUuids = scanRecord.getServiceUuids();
+					if (parcelUuids != null) {
+						for (ParcelUuid uuid : parcelUuids) {
+							uuids.put(uuid.toString());
+						}
+					}
+				}
+
+				// Publish the Async Event to the runner
+				notifyOperation("bt_le_scan_result", mapOf(
+					"name", device.getName() != null ? device.getName() : "", // optional
+					"address", device.getAddress(),
+					"raw_signal", result.getRssi(),
+					"is_connectable", result.isConnectable(),
+					"uuids", uuids
+				));
+			}
+
+			@Override
+			public void onScanFailed(int errorCode) {
+				handleTaskQueue(manager.scanStartTasks, errorCode, null);
+			}
+
+			@Override
+			public void onBatchScanResults(List<ScanResult> results) {
+				// Windows doesn't have this information
+			}
+		}
+
+		public ScanCallbackHandler scanCallbackHandler = new ScanCallbackHandler(this);
+
+		// INTERNAL
+
+		private BluetoothLeScanner getBluetoothLeScanner(String functionName) {
+
+			BluetoothAdapter bluetoothAdapter = getBluetoothAdapter(functionName);
+			if (bluetoothAdapter == null) return null;
+
+			BluetoothLeScanner bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
+			if (bluetoothLeScanner == null) {
+				Log.i(LOG_TAG, functionName + " :: Bluetooth scanner is not available.");
+			}
+			return bluetoothLeScanner;
+		}
+
+		private double queueScanStartTask(BluetoothLeScanner bluetoothLeScanner, ScanCallback scanCallback, String functionName) {
+			int asyncId = asyncTokenGenerator.getAndIncrement();
+			return createTaskAndHandleQueue(scanStartTasks, () -> new BLEScanStartTask(bluetoothLeScanner, scanCallback, functionName, asyncId));
+		}
+
+		// PUBLIC API
+
+		private double scanStartAsync(String functionName) {
+			
+			if (isScanning == true) return -1;
+
+			BluetoothLeScanner bluetoothLeScanner = getBluetoothLeScanner(functionName);
+			if (bluetoothLeScanner == null) return -1;
+							
+			isScanning = true;
+			return queueScanStartTask(bluetoothLeScanner, scanCallbackHandler, functionName);
+		}
+
+		private double scanStopAsync(String functionName) {
+
+			if (isScanning == false) return -1;
+
+			BluetoothLeScanner bluetoothLeScanner = getBluetoothLeScanner(functionName);
+			if (bluetoothLeScanner == null) return -1;
+
+			bluetoothLeScanner.stopScan(scanCallbackHandler);
+			isScanning = false;
+
+			int asyncId = asyncTokenGenerator.getAndIncrement();
+			notifyAsyncOperationSuccess(functionName, asyncId, null);
+			return (double)asyncId;
+		}
+		
+		private double scanIsActiveAsync(String functionName) {
+			return isScanning ? TRUE : FALSE;
+		}
+
+	}
+
+	ScanManager scanManager = new ScanManager();
+
+	public double bt_le_scan_start() {
+		return scanManager.scanStartAsync("bt_le_scan_start");
+	}
+
+	public double bt_le_scan_stop() {
+		return scanManager.scanStopAsync("bt_le_scan_stop");
+	}
+	
+	public double bt_le_scan_is_active() {
+		return scanManager.scanIsActiveAsync("bt_le_scan_is_active");
+	}
+
+	// ADVERTISER
+
+	private class AdvertiseManager {
+
+		public boolean isAdvertising = false;
+
+		// TASKS
+
+		private class BLEAdvertiseStartTask extends QueueableTask {
+
+			BluetoothLeAdvertiser bluetoothLeAdvertiser;
+			AdvertiseSettings advertiseSettings;
+			AdvertiseData advertiseData;
+			AdvertiseCallback advertiseCallback;
+			
+			public BLEAdvertiseStartTask(BluetoothLeAdvertiser bluetoothLeAdvertiser, AdvertiseSettings advertiseSettings, AdvertiseData advertiseData, AdvertiseCallback advertiseCallback, String functionName, int asyncId) {
+				super(functionName, asyncId);
+				this.bluetoothLeAdvertiser = bluetoothLeAdvertiser;
+				this.advertiseSettings = advertiseSettings;
+				this.advertiseData = advertiseData;
+				this.advertiseCallback = advertiseCallback;
+			}
+
+			public int run() {
+				bluetoothLeAdvertiser.startAdvertising(advertiseSettings, advertiseData, advertiseCallback);
+				return 0;
+			}
+		}
+
+		public ConcurrentLinkedQueue<BLEAdvertiseStartTask> advertiseStartTasks = new ConcurrentLinkedQueue<>();
+
+		// CALLBACK HANDLER
+
+		private class AdvertiseCallbackHandler extends AdvertiseCallback {
+
+			AdvertiseManager manager = null;
+
+			public AdvertiseCallbackHandler(AdvertiseManager manager) {
+				this.manager = manager;
+			}
+
+			@Override
+			public void onStartSuccess(AdvertiseSettings settingsInEffect) {
+				manager.isAdvertising = true;
+				handleTaskQueue(manager.advertiseStartTasks, 0, null);
+			}
+
+			@Override
+			public void onStartFailure(int errorCode) {
+				handleTaskQueue(manager.advertiseStartTasks, errorCode, null);
+			}
+		}
+
+		public AdvertiseCallbackHandler advertiseCallbackHandler = new AdvertiseCallbackHandler(this);
+
+		// INTERNAL
+
+		private boolean isAdvertisingSupported(String functionName) {
+			BluetoothAdapter bluetoothAdapter = getBluetoothAdapter(functionName);
+			
+			if (bluetoothAdapter == null) return false;
+			
+			if (!isBluetoothEnabled(functionName)) return false;
+			
+			if (!isBluetoothLeSupported(functionName)) return false;
+			
+			if (!bluetoothAdapter.isMultipleAdvertisementSupported()) {
+				Log.i(LOG_TAG, functionName + " :: Bluetooth LE advertising is not supported on this device.");
+				return false;
+			}
+			
+			
+			return true;
+		}
+
+		private BluetoothLeAdvertiser getBluetoothLeAdvertiser(String functionName) {
+
+			boolean supported = isAdvertisingSupported(functionName);
+			if (supported == false) return null;
+
+			BluetoothAdapter bluetoothAdapter = getBluetoothAdapter(functionName);
+			if (bluetoothAdapter == null) return null;
+
+			BluetoothLeAdvertiser bluetoothLeAdvertiser = bluetoothAdapter.getBluetoothLeAdvertiser();
+			if (bluetoothLeAdvertiser == null) {
+				Log.i(LOG_TAG, functionName + " :: Bluetooth advertiser is not available.");
+			}
+			return bluetoothLeAdvertiser;
+		}
+
+		private AdvertiseSettings createAdvertiseSettings(JSONObject advertiseSettingsJSON, String functionName) {
+
+			int advertiseMode = advertiseSettingsJSON.optInt("advertiseMode", AdvertiseSettings.ADVERTISE_MODE_BALANCED);
+			boolean connectable = advertiseSettingsJSON.optBoolean("connectable", true);
+			boolean discoverable = advertiseSettingsJSON.optBoolean("discoverable", true);
+			int timeout = advertiseSettingsJSON.optInt("timeout", 10000);
+			int txPowerLevel = advertiseSettingsJSON.optInt("txPowerLevel", AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM);
+
+			AdvertiseSettings.Builder builder = new AdvertiseSettings.Builder()
+				.setAdvertiseMode(advertiseMode)
+				.setConnectable(connectable)
+				.setTimeout(timeout)
+				.setTxPowerLevel(txPowerLevel);
+
+			//if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+			//	builder.setDiscoverable(discoverable);
+			//}
+
+			return builder.build();
+		}
+
+		private AdvertiseData createAdvertiseData(JSONObject advertiseDataJSON, String functionName) {
+
+			AdvertiseData.Builder advertiseDataBuilder = new AdvertiseData.Builder();
+
+			boolean includeName = advertiseDataJSON.optBoolean("includeName", true);
+			boolean includePowerLevel = advertiseDataJSON.optBoolean("includePowerLevel", false);
+
+			advertiseDataBuilder.setIncludeDeviceName(includeName).setIncludeTxPowerLevel(includePowerLevel);
+
+			// Add service (uuid + data) to the AdvertiseData
+			if (advertiseDataJSON.has("services")) {
+				JSONArray servicesArray = advertiseDataJSON.optJSONArray("services");
+				if (servicesArray != null) {
+					for (int i = 0; i < servicesArray.length(); i++) {
+						JSONObject serviceEntry = servicesArray.optJSONObject(i);
+						if (serviceEntry == null) {
+							Log.i(LOG_TAG, functionName + " :: Invalid services entry (each entry should be a struct)");
+							return null;
+						}
+						
+						String uuidString = serviceEntry.optString("uuid");
+						UUID uuid = getUUIDFromString(uuidString, functionName);
+						if (uuid == null) {
+							Log.i(LOG_TAG, functionName + " :: Invalid services entry 'uuid' member (should be a valid uuid)");
+							return null;
+						}
+
+						if (serviceEntry.has("data")) {
+							String dataString = serviceEntry.optString("data");
+							byte[] data = decodeBase64String(dataString, functionName);
+							if (data == null) {
+								Log.i(LOG_TAG, functionName + " :: Invalid services entry 'data' member (should be a valid base64 string)");
+								return null;
+							}
+							advertiseDataBuilder.addServiceData(new ParcelUuid(uuid), data);
+						}
+						else {
+							advertiseDataBuilder.addServiceUuid(new ParcelUuid(uuid));
+						}
+					}
+				}
+				else {
+					Log.i(LOG_TAG, functionName + " :: Invalid 'services' member (member must be an array)");
+				}
+			}
+
+			// Add manufacturer data to the AdvertiseData
+			if (advertiseDataJSON.has("manufacturer")) {
+				JSONObject manufacturerObject = advertiseDataJSON.optJSONObject("manufacturer");
+				if (manufacturerObject != null) {
+
+					int id = manufacturerObject.optInt("id", -1);
+					if (id == -1) {
+						Log.i(LOG_TAG, functionName + " :: Invalid manufacturer 'id' member (should be a valid integer)");
+						return null;
+					}
+
+					String dataString = manufacturerObject.optString("data");
+					byte[] data = decodeBase64String(dataString, functionName);
+					if (data == null) {
+						Log.i(LOG_TAG, functionName + " :: Invalid manufacturer 'data' member (should be a valid base64 string)");
+						return null;
+					}
+
+					advertiseDataBuilder.addManufacturerData(id, data);
+				}
+				else {
+					Log.i(LOG_TAG, functionName + " :: Invalid 'manufacturerData' member (member must be a struct)");
+				}
+			} 
+
+			return advertiseDataBuilder.build();
+		}
+
+		private double queueAdvertiseStartTask(BluetoothLeAdvertiser bluetoothLeAdvertiser, AdvertiseSettings advertiseSettings, AdvertiseData advertiseData, AdvertiseCallback advertiseCallback, String functionName) {
+			int asyncId = asyncTokenGenerator.getAndIncrement();
+			return createTaskAndHandleQueue(advertiseStartTasks, () -> new BLEAdvertiseStartTask(bluetoothLeAdvertiser, advertiseSettings, advertiseData, advertiseCallback, functionName, asyncId));
+		}
+
+		// PUBLIC API
+
+		public double advertiseStartAsync(String settings, String data, String functionName) {
+
+			if (isAdvertising == true) return -1;
+
+			BluetoothLeAdvertiser bluetoothLeAdvertiser = getBluetoothLeAdvertiser(functionName);
+			if (bluetoothLeAdvertiser == null) return -1;
+
+			AdvertiseSettings advertiseSettings = null;
+			AdvertiseData advertiseData = null;
+			
+			try {
+				JSONObject settingsJSON = new JSONObject(settings);
+				advertiseSettings = createAdvertiseSettings(settingsJSON, functionName);
+			} catch (JSONException e) {
+				Log.e(LOG_TAG, functionName + " :: Invalid settings json string.", e);
+				return FALSE;
+			}
+			
+			try {
+				JSONObject dataJSON = new JSONObject(data);
+				advertiseData = createAdvertiseData(dataJSON, functionName);
+			} catch (JSONException e) {
+				Log.e(LOG_TAG, functionName + " :: Invalid data json string.", e);
+				return FALSE;
+			}
+
+			if (advertiseSettings == null || advertiseData == null) {
+				return -1;
+			}
+			
+			return queueAdvertiseStartTask(bluetoothLeAdvertiser, advertiseSettings, advertiseData, advertiseCallbackHandler, functionName);
+		}
+
+		public double advertiseStopAsync(String functionName) {
+
+			if (isAdvertising == false) return -1;
+
+			BluetoothLeAdvertiser bluetoothLeAdvertiser = getBluetoothLeAdvertiser(functionName);
+			if (bluetoothLeAdvertiser == null) return -1;
+
+			bluetoothLeAdvertiser.stopAdvertising(advertiseCallbackHandler);
+			isAdvertising = false;
+
+			int asyncId = asyncTokenGenerator.getAndIncrement();
+			notifyAsyncOperationSuccess(functionName, asyncId, null);
+			return (double)asyncId;
+		}
+
+		public double advertiseIsActive(String functionName) {
+			return isAdvertising ? TRUE : FALSE;
+		}
+	}
+
+	AdvertiseManager advertiseManager = new AdvertiseManager();
+
+	public double bt_le_advertise_start(String settings, String data) { 
+		return advertiseManager.advertiseStartAsync(settings, data, "bt_le_advertise_start");
+	}
+	
+	public double bt_le_advertise_stop() {
+		return advertiseManager.advertiseStopAsync("bt_le_advertise_stop");
+	}
+	
+	public double bt_le_advertise_is_active() { 
+		return advertiseManager.advertiseIsActive("bt_le_advertise_is_active");
+	}
+
+	// SERVER
+
+	private class BluetoothGattServerManager {
+
+		public BluetoothGattServer bluetoothGattServer = null;
+
+		// TASKS
+
+		private class BLEServiceAddTask extends BLEGattTask<BluetoothGattServer, BluetoothGattService> {
+		
+			public BLEServiceAddTask(BluetoothGattServer gattServer, BluetoothGattService service, String functionName, int asyncId) {
+				super(gattServer, service, functionName, asyncId);
+			}
+		
+			public int run() {
+				return gatt.addService(target) ? BluetoothStatusCodes.SUCCESS : ERROR_OPERATION_NOT_STARTED;
+			}
+		}
+
+		private class BLENotificationTask extends BLEGattDataTask<BluetoothGattServer, BluetoothDevice> {
+
+			BluetoothGattCharacteristic characteristic;
+		
+			public BLENotificationTask(BluetoothGattServer gattServer, BluetoothDevice device, BluetoothGattCharacteristic characteristic, byte[] data, String functionName, int asyncId) {
+				super(gattServer, device, data, functionName, asyncId);
+				this.characteristic = characteristic;
+			}
+		
+			public int run() {
+				if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+					return gatt.notifyCharacteristicChanged(target, characteristic, true, data);
+				} else {
+					characteristic.setValue(data);
+					return gatt.notifyCharacteristicChanged(target, characteristic, true) ? 0 : ERROR_OPERATION_NOT_STARTED;
+				}
+			}
+		}
+
+		public ConcurrentLinkedQueue<BLEServiceAddTask> serviceAddTasks = new ConcurrentLinkedQueue<>();
+		public ConcurrentLinkedQueue<BLENotificationTask> notificationTasks = new ConcurrentLinkedQueue<>();
+
+		// REQUEST RESPONSE
+
+		private class PendingRequestResponse {
+
+			public static final int READ = 0;
+			public static final int WRITE = 1;
+
+			BluetoothDevice device;
+			Integer type;
+			long timestamp;
+
+			public PendingRequestResponse(BluetoothDevice device, int type) {
+				this.device = device;
+				this.type = type;
+				this.timestamp = System.currentTimeMillis();
+			}
+		}
+
+		public ConcurrentHashMap<Integer, PendingRequestResponse> pendingRequestResponses = new ConcurrentHashMap<>();
+
+		// CALLBACK HANDLER
+
+		private class BluetoothGattServerCallbackHandler extends BluetoothGattServerCallback {
+
+			private BluetoothGattServerManager manager;
+
+			private JSONArray notifiedDevices = new JSONArray();
+
+			private void createPendingRequestResponse(int identifier, BluetoothDevice device, int type) {
+				manager.pendingRequestResponses.put(identifier, new PendingRequestResponse(device, type));
+			}
+
+			private void sendResponse(BluetoothDevice device, int requestId, int status, int offset, byte[] data) {
+				manager.bluetoothGattServer.sendResponse(device, requestId, status, offset, data);
+			}
+
+			public BluetoothGattServerCallbackHandler(BluetoothGattServerManager manager) {
+				this.manager = manager;
+			}
+
+			@Override
+			public void onCharacteristicReadRequest(BluetoothDevice device, int requestId, int offset, BluetoothGattCharacteristic characteristic) {
+				// Data offset (not supported)
+				if (offset != 0) {
+					sendResponse(device, requestId, BluetoothGatt.GATT_INVALID_OFFSET, offset, null);
+					return;
+				}
+
+				// Get properties
+				int properties = characteristic.getProperties();
+				if ((properties & BluetoothGattCharacteristic.PROPERTY_READ) == 0) {
+					sendResponse(device, requestId, BluetoothGatt.GATT_READ_NOT_PERMITTED, 0, null);
+					return;
+				}
+
+				// Get permissions
+				int permissions = characteristic.getPermissions();
+				if (((permissions & BluetoothGattCharacteristic.PERMISSION_READ_ENCRYPTED) != 0) && device.getBondState() == BluetoothDevice.BOND_NONE) {
+					sendResponse(device, requestId, BluetoothGatt.GATT_INSUFFICIENT_AUTHENTICATION, 0, null);
+					return;
+				}
+
+				// Publish the Async Event to the runner
+				notifyOperation("bt_le_server_characteristic_read_request", mapOf(
+					"request_id", requestId,
+					"service_uuid", characteristic.getService().getUuid().toString().toUpperCase(),
+					"characteristic_uuid", characteristic.getUuid().toString().toUpperCase()
+				));
+
+				createPendingRequestResponse(requestId, device, PendingRequestResponse.READ);
+			}
+
+			@Override
+			public void onCharacteristicWriteRequest(BluetoothDevice device, int requestId, BluetoothGattCharacteristic characteristic, boolean preparedWrite, boolean responseNeeded, int offset, byte[] value) {
+
+				// Data offset (not supported)
+				if (offset != 0) {
+					sendResponse(device, requestId, BluetoothGatt.GATT_INVALID_OFFSET, offset, null);
+					return;
+				}
+
+				// Write later (not supported)
+				if (preparedWrite) {
+					if (responseNeeded) {
+						sendResponse(device, requestId, BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED, 0, null);
+					}
+					return;
+				}
+
+				// Get properties
+				int properties = characteristic.getProperties();
+				if ((properties & BluetoothGattCharacteristic.PROPERTY_WRITE) == 0) {
+					sendResponse(device, requestId, BluetoothGatt.GATT_READ_NOT_PERMITTED, 0, null);
+					return;
+				}
+
+				// Get permissions
+				int permissions = characteristic.getPermissions();
+				if (((permissions & BluetoothGattCharacteristic.PERMISSION_WRITE_ENCRYPTED) != 0) && device.getBondState() == BluetoothDevice.BOND_NONE) {
+					sendResponse(device, requestId, BluetoothGatt.GATT_INSUFFICIENT_AUTHENTICATION, 0, null);
+					return;
+				}
+
+				// Publish the Async Event to the runner
+				String operationType;
+				Map<String, Object> extraParams = new HashMap<String,Object>();
+
+				if (responseNeeded) {
+					operationType = "bt_le_server_characteristic_write_request";
+					extraParams.put("request_id", requestId);
+
+					// If a response is required respond to the requesting device
+					createPendingRequestResponse(requestId, device, PendingRequestResponse.WRITE);
+				}
+				else {
+					operationType = "bt_le_server_characteristic_write_command";
+				}
+
+				extraParams.putAll(mapOf(
+					"service_uuid", characteristic.getService().getUuid().toString().toUpperCase(),
+					"characteristic_uuid", characteristic.getUuid().toString().toUpperCase(),
+					"value", value
+				));
+				notifyOperation(operationType, extraParams);
+			}
+
+			@Override
+			public void onConnectionStateChange(BluetoothDevice device, int status, int newState) {
+
+				notifyOperation("bt_le_server_connection_state_changed", mapOf(
+					"success", status == BluetoothGatt.GATT_SUCCESS,
+					"connected", newState == BluetoothProfile.STATE_CONNECTED,
+					"device", createBluetoothDeviceJson(device)
+				));
+			}
+
+			@Override
+			public void onDescriptorReadRequest(BluetoothDevice device, int requestId, int offset, BluetoothGattDescriptor descriptor) {
+
+				// Data offset (not supported)
+				if (offset != 0) {
+					sendResponse(device, requestId, BluetoothGatt.GATT_INVALID_OFFSET, offset, null);
+					return;
+				}
+
+				notifyOperation("bt_le_server_descriptor_read_request", mapOf(
+					"request_id", requestId,
+					"service_uuid", descriptor.getCharacteristic().getService().getUuid().toString().toUpperCase(),
+					"characteristic_uuid", descriptor.getCharacteristic().getUuid().toString().toUpperCase(),
+					"descriptor_uuid", descriptor.getUuid().toString().toUpperCase()
+				));
+
+				createPendingRequestResponse(requestId, device, PendingRequestResponse.READ);
+			}
+
+			@Override
+			public void onDescriptorWriteRequest(BluetoothDevice device, int requestId, BluetoothGattDescriptor descriptor, boolean preparedWrite, boolean responseNeeded, int offset, byte[] value) {
+
+				// Data offset (not supported)
+				if (offset != 0) {
+					sendResponse(device, requestId, BluetoothGatt.GATT_INVALID_OFFSET, offset, null);
+					return;
+				}
+
+				// Write later (not supported)
+				if (preparedWrite) {
+					if (responseNeeded) {
+						sendResponse(device, requestId, BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED, 0, null);
+					}
+					return;
+				}
+
+				// Get permissions
+				int permissions = descriptor.getPermissions();
+				if (((permissions & BluetoothGattDescriptor.PERMISSION_WRITE_ENCRYPTED) != 0) && device.getBondState() == BluetoothDevice.BOND_NONE) {
+					sendResponse(device, requestId, BluetoothGatt.GATT_INSUFFICIENT_AUTHENTICATION, 0, null);
+					return;
+				}
+
+				// Publish the Async Event to the runner
+				String operationType;
+				Map<String, Object> extraParams = new HashMap<String,Object>();
+
+				if (responseNeeded) {
+					operationType = "bt_le_server_descriptor_write_request";
+					extraParams.put("request_id", requestId);
+
+					// If a response is required respond to the requesting device
+					createPendingRequestResponse(requestId, device, PendingRequestResponse.WRITE);
+				}
+				else {
+					operationType = "bt_le_server_descriptor_write_command";
+				}
+
+				extraParams.putAll(mapOf(
+					"service_uuid", descriptor.getCharacteristic().getService().getUuid().toString().toUpperCase(),
+					"characteristic_uuid", descriptor.getCharacteristic().getUuid().toString().toUpperCase(),
+					"descriptor_uuid", descriptor.getUuid().toString().toUpperCase(),
+					"value", value
+				));
+				notifyOperation(operationType, extraParams);
+			}
+
+			@Override
+			public void onExecuteWrite(BluetoothDevice device, int requestId, boolean execute) {
+
+			}
+
+			@Override
+			public void onMtuChanged(BluetoothDevice device, int mtu) {
+			}
+
+			@Override
+			public void onNotificationSent(BluetoothDevice device, int status) {
+
+				QueueableTask queueableTask = manager.notificationTasks.remove();  // remove the completed operation from the queue
+
+				String functionName = queueableTask.functionName;
+				int asyncId = queueableTask.asyncId;
+
+				// Add device to list of notified devices
+				try {
+					JSONObject notifiedDevice = new JSONObject();
+					notifiedDevice.put("address", device.getAddress());
+					notifiedDevice.put("status", status);
+					notifiedDevices.put(notifiedDevice);
+				} catch (JSONException e) {
+					Log.e(LOG_TAG, "Failed to create notified bluetooth device JSON object", e);
+				}
+
+				// Notify success if this is the end of the asyncId group
+				queueableTask = manager.notificationTasks.peek();
+				if (queueableTask == null || queueableTask.asyncId != asyncId) {
+					notifyAsyncOperationSuccess(functionName, asyncId, mapOf(
+						"devices", notifiedDevices
+						));
+
+					// Clear data array
+					notifiedDevices = new JSONArray();
+				}
+
+				handleNextTask(manager.notificationTasks);
+			}
+
+			@Override
+			public void onPhyRead(BluetoothDevice device, int txPhy, int rxPhy, int status) {
+
+			}
+
+			@Override
+			public void onPhyUpdate(BluetoothDevice device, int txPhy, int rxPhy, int status) {
+
+			}
+
+			@Override
+			public void onServiceAdded(int status, BluetoothGattService service) {
+				handleTaskQueue(manager.serviceAddTasks, status, mapOf(
+					"service_uuid", service.getUuid()
+					));
+			}
+		}
+
+		private BluetoothGattServerCallbackHandler bluetoothGattServerCallbackHandler = new BluetoothGattServerCallbackHandler(this);
+
+		// INTERNAL
+
+		private static final long CLEANUP_INTERVAL_MS = 2000; // 2 second
+		private final Handler handler = new Handler();
+		
+		private final Runnable cleanupRunnable = this::executeCleanup;
+
+		private void executeCleanup() {
+			cleanupOldRequests();
+			handler.postDelayed(cleanupRunnable, CLEANUP_INTERVAL_MS);
+		}
+		
+		private void startCleanupTask() {
+			handler.postDelayed(cleanupRunnable, CLEANUP_INTERVAL_MS);
+		}
+		
+		private void stopCleanupTask() {
+			handler.removeCallbacks(cleanupRunnable);
+		}
+		
+		private void cleanupOldRequests() {
+			// Iterate through the map and remove old entries
+			long currentTime = System.currentTimeMillis();
+			for (Iterator<Map.Entry<Integer, PendingRequestResponse>> it = pendingRequestResponses.entrySet().iterator(); it.hasNext(); ) {
+				Map.Entry<Integer, PendingRequestResponse> entry = it.next();
+				if (currentTime - entry.getValue().timestamp > 10000) {
+					it.remove();
+				}
+			}
+		}
+
+		private BluetoothGattService getBluetoothGattService(BluetoothGattServer gattServer, String service, String functionName) {
+			
+			UUID serviceUUID = getUUIDFromString(service, functionName);
+			if (serviceUUID == null) return null;
+
+			BluetoothGattService gattService = gattServer.getService(serviceUUID);
+			if (gattService == null) {
+				Log.i(LOG_TAG, functionName + " :: Service with uuid '" + service + "' not found.");
+			}		
+
+			return gattService;
+		}
+
+		private BluetoothGattCharacteristic getBluetoothGattCharateristic(BluetoothGattServer gattServer, String service, String characteristic, String functionName) {
+
+			BluetoothGattService gattService = getBluetoothGattService(gattServer, service, functionName);
+			if (gattService == null) return null;
+
+			UUID characteristicUUID = getUUIDFromString(characteristic, functionName);
+			if (characteristicUUID == null) return null;
+
+			BluetoothGattCharacteristic gattCharacteristic = gattService.getCharacteristic(characteristicUUID);
+			if (gattCharacteristic == null) {
+				Log.i(LOG_TAG, functionName + " :: Characteristic with uuid '" + characteristic + "' not found.");
+			}
+		
+			return gattCharacteristic;
+		}
+
+		private BluetoothGattDescriptor getBluetoothGattDescriptor(BluetoothGattServer gattServer, String service, String characteristic, String descriptor, String functionName) {
+
+			BluetoothGattCharacteristic gattCharacteristic = getBluetoothGattCharateristic(gattServer, service, characteristic, functionName);
+			if (gattCharacteristic == null) return null;
+
+			UUID descriptorUUID = getUUIDFromString(descriptor, functionName);
+			if (descriptorUUID == null) return null;
+
+			BluetoothGattDescriptor gattDescriptor = gattCharacteristic.getDescriptor(descriptorUUID);
+			if (gattDescriptor == null) {
+				Log.i(LOG_TAG, functionName + " :: Descriptor with uuid '" + descriptor + "' not found.");
+			}
+
+			return gattDescriptor;
+		}
+
+		private BluetoothGattDescriptor createGattDescriptor(JSONObject gattDescriptorJSON, String functionName) throws Exception {
+
+			String uuidString = gattDescriptorJSON.optString("uuid");
+			UUID uuid = getUUIDFromString(uuidString, functionName);
+
+			if (uuid == null) {
+				throw new Exception("Invalid descriptor uuid: '" + uuidString + "'.");
+			}
+
+			int permissions = gattDescriptorJSON.optInt("permissions", 0);
+
+			return new BluetoothGattDescriptor(uuid, permissions);
+		}
+
+		private BluetoothGattCharacteristic createGattCharacteristic(JSONObject gattCharacteristicJSON, String functionName) throws Exception {
+
+			String uuidString = gattCharacteristicJSON.optString("uuid");
+			UUID uuid = getUUIDFromString(uuidString, functionName);
+
+			if (uuid == null) {
+				throw new Exception("Invalid characteristic uuid: '" + uuidString + "'.");
+			}
+			int properties = gattCharacteristicJSON.optInt("properties", 0);
+			int permissions = gattCharacteristicJSON.optInt("permissions", 0);
+
+			Log.e(LOG_TAG, "Properties: " + properties + ", permissions: " + permissions);
+
+			BluetoothGattCharacteristic gattCharacteristic = new BluetoothGattCharacteristic(uuid, properties, permissions);
+
+			JSONArray descriptors = gattCharacteristicJSON.optJSONArray("descriptors");
+			if (descriptors != null) {
+				for (int i = 0; i < descriptors.length(); i++) {
+					JSONObject descriptorData = descriptors.optJSONObject(i);
+					if (descriptorData == null) {
+						throw new Exception("Invalid descriptor structure (a descriptor must be a struct).");
+					}
+					Log.e(LOG_TAG, "Creating GattDescriptor");
+					gattCharacteristic.addDescriptor(createGattDescriptor(descriptorData, functionName));
+				}
+			}
+
+			if (((properties & BluetoothGattCharacteristic.PROPERTY_NOTIFY) | (properties & BluetoothGattCharacteristic.PROPERTY_INDICATE)) != 0) {
+				permissions = BluetoothGattDescriptor.PERMISSION_READ | BluetoothGattDescriptor.PERMISSION_WRITE;
+				gattCharacteristic.addDescriptor(new BluetoothGattDescriptor(CCCD_UUID, permissions));
+			}
+
+			return gattCharacteristic;
+		}
+
+		private BluetoothGattService createGattService(JSONObject gattServiceJSON, String functionName) throws Exception {
+
+			String uuidString = gattServiceJSON.optString("uuid");
+			UUID uuid = getUUIDFromString(uuidString, functionName);
+
+			if (uuid == null) {
+				throw new Exception("Invalid service uuid: '" + uuidString + "'.");
+			}
+
+			BluetoothGattService gattService = new BluetoothGattService(uuid, BluetoothGattService.SERVICE_TYPE_PRIMARY);
+
+			JSONArray characteristics = gattServiceJSON.optJSONArray("characteristics");
+			if (characteristics != null) {
+				for (int i = 0; i < characteristics.length(); i++) {
+					JSONObject characteristicData = characteristics.optJSONObject(i);
+					if (characteristicData == null) {
+						throw new Exception("Invalid characteristic structure (a characteristic must be a struct).");
+					}
+					Log.e(LOG_TAG, "Creating GattCharacteristic");
+					gattService.addCharacteristic(createGattCharacteristic(characteristicData, functionName));
+				}
+			}
+
+			return gattService;
+		}
+
+		private double queueServiceAddTask(BluetoothGattServer bluetoothGattServer, BluetoothGattService bluetoothGattService, String functionName) {
+			int asyncId = asyncTokenGenerator.getAndIncrement();
+			return createTaskAndHandleQueue(serviceAddTasks, () -> new BLEServiceAddTask(bluetoothGattServer, bluetoothGattService, functionName, asyncId));
+		}
+
+		// PUBLIC API
+
+		public double gattServerOpenAsync(String functionName) {
+			if (bluetoothGattServer != null) return -1;
+
+			startCleanupTask();
+
+			bluetoothGattServer = bluetoothManager.openGattServer(activity, bluetoothGattServerCallbackHandler);
+			
+			int asyncId = asyncTokenGenerator.getAndIncrement();
+			notifyAsyncOperationSuccess(functionName, asyncId, null);
+			return (double) asyncId;
+		}
+
+		public double gattServerAddServiceAsync(String data, String functionName) {
+			if (bluetoothGattServer == null) return -1;
+
+			JSONObject serviceData = null;
+			try {
+				serviceData = new JSONObject(data);
+			} catch (Exception e) {
+				Log.e(LOG_TAG, functionName + " :: Error parsing service structure.");
+				return -1;
+			}
+
+			BluetoothGattService bluetoothGattService;
+			try {
+				Log.e(LOG_TAG, "Creating GattService");
+				bluetoothGattService = createGattService(serviceData, functionName);
+			} catch (Exception e) {
+				Log.e(LOG_TAG, functionName + " :: " + e.getMessage());
+				return -1;
+			}
+
+			return queueServiceAddTask(bluetoothGattServer, bluetoothGattService, functionName);
+		}
+
+		public double gattServerClearServices(String functionName) {
+			if (bluetoothGattServer == null) return FALSE;
+			bluetoothGattServer.clearServices();
+			return TRUE;
+		}
+
+		public double gattServerCloseAsync(String functionName) {
+			if (bluetoothGattServer == null) return -1;
+
+			bluetoothGattServer.close();
+			bluetoothGattServer.clearServices();
+			bluetoothGattServer = null;
+
+			pendingRequestResponses.clear();
+			stopCleanupTask();
+			
+			int asyncId = asyncTokenGenerator.getAndIncrement();
+			notifyAsyncOperationSuccess(functionName, asyncId, null);
+			return (double) asyncId;
+		}
+
+		public double gattServerRespondRead(int requestId, int status, String value, String functionName) {
+			if (bluetoothGattServer == null) return FALSE;
+
+			PendingRequestResponse pendingRequestResponse = pendingRequestResponses.get(requestId);
+			if (pendingRequestResponse == null) return FALSE;
+
+			if (pendingRequestResponse.type == PendingRequestResponse.WRITE) return FALSE;
+
+			pendingRequestResponses.remove(requestId);
+
+			byte[] data = null;
+			
+			// If the status is not valid (send null value)
+			if (status == BluetoothGatt.GATT_SUCCESS) {
+				data = decodeBase64String(value, functionName);
+			}
+
+			return bluetoothGattServer.sendResponse(pendingRequestResponse.device, requestId, status, 0, data) ? TRUE : FALSE;
+		}
+
+		public double gattServerRespondWrite(int requestId, int status, String functionName) {
+			if (bluetoothGattServer == null) return FALSE;
+
+			PendingRequestResponse pendingRequestResponse = pendingRequestResponses.get(requestId);
+			if (pendingRequestResponse == null) return FALSE;
+
+			if (pendingRequestResponse.type == PendingRequestResponse.READ) return FALSE;
+
+			pendingRequestResponses.remove(requestId);
+
+			return bluetoothGattServer.sendResponse(pendingRequestResponse.device, requestId, status, 0, null) ? TRUE : FALSE;
+		}
+
+		public double gattServerNotifyValueAsync(String service, String characteristic, String value, String functionName) {
+
+			if (bluetoothGattServer == null) return -1;
+
+			BluetoothGattCharacteristic gattCharacteristic = getBluetoothGattCharateristic(bluetoothGattServer, service, characteristic, functionName);
+			if (gattCharacteristic == null) return -1;
+
+			byte[] data = decodeBase64String(value, functionName);
+			if (data == null) return -1;
+
+			// Generate a new async identifier
+			int asyncId = asyncTokenGenerator.getAndIncrement();
+
+			// Notify subscribed devices of the change (TODO)
+			for (BluetoothDevice connectedDevice : bluetoothManager.getConnectedDevices(BluetoothProfile.GATT_SERVER)) {
+				createTaskAndHandleQueue(notificationTasks, () ->
+					new BLENotificationTask(bluetoothGattServer, connectedDevice, gattCharacteristic, data, functionName, asyncId)
+				);
+			}
+
+			return asyncId;
+		}
+
+	}
+
+	BluetoothGattServerManager bluetoothGattServerManager = new BluetoothGattServerManager();
+
+	public double bt_le_server_open() {
+		return bluetoothGattServerManager.gattServerOpenAsync("bt_le_server_open");
+	}
+
+	public double bt_le_server_add_service(String data) {
+		return bluetoothGattServerManager.gattServerAddServiceAsync(data, "bt_le_server_add_service");
+	}
+
+	public double bt_le_server_clear_services() {
+		return bluetoothGattServerManager.gattServerClearServices("bt_le_server_clear_services");
+	}
+
+	public double bt_le_server_close() {
+		return bluetoothGattServerManager.gattServerCloseAsync("bt_le_server_close");
+	}
+
+	public double bt_le_server_respond_read(double requestId, double status, String value) { 
+		return bluetoothGattServerManager.gattServerRespondRead((int)requestId, (int)status, value, "bt_le_server_respond_read");
+	}
+
+	public double bt_le_server_respond_write(double requestId, double status) { 
+		return bluetoothGattServerManager.gattServerRespondWrite((int)requestId, (int)status, "bt_le_server_respond_write");
+	}
+
+	public double bt_le_server_notify_value(String service, String characteristic, String value) {
+		return bluetoothGattServerManager.gattServerNotifyValueAsync(service, characteristic, value, "bt_le_server_notify_value");
+	}
+
+	// CLIENT
+
+	private class BluetoothGattManager {
+
+		public ConcurrentHashMap<String, BluetoothGatt> activeGattConnections = new ConcurrentHashMap<>();
+
+		// TASKS
+
+		private class BLECharacteristicReadTask extends BLEGattTask<BluetoothGatt, BluetoothGattCharacteristic> {
+
+			public BLECharacteristicReadTask(BluetoothGatt gatt, BluetoothGattCharacteristic target, String functionName, int asyncId) {
+				super(gatt, target, functionName, asyncId);
+			}
+
+			public int run() {
+				return gatt.readCharacteristic(target) ? BluetoothStatusCodes.SUCCESS : ERROR_OPERATION_NOT_STARTED;
+			}
+		}
+
+		private class BLECharacteristicWriteTask extends BLEGattDataTask<BluetoothGatt, BluetoothGattCharacteristic> {
+
+			int writeType;
+
+			public BLECharacteristicWriteTask(BluetoothGatt gatt, BluetoothGattCharacteristic target, byte[] data, int writeType, String functionName, int asyncId) {
+				super(gatt, target, data, functionName, asyncId);
+				this.writeType = writeType;
+			}
+
+			public int run() {
+				return setCharacteristicValue(gatt, target, data, writeType);
+			}
+		}
+
+		private class BLEDescriptorReadTask extends BLEGattTask<BluetoothGatt, BluetoothGattDescriptor> {
+
+			public BLEDescriptorReadTask(BluetoothGatt gatt, BluetoothGattDescriptor target, String functionName, int asyncId) {
+				super(gatt, target, functionName, asyncId);
+			}
+
+			public int run() {
+				return gatt.readDescriptor(target) ? BluetoothStatusCodes.SUCCESS : ERROR_OPERATION_NOT_STARTED;
+			}
+		}
+
+		private class BLEDescriptorWriteTask extends BLEGattDataTask<BluetoothGatt, BluetoothGattDescriptor> {
+
+			public BLEDescriptorWriteTask(BluetoothGatt gatt, BluetoothGattDescriptor target, byte[] data, String functionName, int asyncId) {
+				super(gatt, target, data, functionName, asyncId);
+			}
+
+			public int run() {
+				return setDescriptorValue(gatt, target, data);
+			}
+		}
+
+		private class BLEGattOpenTask extends BLEGattTask<BluetoothGatt, BluetoothDevice> {
+
+			BluetoothGattCallback bluetoothGattCallback;
+
+			public BLEGattOpenTask(BluetoothDevice device, BluetoothGattCallback bluetoothGattCallback, String functionName, int asyncId) {
+				super(null, device, functionName, asyncId);
+				this.bluetoothGattCallback = bluetoothGattCallback;
+			}
+
+			public int run() {
+				gatt = target.connectGatt(activity, false, bluetoothGattCallback, BluetoothDevice.TRANSPORT_LE);
+				return BluetoothStatusCodes.SUCCESS;
+			}
+		}
+
+		// TASK QUEUES
+
+		public ConcurrentLinkedQueue<BLECharacteristicReadTask> characteristicReadTasks = new ConcurrentLinkedQueue<>();
+		public ConcurrentLinkedQueue<BLECharacteristicWriteTask> characteristicWriteTasks = new ConcurrentLinkedQueue<>(); 
+
+		public ConcurrentLinkedQueue<BLEDescriptorReadTask> descriptorReadTasks = new ConcurrentLinkedQueue<>();
+		public ConcurrentLinkedQueue<BLEDescriptorWriteTask> descriptorWriteTasks = new ConcurrentLinkedQueue<>();
+
+		public ConcurrentLinkedQueue<BLEGattOpenTask> gattOpenTasks = new ConcurrentLinkedQueue<>();
+
+		// CALLBACK HANDLER
+
+		private class BluetoothGattCallbackHandler extends BluetoothGattCallback {
+
+			BluetoothGattManager gattManager;
+
+			public BluetoothGattCallbackHandler(BluetoothGattManager gattManager) {
+				this.gattManager = gattManager;
+			}
+
+			// For API < 33
+			@Override
+			public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
+				
+				notifyOperation("bt_le_characteristic_value_changed", mapOf(
+					"characteristic_uuid", characteristic.getUuid(),
+					"service_uuid", characteristic.getService().getUuid(),
+					"address", gatt.getDevice().getAddress(),
+					"value", characteristic.getValue()
+				));
+			}
+
+			// For API >= 33
+			@Override
+			public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, byte[] value) {
+				
+				notifyOperation("bt_le_characteristic_value_changed", mapOf(
+					"characteristic_uuid", characteristic.getUuid(),
+					"service_uuid", characteristic.getService().getUuid(),
+					"address", gatt.getDevice().getAddress(),
+					"value", value
+				));
+			}
+
+			// For API < 33
+			@Override
+			public void onCharacteristicRead (BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+				handleTaskQueue(gattManager.characteristicReadTasks, status, mapOf(
+					"value", characteristic.getValue()
+					));
+
+			}
+
+			// For API >= 33 (TIRAMISU)
+			@Override
+			public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, byte[] value, int status) {
+				handleTaskQueue(gattManager.characteristicReadTasks, status, mapOf(
+					"value", value
+					));
+			}
+
+			@Override
+			public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+				handleTaskQueue(gattManager.characteristicWriteTasks, status, null);
+			}
+
+			@Override
+			public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
+				
+				BluetoothDevice device = gatt.getDevice();
+
+				// Publish the Async Event to the runner
+				notifyOperation("bt_le_peripheral_connection_state_changed", mapOf(
+					"is_connected", newState == BluetoothProfile.STATE_CONNECTED,
+					"is_paired", device.getBondState() == BluetoothDevice.BOND_BONDED,
+					"address", device.getAddress(),
+					"name", device.getName() != null ? device.getName() : "" // Optional
+				));
+
+				BLEGattTask<BluetoothGatt, BluetoothDevice> openTask = gattManager.gattOpenTasks.peek();
+				if (openTask == null) return;
+
+				// Check if it is an openTask
+				if (openTask.gatt.getDevice().getAddress().equals(gatt.getDevice().getAddress())) {
+					
+					// Start discovery
+					if (newState == BluetoothProfile.STATE_CONNECTED) {
+						gatt.discoverServices();
+					}
+					else {
+						gatt.close();
+
+						BLEGattOpenTask task = gattOpenTasks.remove();
+						notifyAsyncOperationError(task.functionName, task.asyncId, status, null);
+						
+						// Start next one
+						handleNextTask(gattOpenTasks);
+					}
+				}
+			}
+			
+			// For API < 33
+			@Override
+			public void onDescriptorRead (BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {
+				handleTaskQueue(gattManager.descriptorReadTasks, status, mapOf(
+					"value", descriptor.getValue()
+					));
+			}
+
+			// For API >= 33
+			@Override
+			public void onDescriptorRead(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status, byte[] value) {
+				handleTaskQueue(gattManager.descriptorReadTasks, status, mapOf(
+					"value", value
+					));
+			}
+
+			@Override
+			public void onDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {
+				handleTaskQueue(gattManager.descriptorWriteTasks, status, null);
+			}
+
+			@Override
+			public void onMtuChanged(BluetoothGatt gatt, int mtu, int status) {
+
+				// Windows doesn't have this information
+			}
+
+			@Override
+			public void onPhyRead(BluetoothGatt gatt, int txPhy, int rxPhy, int status) {
+
+				// Windows doesn't have this information
+			}
+
+			@Override
+			public void onPhyUpdate(BluetoothGatt gatt, int txPhy, int rxPhy, int status) {
+				
+				// Windows doesn't have this information
+			}
+
+			@Override
+			public void onReadRemoteRssi(BluetoothGatt gatt, int rssi, int status) {
+
+				// Windows doesn't have this information
+			}
+
+			@Override
+			public void onReliableWriteCompleted(BluetoothGatt gatt, int status) {
+
+				// We don't support reliable writes
+			}
+
+			@Override
+			public void onServiceChanged(BluetoothGatt gatt) {
+
+				BluetoothDevice device = gatt.getDevice();
+
+				// Publish the Async Event to the runner
+				notifyOperation("bt_le_peripheral_service_changed", mapOf(
+					"address", device.getAddress(),
+					"name", device.getName()
+				));
+			}
+
+			@Override
+			public void onServicesDiscovered(BluetoothGatt gatt, int status) {
+				
+				if (status == BluetoothGatt.GATT_SUCCESS) {
+					gattManager.activeGattConnections.put(gatt.getDevice().getAddress(), gatt);
+				}
+				else gatt.close();
+
+				BluetoothDevice device = gatt.getDevice();
+
+				handleTaskQueue(gattManager.gattOpenTasks, status, mapOf(
+								"is_paired", device.getBondState() == BluetoothDevice.BOND_BONDED,
+								"address", device.getAddress(),
+								"name", device.getName() != null ? device.getName() : "" // Optional
+							));
+			}
+		}
+
+		private BluetoothGattCallbackHandler bluetoothGattCallbackHandler = new BluetoothGattCallbackHandler(this);
+
+		// INTERNAL
+
+		private int setCharacteristicValue(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, byte[] value, int writeType) {
+			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+				return gatt.writeCharacteristic(characteristic, value, writeType);
+			} else {
+				characteristic.setValue(value);
+				return gatt.writeCharacteristic(characteristic) ? BluetoothStatusCodes.SUCCESS : BluetoothStatusCodes.ERROR_UNKNOWN;
+			}
+		}
+	
+		private int setDescriptorValue(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, byte[] value) {
+			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+				return gatt.writeDescriptor(descriptor, value);
+			} else {
+				descriptor.setValue(value);
+				return gatt.writeDescriptor(descriptor) ? BluetoothStatusCodes.SUCCESS : BluetoothStatusCodes.ERROR_UNKNOWN;
+			}
+		}
+
+		private BluetoothGatt getBluetoothGatt(String address, String functionName) {
+
+
+
+			BluetoothGatt gatt = activeGattConnections.get(address);
+			if (gatt == null) {
+				Log.i(LOG_TAG, functionName + " :: Gatt with address '" + address + "' not found.");
+			}
+			return gatt;
+		}
+
+		private BluetoothGattService getBluetoothGattService(BluetoothGatt gatt, String service, String functionName) {
+			
+			UUID serviceUUID = getUUIDFromString(service, functionName);
+			if (serviceUUID == null) return null;
+
+			BluetoothGattService gattService = gatt.getService(serviceUUID);
+			if (gattService == null) {
+				Log.i(LOG_TAG, functionName + " :: Service with uuid '" + service + "' not found.");
+			}		
+
+			return gattService;
+		}
+
+		private BluetoothGattCharacteristic getBluetoothGattCharateristic(BluetoothGatt gatt, String service, String characteristic, String functionName) {
+
+			BluetoothGattService gattService = getBluetoothGattService(gatt, service, functionName);
+			if (gattService == null) return null;
+
+			UUID characteristicUUID = getUUIDFromString(characteristic, functionName);
+			if (characteristicUUID == null) return null;
+
+			BluetoothGattCharacteristic gattCharacteristic = gattService.getCharacteristic(characteristicUUID);
+			if (gattCharacteristic == null) {
+				Log.i(LOG_TAG, functionName + " :: Characteristic with uuid '" + characteristic + "' not found.");
+			}
+		
+			return gattCharacteristic;
+		}
+
+		private BluetoothGattDescriptor getBluetoothGattDescriptor(BluetoothGatt gatt, String service, String characteristic, String descriptor, String functionName) {
+
+			BluetoothGattCharacteristic gattCharacteristic = getBluetoothGattCharateristic(gatt, service, characteristic, functionName);
+			if (gattCharacteristic == null) return null;
+
+			UUID descriptorUUID = getUUIDFromString(descriptor, functionName);
+			if (descriptorUUID == null) return null;
+
+			BluetoothGattDescriptor gattDescriptor = gattCharacteristic.getDescriptor(descriptorUUID);
+			if (gattDescriptor == null) {
+				Log.i(LOG_TAG, functionName + " :: Descriptor with uuid '" + descriptor + "' not found.");
+			}
+
+			return gattDescriptor;
+		}
+
+		private double queueGattOpenTask(BluetoothDevice device, String functionName) {
+			int asyncId = asyncTokenGenerator.getAndIncrement();
+			createTaskAndHandleQueue(gattOpenTasks, () -> new BLEGattOpenTask(device, bluetoothGattCallbackHandler, functionName, asyncId));
+			return asyncId;
+		}
+
+		private double queueCharacteristicReadTask(BluetoothGatt gatt, BluetoothGattCharacteristic gattCharacteristic, String functionName) {
+			int asyncId = asyncTokenGenerator.getAndIncrement();
+			createTaskAndHandleQueue(characteristicReadTasks, () -> new BLECharacteristicReadTask(gatt, gattCharacteristic, functionName, asyncId));
+			return asyncId;
+		}
+
+		private double queueCharacteristicWriteTask(BluetoothGatt gatt, BluetoothGattCharacteristic gattCharacteristic, byte[] data, int writeType, String functionName) {
+			int asyncId = asyncTokenGenerator.getAndIncrement();
+			createTaskAndHandleQueue(characteristicWriteTasks, () -> new BLECharacteristicWriteTask(gatt, gattCharacteristic, data, writeType, functionName, asyncId));
+			return asyncId;
+		}
+
+		private double queueDescriptorReadTask(BluetoothGatt gatt, BluetoothGattDescriptor gattDescriptor, String functionName) {
+			int asyncId = asyncTokenGenerator.getAndIncrement();
+			createTaskAndHandleQueue(descriptorReadTasks, () -> new BLEDescriptorReadTask(gatt, gattDescriptor, functionName, asyncId));
+			return asyncId;
+		}
+
+		private double queueDescriptorWriteTask(BluetoothGatt gatt, BluetoothGattDescriptor gattDescriptor, byte[] data, String functionName) {
+			int asyncId = asyncTokenGenerator.getAndIncrement();
+			createTaskAndHandleQueue(descriptorWriteTasks, () -> new BLEDescriptorWriteTask(gatt, gattDescriptor, data, functionName, asyncId));
+			return asyncId;
+		}
+
+		// PUBLIC API
+
+		public double characteristicReadAsync(String address, String service, String characteristic, String functionName) {
+			BluetoothGatt gatt = getBluetoothGatt(address, functionName);
+			if (gatt == null) return -1;
+
+			BluetoothGattCharacteristic gattCharacteristic = getBluetoothGattCharateristic(gatt, service, characteristic, functionName);
+			if (gattCharacteristic == null) return -1;
+
+			return queueCharacteristicReadTask(gatt, gattCharacteristic, functionName);
+		}
+
+		public double characteristicWriteAsync(String address, String service, String characteristic, String value, int writeType, String functionName) {
+
+			BluetoothGatt gatt = getBluetoothGatt(address, functionName);
+			if (gatt == null) return -1;
+
+			BluetoothGattCharacteristic gattCharacteristic = getBluetoothGattCharateristic(gatt, service, characteristic, functionName);
+			if (gattCharacteristic == null) return -1;
+
+			byte[] data = decodeBase64String(value, functionName);
+			if (data == null) return -1;
+
+			return queueCharacteristicWriteTask(gatt, gattCharacteristic, data, writeType, functionName);
+		}
+
+		public double characteristicSubscribeAsync(String address, String service, String characteristic, byte[] data, String functionName) {
+
+			BluetoothGatt gatt = getBluetoothGatt(address, functionName);
+			if (gatt == null) return -1;
+
+			BluetoothGattCharacteristic gattCharacteristic = getBluetoothGattCharateristic(gatt, service, characteristic, functionName);
+			if (gattCharacteristic == null) return -1;
+
+			BluetoothGattDescriptor gattDescriptor = gattCharacteristic.getDescriptor(CCCD_UUID);
+			if (gattDescriptor == null) return -1;
+
+			// Enable local notifications (if not a disable action)
+			gatt.setCharacteristicNotification(gattCharacteristic, !Arrays.equals(data, BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE));
+
+			return queueDescriptorWriteTask(gatt, gattDescriptor, data, functionName);
+		}
+
+		public double descriptorReadAsync(String address, String service, String characteristic, String descriptor, String functionName) {
+
+			BluetoothGatt gatt = getBluetoothGatt(address, functionName);
+			if (gatt == null) return -1;
+
+			BluetoothGattDescriptor gattDescriptor = getBluetoothGattDescriptor(gatt, service, characteristic, descriptor, functionName);
+			if (gattDescriptor == null) return -1;
+
+			return queueDescriptorReadTask(gatt, gattDescriptor, functionName);
+		}
+
+		public double descriptorWriteAsync(String address, String service, String characteristic, String descriptor, String value, String functionName) {
+
+			BluetoothGatt gatt = getBluetoothGatt(address, functionName);
+			if (gatt == null) return -1;
+
+			BluetoothGattDescriptor gattDescriptor = getBluetoothGattDescriptor(gatt, service, characteristic, descriptor, functionName);
+			if (gattDescriptor == null) return -1;
+
+			byte[] data = decodeBase64String(value, functionName);
+			if (data == null) return -1;
+
+			return queueDescriptorWriteTask(gatt, gattDescriptor, data, functionName);
+		}
+
+		public double getServicesAsync(String address, String functionName) {
+
+			BluetoothGatt gatt = getBluetoothGatt(address, functionName);
+			if (gatt == null) return -1;
+
+			List<BluetoothGattService> services = gatt.getServices();
+			JSONArray servicesJSONArray = createServicesJsonArray(services);
+
+			int asyncId = asyncTokenGenerator.getAndIncrement();
+			notifyAsyncOperationSuccess(functionName, asyncId, mapOf("services", servicesJSONArray.toString()));
+			return (double)asyncId;
+		}
+
+		public double getCharacteristicsAsync(String address, String service, String functionName) {
+
+			BluetoothGatt gatt = getBluetoothGatt(address, functionName);
+			if (gatt == null) return -1;
+
+			BluetoothGattService gattService = getBluetoothGattService(gatt, service, functionName);
+			if (gattService == null) return -1;
+
+			List<BluetoothGattCharacteristic> characteristics = gattService.getCharacteristics();
+			JSONArray characteristicsJSONArray = createCharacteristicsJsonArray(characteristics);
+
+			int asyncId = asyncTokenGenerator.getAndIncrement();
+			notifyAsyncOperationSuccess(functionName, asyncId, mapOf("characteristics", characteristicsJSONArray));
+			return (double)asyncId;
+		}
+
+		public double getDescriptorsAsync(String address, String service, String characteristic, String functionName) {
+
+			BluetoothGatt gatt = getBluetoothGatt(address, functionName);
+			if (gatt == null) return -1;
+
+			BluetoothGattCharacteristic gattCharacteristic = getBluetoothGattCharateristic(gatt, service, characteristic, functionName);
+			if (gattCharacteristic == null) return -1;
+
+			List<BluetoothGattDescriptor> descriptors = gattCharacteristic.getDescriptors();
+			JSONArray descriptorsJSONArray = createDescriptorJsonArray(descriptors);
+
+			int asyncId = asyncTokenGenerator.getAndIncrement();
+			notifyAsyncOperationSuccess(functionName, asyncId, mapOf("descriptors", descriptorsJSONArray));
+			return (double)asyncId;
+		}
+
+		public double gattOpenAsync(String address, String functionName) {
+
+			if (activeGattConnections.containsKey(address)) return -1;
+
+			BluetoothDevice device = getBluetoothDevice(address,  functionName);
+			if (device == null) return -1;
+
+			return queueGattOpenTask(device, functionName);
+		}
+
+		public double gattIsOpen(String address) {
+			return activeGattConnections.containsKey(address) ? TRUE : FALSE;
+		}
+
+		public double gattClose(String address, String functionName) {
+
+			BluetoothGatt gatt = getBluetoothGatt(address, functionName);
+			if (gatt == null) return FALSE;
+
+			gatt.close();
+			activeGattConnections.remove(address);
+			return TRUE;
+		}
+
+		public double gattCloseAll() {
+			for (BluetoothGatt gatt : activeGattConnections.values()) {
+				gatt.close();
+			}
+			activeGattConnections.clear();
+			return TRUE;
+		}
+
+	}
+
+	private BluetoothGattManager bluetoothGattManager = new BluetoothGattManager();
+	
+	public double bt_le_peripheral_open(String address) {
+		return bluetoothGattManager.gattOpenAsync(address, "bt_le_peripheral_open");
+	}
+
+	public double bt_le_peripheral_is_open(String address) {
+		return bluetoothGattManager.gattIsOpen(address);
+	}
+
+	public double bt_le_peripheral_close_all() {
+		return bluetoothGattManager.gattCloseAll();
+	}
+	
+	public double bt_le_peripheral_close(String address) {
+		return bluetoothGattManager.gattClose(address, "bt_le_peripheral_close");
+	}
+
+	public double bt_le_peripheral_is_connected(String address) {
+		List<BluetoothDevice> devices = bluetoothManager.getConnectedDevices(BluetoothProfile.GATT);
+
+		for (BluetoothDevice device : devices) {
+			if (device.getAddress().equals(address)) {
+				return TRUE;
+			}
+		}
+		return FALSE;
+	}
+	
+	public double bt_le_peripheral_is_paired(String address) {
+		BluetoothAdapter bluetoothAdapter = getBluetoothAdapter("bt_le_peripheral_is_paired");
+		BluetoothDevice device = bluetoothAdapter.getRemoteDevice(address);
+
+		return device.getBondState() == BluetoothDevice.BOND_BONDED ? TRUE : FALSE;
+	}
+	
+	public double bt_le_peripheral_get_services(String address) {
+		return bluetoothGattManager.getServicesAsync(address, "bt_le_peripheral_get_services");
+	}
+
+	public double bt_le_service_get_characteristics(String address, String service) {
+		return bluetoothGattManager.getCharacteristicsAsync(address, service, "bt_le_service_get_characteristics");
+	}
+
+	public double bt_le_characteristic_get_descriptors(String address, String service, String characteristic) {
+		return bluetoothGattManager.getDescriptorsAsync(address, service, characteristic, "bt_le_characteristic_get_descriptors");
+	}
+	
+	public double bt_le_characteristic_read(String address, String service, String characteristic) {
+		return bluetoothGattManager.characteristicReadAsync(address, service, characteristic, "bt_le_characteristic_read");
+	}
+
+	public double bt_le_characteristic_write_request(String address, String service, String characteristic, String value) {
+		return bluetoothGattManager.characteristicWriteAsync(address, service, characteristic, value, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT, "bt_le_characteristic_write_request");
+	}
+
+	public double bt_le_characteristic_write_command(String address, String service, String characteristic, String value) {
+		return bluetoothGattManager.characteristicWriteAsync(address, service, characteristic, value, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE, "bt_le_characteristic_write_command");
+	}
+
+	public double bt_le_characteristic_notify(String address, String service, String characteristic) {
+		return bluetoothGattManager.characteristicSubscribeAsync(address, service, characteristic, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE, "bt_le_characteristic_notify");
+	}
+
+	public double bt_le_characteristic_indicate(String address, String service, String characteristic) {
+		return bluetoothGattManager.characteristicSubscribeAsync(address, service, characteristic, BluetoothGattDescriptor.ENABLE_INDICATION_VALUE, "bt_le_characteristic_indicate");
+	}
+
+	public double bt_le_characteristic_unsubscribe(String address, String service, String characteristic) {
+		return bluetoothGattManager.characteristicSubscribeAsync(address, service, characteristic, BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE, "bt_le_characteristic_unsubscribe");
+	}
+
+	public double bt_le_descriptor_read(String address, String service, String characteristic, String descriptor) {
+		return bluetoothGattManager.descriptorReadAsync(address, service, characteristic, descriptor, "bt_le_descriptor_read");
+	}
+
+	public double bt_le_descriptor_write(String address, String service, String characteristic, String descriptor, String value) {
+		return bluetoothGattManager.descriptorWriteAsync(address, service, characteristic, descriptor, value, "bt_le_descriptor_write");
+	}
+
+	// PRIVATE METHODS
+	
+	private UUID getUUIDFromString(String uuid, String functionName) {
+		try {
+			return UUID.fromString(uuid);
+		} catch (IllegalArgumentException e) {
+			Log.e(LOG_TAG, functionName + " :: Error invalid UUID string", e);
+		}
+		return null;
+	}
+
+	private byte[] decodeBase64String(String value, String functionName) {
+		try {
+			return Base64.decode(value, Base64.DEFAULT);
+		} catch (IllegalArgumentException e) {
+			Log.e(LOG_TAG, functionName + " :: Error invalid base64 string", e);
+		}
+		return null;
+	}
+
+	private boolean isBluetoothEnabled(String functionName) 
+	{
+		BluetoothAdapter bluetoothAdapter = getBluetoothAdapter(functionName);
+		if (bluetoothAdapter == null) return false;
+		
+		if (!bluetoothAdapter.isEnabled()) {
+			Log.i(LOG_TAG, functionName + " :: Bluetooth is not enabled.");
+			return false;
+		}
+		return true;
+	}
+
+	private boolean isBluetoothLeSupported(String functionName) 
+	{
+		if (activity.getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) return true;
+		
+		Log.i(LOG_TAG, functionName + " :: Bluetooth LE is not supported on this device.");
+		return false;
+	}
+
+	private BluetoothAdapter getBluetoothAdapter(String functionName) {
+		BluetoothAdapter bluetoothAdapter = bluetoothManager.getAdapter();
+		if (bluetoothAdapter == null) {
+			Log.i(LOG_TAG, functionName + " :: Bluetooth is not supported on this device.");
+		}
+		return bluetoothAdapter;
+	}
+
+	private BluetoothDevice getBluetoothDevice(String address, String functionName) {
+
+		BluetoothAdapter bluetoothAdapter = getBluetoothAdapter(functionName);
+		if (bluetoothAdapter == null) return null;
+
+		BluetoothDevice device = bluetoothAdapter.getRemoteDevice(address);
+		if (device == null) {
+			Log.i(LOG_TAG, functionName + " :: Device with address '" + address + "' not found.");
+		}
+		return device;
+	}
+
+	private JSONObject createBluetoothDeviceJson(BluetoothDevice device) {
+		JSONObject deviceJson = new JSONObject();
+		try {
+			deviceJson.put("name", device.getName() != null ? device.getName() : "");
+			deviceJson.put("address", device.getAddress());
+			deviceJson.put("is_paired", device.getBondState() == BluetoothDevice.BOND_BONDED);
+			deviceJson.put("type", device.getType());
+			deviceJson.put("alias", device.getAlias());
+		} catch (JSONException e) {
+			Log.e(LOG_TAG, "Failed to create bluetooth device JSON object", e);
+		}
+		return deviceJson;
+
+	}
+
+	private JSONArray createServicesJsonArray(List<BluetoothGattService> services) {
+		JSONArray servicesJsonList = new JSONArray();
+		for (BluetoothGattService service : services) {
+			servicesJsonList.put(createServiceJson(service));
+		}
+		return servicesJsonList;
+	}
+
+	private JSONObject createServiceJson(BluetoothGattService service) {
+		JSONObject serviceJson = new JSONObject();
+		try {
+			serviceJson.put("type", service.getType());
+			serviceJson.put("uuid", service.getUuid().toString().toUpperCase());
+		} catch (JSONException e) {
+			Log.e(LOG_TAG, "Failed to create bluetooth gatt service JSON object", e);
+		}
+
+		return serviceJson;
+	}
+
+	private JSONArray createCharacteristicsJsonArray(List<BluetoothGattCharacteristic> characteristics) {
+		JSONArray characteristicsJsonList = new JSONArray();
+		for (BluetoothGattCharacteristic characteristic : characteristics) {
+			characteristicsJsonList.put(createCharacteristicJson(characteristic));
+		}
+
+		return characteristicsJsonList;
+	}
+
+	private JSONObject createCharacteristicJson(BluetoothGattCharacteristic characteristic) {
+		JSONObject characteristicJson = new JSONObject();
+		try {
+			characteristicJson.put("permissions", characteristic.getPermissions());
+			characteristicJson.put("uuid", characteristic.getUuid().toString().toUpperCase());
+			characteristicJson.put("properties", characteristic.getProperties());
+		} catch (JSONException e) {
+			Log.e(LOG_TAG, "Failed to create bluetooth gatt characteristic JSON object", e);
+		}
+		return characteristicJson;
+	}
+
+	private JSONArray createDescriptorJsonArray(List<BluetoothGattDescriptor> descriptors) {
+		JSONArray descriptorJsonList = new JSONArray();
+		for (BluetoothGattDescriptor descriptor : descriptors) {
+			descriptorJsonList.put(createDescriptorJson(descriptor));
+		}
+
+		return descriptorJsonList;
+	}
+
+	private JSONObject createDescriptorJson(BluetoothGattDescriptor descriptor) {
+		JSONObject descriptorJson = new JSONObject();
+		try {
+			descriptorJson.put("uuid", descriptor.getUuid().toString().toUpperCase());
+		} catch (JSONException e) {
+			Log.e(LOG_TAG, "Failed to create bluetooth gatt descriptor JSON object", e);
+		}
+		return descriptorJson;
+	}
+
+	//#endregion
+
+
+
+	// ========================================================================
+	// ExtGen public API adapter
+	// ========================================================================
+
+	private static final int ERR_OK = 0;
+	private static final int ERR_UNKNOWN = 1;
+	private static final int ERR_NOT_SUPPORTED = 2;
+	private static final int ERR_NOT_INITIALIZED = 3;
+	private static final int ERR_BLUETOOTH_DISABLED = 4;
+	private static final int ERR_PERMISSION_DENIED = 5;
+	private static final int ERR_INVALID_ARGUMENT = 6;
+	private static final int ERR_INVALID_HANDLE = 7;
+	private static final int ERR_BUSY = 8;
+	private static final int ERR_NOT_FOUND = 10;
+	private static final int ERR_CONNECTION_FAILED = 11;
+	private static final int ERR_DISCONNECTED = 12;
+	private static final int ERR_OPERATION_FAILED = 13;
+
+	private static final int TRANSPORT_UNKNOWN = 0;
+	private static final int TRANSPORT_CLASSIC = 1;
+	private static final int TRANSPORT_LE = 2;
+
+	private static final int PERMISSION_UNKNOWN = 0;
+	private static final int PERMISSION_GRANTED = 1;
+	private static final int PERMISSION_DENIED = 2;
+
+	private static final long HANDLE_MAGIC = 0x42L;
+	private static final long HANDLE_DEVICE = 0x01L;
+	private static final long HANDLE_CLASSIC = 0x02L;
+	private static final long HANDLE_LE = 0x03L;
+	private static final int REQUEST_BT_PERMISSIONS = 0xB710;
+
+	private boolean extInitialized = false;
+	private volatile int extLastError = ERR_OK;
+	private volatile String extLastErrorMessage = "";
+	private final AtomicLong extNextDevice = new AtomicLong(1);
+	private final AtomicLong extNextClassic = new AtomicLong(1);
+	private final AtomicLong extNextLe = new AtomicLong(1);
+
+	private static final class ExtDevice {
+		long handle;
+		int transport;
+		String id = "";
+		String name = "";
+		String address = "";
+		boolean hasAddress = false;
+		boolean connectable = false;
+		int rssi = 0;
+		boolean hasRssi = false;
+	}
+
+	private static final class ExtClassicConnection {
+		long handle;
+		long device;
+		Integer socketId;
+		boolean connected;
+	}
+
+	private static final class ExtLeConnection {
+		long handle;
+		long device;
+		String address;
+	}
+
+	private static final class PendingClassicConnect {
+		long connection;
+		long device;
+		GMFunction callback;
+		PendingClassicConnect(long connection, long device, GMFunction callback) {
+			this.connection = connection;
+			this.device = device;
+			this.callback = callback;
+		}
+	}
+
+	private final Object extLock = new Object();
+	private final LinkedHashMap<Long, ExtDevice> extDevices = new LinkedHashMap<>();
+	private final HashMap<String, Long> extDeviceById = new HashMap<>();
+	private final ArrayList<Long> extDeviceOrder = new ArrayList<>();
+	private final HashMap<Long, ExtClassicConnection> extClassicConnections = new HashMap<>();
+	private final HashMap<Integer, Long> extClassicBySocket = new HashMap<>();
+	private final HashMap<Integer, PendingClassicConnect> extPendingClassic = new HashMap<>();
+	private final HashMap<Long, ExtLeConnection> extLeConnections = new HashMap<>();
+	private final HashMap<String, Long> extLeByAddress = new HashMap<>();
+
+	private volatile GMFunction extCallbackDeviceFound = null;
+	private volatile GMFunction extCallbackScanStopped = null;
+	private volatile GMFunction extCallbackClassicClientConnected = null;
+	private volatile GMFunction extCallbackClassicData = null;
+	private volatile GMFunction extCallbackClassicDisconnected = null;
+	private volatile GMFunction extCallbackLeEvent = null;
+
+	private long extMakeHandle(long type, long id) {
+		return (HANDLE_MAGIC << 40) | (type << 32) | (id & 0xffffffffL);
+	}
+
+	private boolean extHandleType(long handle, long type) {
+		return ((handle >> 40) & 0xffL) == HANDLE_MAGIC && ((handle >> 32) & 0xffL) == type;
+	}
+
+	private void extSetError(int code, String message) {
+		extLastError = code;
+		extLastErrorMessage = message != null ? message : "";
+	}
+
+	private int extResult(int code, String message) {
+		extSetError(code, message);
+		return code;
+	}
+
+	private void extCall(GMFunction callback, Object... args) {
+		if (callback == null) return;
+		try { callback.call(args); }
+		catch (Throwable error) { Log.e(LOG_TAG, "GMBluetooth callback failed", error); }
+	}
+
+	private boolean extHasPermission(String permission) {
+		if (activity == null) return false;
+		if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true;
+		return activity.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED;
+	}
+
+	private boolean extHasScanPermission() {
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+			return extHasPermission(Manifest.permission.BLUETOOTH_SCAN);
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
+			return extHasPermission(Manifest.permission.ACCESS_FINE_LOCATION);
+		return true;
+	}
+
+	private boolean extHasConnectPermission() {
+		return Build.VERSION.SDK_INT < Build.VERSION_CODES.S || extHasPermission(Manifest.permission.BLUETOOTH_CONNECT);
+	}
+
+	private boolean extHasAdvertisePermission() {
+		return Build.VERSION.SDK_INT < Build.VERSION_CODES.S || extHasPermission(Manifest.permission.BLUETOOTH_ADVERTISE);
+	}
+
+	private ExtDevice extDevice(long handle) {
+		if (!extHandleType(handle, HANDLE_DEVICE)) return null;
+		synchronized (extLock) { return extDevices.get(handle); }
+	}
+
+	private long extUpsertDevice(int transport, String id, String name, String address, Integer rssi, boolean connectable) {
+		if (id == null || id.isEmpty()) return 0;
+		long handle;
+		boolean created = false;
+		synchronized (extLock) {
+			Long found = extDeviceById.get(id);
+			ExtDevice d;
+			if (found == null) {
+				handle = extMakeHandle(HANDLE_DEVICE, extNextDevice.getAndIncrement());
+				d = new ExtDevice(); d.handle = handle; d.id = id;
+				extDevices.put(handle, d); extDeviceById.put(id, handle); extDeviceOrder.add(handle); created = true;
+				Log.i(LOG_TAG, "extUpsertDevice: NEW device (handle=" + handle + " id=" + id + " name=" + name + ")");
+			} else {
+				handle = found;
+				d = extDevices.get(handle);
+				Log.i(LOG_TAG, "extUpsertDevice: EXISTING device (handle=" + handle + " id=" + id + ")");
+			}
+			d.transport = transport;
+			if (name != null && !name.isEmpty()) d.name = name;
+			if (address != null && !address.isEmpty()) { d.address = address; d.hasAddress = true; }
+			if (rssi != null) { d.rssi = rssi; d.hasRssi = true; }
+			d.connectable = connectable;
+		}
+		if (created && extCallbackDeviceFound != null) {
+			Log.i(LOG_TAG, "extUpsertDevice: calling device found callback");
+			extCall(extCallbackDeviceFound, (double)handle);
+		} else if (created && extCallbackDeviceFound == null) {
+			Log.w(LOG_TAG, "extUpsertDevice: device found callback is null!");
+		}
+		return handle;
+	}
+
+	private String extLeAddress(long connection) {
+		synchronized (extLock) {
+			ExtLeConnection c = extLeConnections.get(connection);
+			return c != null ? c.address : null;
+		}
+	}
+
+	private long extLeConnectionForAddress(String address) {
+		if (address == null) return 0;
+		synchronized (extLock) {
+			Long h = extLeByAddress.get(address);
+			return h != null ? h : 0;
+		}
+	}
+
+	private String extEventType(String oldType) {
+		return oldType != null && oldType.startsWith("bt_") ? "bluetooth_" + oldType.substring(3) : oldType;
+	}
+
+	private void extDecorateLeEvent(JSONObject json) {
+		String address = json.optString("address", "");
+		if (!address.isEmpty()) {
+			long connection = extLeConnectionForAddress(address);
+			if (connection != 0) {
+				try { json.put("connection", connection); } catch (JSONException ignored) { }
+			}
+		}
+	}
+
+	private void extProcessEvent(ExtEvent event) {
+		JSONObject json = event.data;
+		String type = event.type;
+		try {
+			if ("bt_le_scan_result".equals(type)) {
+				String address = json.optString("address", "");
+				extUpsertDevice(TRANSPORT_LE, "android:ble:" + address, json.optString("name", ""), address,
+					json.has("raw_signal") ? json.optInt("raw_signal") : null, json.optBoolean("is_connectable", true));
+				extDecorateLeEvent(json);
+				extCall(extCallbackLeEvent, extEventType(type), json.toString());
+				return;
+			}
+			if ("bt_classic_scan_result".equals(type)) {
+				String address = json.optString("address", "");
+				extUpsertDevice(TRANSPORT_CLASSIC, "android:classic:" + address, json.optString("name", ""), address, null, true);
+				return;
+			}
+			if ("bt_classic_scan_finished".equals(type)) {
+				extCall(extCallbackScanStopped, ERR_OK, "");
+				return;
+			}
+			if ("bt_classic_socket_open".equals(type)) {
+				int asyncId = json.optInt("async_id", -1);
+				PendingClassicConnect pending;
+				synchronized (extLock) { pending = extPendingClassic.remove(asyncId); }
+				if (pending != null) {
+					boolean success = json.optBoolean("success", false);
+					if (success) {
+						int socketId = json.optInt("socket_id", -1);
+						synchronized (extLock) {
+							ExtClassicConnection c = extClassicConnections.get(pending.connection);
+							if (c != null) { c.socketId = socketId; c.connected = true; extClassicBySocket.put(socketId, c.handle); }
+						}
+						extCall(pending.callback, ERR_OK, "", (double)pending.connection, (double)pending.device);
+					} else {
+						int error = json.optInt("error_code", ERR_CONNECTION_FAILED);
+						String message = json.optString("error_message", "Bluetooth Classic connection failed");
+						synchronized (extLock) { extClassicConnections.remove(pending.connection); }
+						extCall(pending.callback, error, message, (double)pending.connection, (double)pending.device);
+					}
+				}
+				return;
+			}
+			if ("bt_classic_server_accept".equals(type) && json.optBoolean("success", false)) {
+				int socketId = json.optInt("socket_id", -1);
+				BluetoothSocket socket = activeSockets.get(socketId);
+				if (socket != null) {
+					BluetoothDevice remote = socket.getRemoteDevice();
+					String address = remote.getAddress();
+					long device = extUpsertDevice(TRANSPORT_CLASSIC, "android:classic:" + address,
+						remote.getName() != null ? remote.getName() : "", address, null, true);
+					long connection = extMakeHandle(HANDLE_CLASSIC, extNextClassic.getAndIncrement());
+					ExtClassicConnection c = new ExtClassicConnection(); c.handle = connection; c.device = device; c.socketId = socketId; c.connected = true;
+					synchronized (extLock) { extClassicConnections.put(connection, c); extClassicBySocket.put(socketId, connection); }
+					extCall(extCallbackClassicClientConnected, (double)connection, (double)device);
+				}
+				return;
+			}
+			if ("bt_classic_socket_data".equals(type)) {
+				int socketId = json.optInt("socket_id", -1);
+				Long connection;
+				synchronized (extLock) { connection = extClassicBySocket.get(socketId); }
+				if (connection != null) {
+					ConcurrentLinkedQueue<byte[]> queue = socketDataQueues.get(socketId);
+					int available = 0;
+					if (queue != null) for (byte[] bytes : queue) if (bytes != null) available += bytes.length;
+					extCall(extCallbackClassicData, (double)connection, available);
+				}
+				return;
+			}
+			if ("bt_classic_socket_remotely_closed".equals(type) || "bt_classic_socket_error".equals(type)) {
+				int socketId = json.optInt("socket_id", -1);
+				Long connection;
+				synchronized (extLock) { connection = extClassicBySocket.remove(socketId); }
+				if (connection != null) {
+					synchronized (extLock) { extClassicConnections.remove(connection); }
+					extCall(extCallbackClassicDisconnected, (double)connection,
+						"bt_classic_socket_error".equals(type) ? ERR_DISCONNECTED : ERR_OK,
+						"bt_classic_socket_error".equals(type) ? "Bluetooth socket error" : "Remote device disconnected");
+				}
+				return;
+			}
+
+			if (type.startsWith("bt_le_")) {
+				extDecorateLeEvent(json);
+				extCall(extCallbackLeEvent, extEventType(type), json.toString());
+			}
+		} catch (Throwable error) {
+			Log.e(LOG_TAG, "GMBluetooth event processing failed: " + type, error);
+		}
+	}
+
+	@Override
+	public boolean bluetooth_initialize() {
+		Log.i(LOG_TAG, "bluetooth_initialize called");
+		if (extInitialized) { Log.i(LOG_TAG, "bluetooth_initialize: already initialized"); return true; }
+		activity = RunnerActivity.CurrentActivity;
+		if (activity == null) { Log.e(LOG_TAG, "bluetooth_initialize: activity is null"); extSetError(ERR_NOT_INITIALIZED, "Current Android Activity is unavailable"); return false; }
+		bluetoothManager = (BluetoothManager)activity.getSystemService(Context.BLUETOOTH_SERVICE);
+		if (bluetoothManager == null || bluetoothManager.getAdapter() == null) {
+			Log.e(LOG_TAG, "bluetooth_initialize: Bluetooth not supported"); extSetError(ERR_NOT_SUPPORTED, "Bluetooth is not supported on this device"); return false;
+		}
+		try {
+			Log.i(LOG_TAG, "bluetooth_initialize: calling bt_init()");
+			bt_init();
+			extInitialized = true;
+			extSetError(ERR_OK, "");
+			Log.i(LOG_TAG, "bluetooth_initialize: SUCCESS");
+			return true;
+		} catch (Throwable error) {
+			Log.e(LOG_TAG, "bluetooth_initialize: FAILED", error);
+			extSetError(ERR_OPERATION_FAILED, error.getMessage());
+			return false;
+		}
+	}
+
+	@Override
+	public void bluetooth_shutdown() {
+		if (!extInitialized) return;
+		try { scanManager.scanStopAsync("bt_le_scan_stop"); } catch (Throwable ignored) { }
+		try { advertiseManager.advertiseStopAsync("bt_le_advertise_stop"); } catch (Throwable ignored) { }
+		try { bluetoothGattServerManager.gattServerCloseAsync("bt_le_server_close"); } catch (Throwable ignored) { }
+		try { bluetoothGattManager.gattCloseAll(); } catch (Throwable ignored) { }
+		try { bt_classic_socket_close_all(); } catch (Throwable ignored) { }
+		try { if (isServerRunning) bt_classic_server_stop(); } catch (Throwable ignored) { }
+		try { bt_end(); } catch (Throwable ignored) { }
+		extInitialized = false;
+		extEventQueue.clear();
+		synchronized (extLock) {
+			extDevices.clear(); extDeviceById.clear(); extDeviceOrder.clear(); extClassicConnections.clear();
+			extClassicBySocket.clear(); extPendingClassic.clear(); extLeConnections.clear(); extLeByAddress.clear();
+		}
+		extCallbackDeviceFound = null; extCallbackScanStopped = null; extCallbackClassicClientConnected = null;
+		extCallbackClassicData = null; extCallbackClassicDisconnected = null; extCallbackLeEvent = null;
+		extSetError(ERR_OK, "");
+	}
+
+	@Override
+	public int bluetooth_update() {
+		int count = 0;
+		ExtEvent event;
+		while ((event = extEventQueue.poll()) != null) {
+			Log.i(LOG_TAG, "bluetooth_update: processing event type=" + event.type);
+			extProcessEvent(event);
+			++count;
+		}
+		if (count > 0) Log.i(LOG_TAG, "bluetooth_update: processed " + count + " events");
+		return count;
+	}
+
+	@Override public boolean bluetooth_is_initialized() { return extInitialized; }
+	@Override public int bluetooth_last_error_code() { return extLastError; }
+	@Override public String bluetooth_last_error_message() { return extLastErrorMessage; }
+	@Override public boolean bluetooth_le_is_supported() { return extInitialized && bt_le_is_supported() > .5; }
+	public boolean bluetooth_le_advertise_is_supported() {
+		if (!extInitialized || !extHasAdvertisePermission()) return false;
+		try { BluetoothAdapter a = bluetoothManager.getAdapter(); return a != null && a.isMultipleAdvertisementSupported(); }
+		catch (Throwable ignored) { return false; }
+	}
+	public boolean bluetooth_le_server_is_supported() { return bluetooth_le_is_supported(); }
+	@Override public boolean bluetooth_classic_is_supported() { return extInitialized && bt_classic_is_supported() > .5; }
+	@Override public boolean bluetooth_classic_server_is_supported() { return bluetooth_classic_is_supported(); }
+
+	@Override
+	public int bluetooth_permission_get_status() {
+		if (!extInitialized) return PERMISSION_UNKNOWN;
+		boolean hasScan = extHasScanPermission();
+		boolean hasConnect = extHasConnectPermission();
+		boolean hasAdvertise = extHasAdvertisePermission();
+		int status = (hasScan && hasConnect && hasAdvertise) ? PERMISSION_GRANTED : PERMISSION_DENIED;
+		// Log.i(LOG_TAG, "bluetooth_permission_get_status: scan=" + hasScan + " connect=" + hasConnect + " advertise=" + hasAdvertise + " -> " + (status == PERMISSION_GRANTED ? "GRANTED" : "DENIED"));
+		return status;
+	}
+
+	@Override
+	public int bluetooth_permission_request() {
+		if (!extInitialized || activity == null) return extResult(ERR_NOT_INITIALIZED, "Bluetooth is not initialized");
+		if (bluetooth_permission_get_status() == PERMISSION_GRANTED) return extResult(ERR_OK, "");
+		try {
+			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+				activity.requestPermissions(new String[]{Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE}, REQUEST_BT_PERMISSIONS);
+			} else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+				activity.requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, REQUEST_BT_PERMISSIONS);
+			}
+			return extResult(ERR_OK, "");
+		} catch (Throwable error) { return extResult(ERR_OPERATION_FAILED, error.getMessage()); }
+	}
+
+	@Override
+	public int bluetooth_le_scan_start(boolean active) {
+		Log.i(LOG_TAG, "bluetooth_le_scan_start called (active=" + active + ")");
+		if (!extInitialized) { Log.e(LOG_TAG, "bluetooth_le_scan_start: not initialized"); return extResult(ERR_NOT_INITIALIZED, "Bluetooth is not initialized"); }
+		if (!extHasScanPermission()) { Log.e(LOG_TAG, "bluetooth_le_scan_start: permission denied"); return extResult(ERR_PERMISSION_DENIED, "Bluetooth scan permission is not granted"); }
+		if (!isBluetoothEnabled("bluetooth_le_scan_start")) { Log.e(LOG_TAG, "bluetooth_le_scan_start: bluetooth disabled"); return extResult(ERR_BLUETOOTH_DISABLED, "Bluetooth is disabled"); }
+		Log.i(LOG_TAG, "bluetooth_le_scan_start: calling bt_le_scan_start()");
+		double r = bt_le_scan_start();
+		int result = r >= 0 ? ERR_OK : ERR_OPERATION_FAILED;
+		String message = r >= 0 ? "" : "BLE scan could not start (result=" + r + ")";
+		Log.i(LOG_TAG, "bluetooth_le_scan_start: result=" + result + " message=" + message);
+		return extResult(result, message);
+	}
+	@Override public int bluetooth_le_scan_stop() { double r=bt_le_scan_stop(); if (r>=0) extCall(extCallbackScanStopped, ERR_OK, ""); return extResult(r>=0?ERR_OK:ERR_OPERATION_FAILED, r>=0?"":"BLE scan could not stop"); }
+	@Override public boolean bluetooth_le_scan_is_running() { return bt_le_scan_is_active() > .5; }
+
+	@Override public int bluetooth_classic_scan_start() {
+		if (!extHasScanPermission()) return extResult(ERR_PERMISSION_DENIED, "Bluetooth scan permission is not granted");
+		double r=bt_classic_scan_start(); return extResult(r>=0?ERR_OK:ERR_OPERATION_FAILED, r>=0?"":"Classic discovery could not start");
+	}
+	@Override public int bluetooth_classic_scan_stop() { double r=bt_classic_scan_stop(); return extResult(r>=0?ERR_OK:ERR_OPERATION_FAILED, r>=0?"":"Classic discovery could not stop"); }
+	@Override public boolean bluetooth_classic_scan_is_running() { return bt_classic_scan_is_active() > .5; }
+
+	@Override public void bluetooth_device_clear() { synchronized(extLock){ extDevices.clear(); extDeviceById.clear(); extDeviceOrder.clear(); } }
+	@Override public int bluetooth_device_get_count() { synchronized(extLock){ return extDeviceOrder.size(); } }
+	@Override public long bluetooth_device_get_at(int index) { synchronized(extLock){ return index>=0 && index<extDeviceOrder.size()?extDeviceOrder.get(index):0; } }
+	@Override public boolean bluetooth_device_is_valid(long device) { return extDevice(device)!=null; }
+	@Override public int bluetooth_device_get_transport(long device) { ExtDevice d=extDevice(device); return d!=null?d.transport:TRANSPORT_UNKNOWN; }
+	@Override public String bluetooth_device_get_id(long device) { ExtDevice d=extDevice(device); return d!=null?d.id:""; }
+	@Override public String bluetooth_device_get_name(long device) { ExtDevice d=extDevice(device); return d!=null?d.name:""; }
+	@Override public boolean bluetooth_device_has_address(long device) { ExtDevice d=extDevice(device); return d!=null&&d.hasAddress; }
+	@Override public String bluetooth_device_get_address(long device) { ExtDevice d=extDevice(device); return d!=null&&d.hasAddress?d.address:""; }
+	@Override public boolean bluetooth_device_has_rssi(long device) { ExtDevice d=extDevice(device); return d!=null&&d.hasRssi; }
+	@Override public int bluetooth_device_get_rssi(long device) { ExtDevice d=extDevice(device); return d!=null&&d.hasRssi?d.rssi:0; }
+	@Override public boolean bluetooth_device_is_connectable(long device) { ExtDevice d=extDevice(device); return d!=null&&d.connectable; }
+
+	@Override
+	public long bluetooth_classic_connect(long device, String service_uuid, GMFunction callback) {
+		ExtDevice d=extDevice(device);
+		if (d==null || d.transport!=TRANSPORT_CLASSIC || !d.hasAddress) { extSetError(ERR_INVALID_HANDLE, "Expected a Classic device handle"); return 0; }
+		if (!extHasConnectPermission()) { extSetError(ERR_PERMISSION_DENIED, "Bluetooth connect permission is not granted"); return 0; }
+		long handle=extMakeHandle(HANDLE_CLASSIC, extNextClassic.getAndIncrement());
+		ExtClassicConnection c=new ExtClassicConnection(); c.handle=handle; c.device=device;
+		synchronized(extLock){ extClassicConnections.put(handle,c); }
+		double async=bt_classic_socket_open(d.address, service_uuid, FALSE);
+		if (async<0) { synchronized(extLock){extClassicConnections.remove(handle);} extSetError(ERR_CONNECTION_FAILED,"RFCOMM connection could not start"); return 0; }
+		synchronized(extLock){ extPendingClassic.put((int)async,new PendingClassicConnect(handle,device,callback)); }
+		extSetError(ERR_OK, ""); return handle;
+	}
+
+	@Override
+	public int bluetooth_classic_disconnect(long connection) {
+		ExtClassicConnection c; synchronized(extLock){ c=extClassicConnections.get(connection); }
+		if(c==null||c.socketId==null) return extResult(ERR_INVALID_HANDLE,"Invalid Classic connection handle");
+		double r=bt_classic_socket_close(c.socketId);
+		synchronized(extLock){ extClassicConnections.remove(connection); extClassicBySocket.remove(c.socketId); }
+		if(r>0){ extCall(extCallbackClassicDisconnected,(double)connection,ERR_OK,"Disconnected"); return extResult(ERR_OK,""); }
+		return extResult(ERR_OPERATION_FAILED,"Could not close Classic socket");
+	}
+	@Override public boolean bluetooth_classic_connection_is_valid(long connection){ synchronized(extLock){return extClassicConnections.containsKey(connection);} }
+	@Override public boolean bluetooth_classic_connection_is_connected(long connection){ synchronized(extLock){ExtClassicConnection c=extClassicConnections.get(connection); return c!=null&&c.connected&&c.socketId!=null&&activeSockets.containsKey(c.socketId);} }
+	@Override public long bluetooth_classic_connection_get_device(long connection){ synchronized(extLock){ExtClassicConnection c=extClassicConnections.get(connection); return c!=null?c.device:0;} }
+	@Override public int bluetooth_classic_receive_available(long connection){
+		ExtClassicConnection c; synchronized(extLock){c=extClassicConnections.get(connection);} if(c==null||c.socketId==null)return 0;
+		ConcurrentLinkedQueue<byte[]> q=socketDataQueues.get(c.socketId); if(q==null)return 0; int n=0; for(byte[] b:q)if(b!=null)n+=b.length; return n;
+	}
+
+	@Override
+	public int bluetooth_classic_send(long connection, ByteBuffer data, int offset, int size) {
+		// TODO: Implement the final GameMaker ByteBuffer -> RFCOMM copy only after
+		// the project-specific buffer convention is supplied. The old socket
+		// transport remains present below and is intentionally not called here.
+		return extResult(ERR_NOT_SUPPORTED, "TODO: GameMaker buffer send bridge not implemented yet");
+	}
+	@Override
+	public int bluetooth_classic_receive(long connection, ByteBuffer out_data, int offset, int max_size) {
+		// TODO: Implement native RFCOMM queue -> GameMaker ByteBuffer copy only
+		// after the project-specific buffer convention is supplied.
+		extSetError(ERR_NOT_SUPPORTED, "TODO: GameMaker buffer receive bridge not implemented yet"); return 0;
+	}
+
+	@Override public int bluetooth_classic_server_start(String name,String service_uuid){ if(!extHasConnectPermission())return extResult(ERR_PERMISSION_DENIED,"Bluetooth connect permission is not granted"); double r=bt_classic_server_start(name,service_uuid,FALSE); return extResult(r>=0?ERR_OK:ERR_OPERATION_FAILED,r>=0?"":"Classic server could not start"); }
+	@Override public int bluetooth_classic_server_stop(){ double r=bt_classic_server_stop(); return extResult(r>=0?ERR_OK:ERR_OPERATION_FAILED,r>=0?"":"Classic server could not stop"); }
+	@Override public boolean bluetooth_classic_server_is_running(){ return isServerRunning; }
+
+	// BLE central. The old transport is keyed by the platform address/identifier;
+	// the ExtGen API keeps that detail behind opaque connection handles.
+	public long bluetooth_le_connect(long device) {
+		ExtDevice d=extDevice(device); if(d==null||d.transport!=TRANSPORT_LE||!d.hasAddress){extSetError(ERR_INVALID_HANDLE,"Expected a BLE device handle");return 0;}
+		if(!extHasConnectPermission()){extSetError(ERR_PERMISSION_DENIED,"Bluetooth connect permission is not granted");return 0;}
+		synchronized(extLock){Long existing=extLeByAddress.get(d.address);if(existing!=null)return existing;}
+		long h=extMakeHandle(HANDLE_LE,extNextLe.getAndIncrement()); ExtLeConnection c=new ExtLeConnection(); c.handle=h;c.device=device;c.address=d.address;
+		synchronized(extLock){extLeConnections.put(h,c);extLeByAddress.put(d.address,h);} double r=bt_le_peripheral_open(d.address);
+		if(r<0){synchronized(extLock){extLeConnections.remove(h);extLeByAddress.remove(d.address);}extSetError(ERR_CONNECTION_FAILED,"GATT connection could not start");return 0;}
+		extSetError(ERR_OK,"");return h;
+	}
+	public int bluetooth_le_disconnect(long connection){String a=extLeAddress(connection);if(a==null)return extResult(ERR_INVALID_HANDLE,"Invalid BLE connection handle");double r=bt_le_peripheral_close(a);synchronized(extLock){extLeConnections.remove(connection);extLeByAddress.remove(a);}return extResult(r>0?ERR_OK:ERR_OPERATION_FAILED,r>0?"":"GATT connection could not close");}
+	public boolean bluetooth_le_connection_is_valid(long connection){synchronized(extLock){return extLeConnections.containsKey(connection);}}
+	public boolean bluetooth_le_connection_is_connected(long connection){String a=extLeAddress(connection);return a!=null&&bt_le_peripheral_is_connected(a)>.5;}
+	public long bluetooth_le_connection_get_device(long connection){synchronized(extLock){ExtLeConnection c=extLeConnections.get(connection);return c!=null?c.device:0;}}
+	private int extAsync(double r,String message){return extResult(r>=0?ERR_OK:ERR_OPERATION_FAILED,r>=0?"":message);}
+	public int bluetooth_le_services_discover(long c){String a=extLeAddress(c);return a==null?extResult(ERR_INVALID_HANDLE,"Invalid BLE connection handle"):extAsync(bt_le_peripheral_get_services(a),"Service discovery could not start");}
+	public int bluetooth_le_characteristics_discover(long c,String s){String a=extLeAddress(c);return a==null?extResult(ERR_INVALID_HANDLE,"Invalid BLE connection handle"):extAsync(bt_le_service_get_characteristics(a,s),"Characteristic discovery could not start");}
+	public int bluetooth_le_descriptors_discover(long c,String s,String ch){String a=extLeAddress(c);return a==null?extResult(ERR_INVALID_HANDLE,"Invalid BLE connection handle"):extAsync(bt_le_characteristic_get_descriptors(a,s,ch),"Descriptor discovery could not start");}
+	public int bluetooth_le_characteristic_read(long c,String s,String ch){String a=extLeAddress(c);return a==null?extResult(ERR_INVALID_HANDLE,"Invalid BLE connection handle"):extAsync(bt_le_characteristic_read(a,s,ch),"Characteristic read could not start");}
+	public int bluetooth_le_characteristic_write_request(long c,String s,String ch,String v){String a=extLeAddress(c);return a==null?extResult(ERR_INVALID_HANDLE,"Invalid BLE connection handle"):extAsync(bt_le_characteristic_write_request(a,s,ch,v),"Characteristic write could not start");}
+	public int bluetooth_le_characteristic_write_command(long c,String s,String ch,String v){String a=extLeAddress(c);return a==null?extResult(ERR_INVALID_HANDLE,"Invalid BLE connection handle"):extAsync(bt_le_characteristic_write_command(a,s,ch,v),"Characteristic write command could not start");}
+	public int bluetooth_le_characteristic_notify(long c,String s,String ch){String a=extLeAddress(c);return a==null?extResult(ERR_INVALID_HANDLE,"Invalid BLE connection handle"):extAsync(bt_le_characteristic_notify(a,s,ch),"Notify subscription could not start");}
+	public int bluetooth_le_characteristic_indicate(long c,String s,String ch){String a=extLeAddress(c);return a==null?extResult(ERR_INVALID_HANDLE,"Invalid BLE connection handle"):extAsync(bt_le_characteristic_indicate(a,s,ch),"Indicate subscription could not start");}
+	public int bluetooth_le_characteristic_unsubscribe(long c,String s,String ch){String a=extLeAddress(c);return a==null?extResult(ERR_INVALID_HANDLE,"Invalid BLE connection handle"):extAsync(bt_le_characteristic_unsubscribe(a,s,ch),"Unsubscribe could not start");}
+	public int bluetooth_le_descriptor_read(long c,String s,String ch,String d){String a=extLeAddress(c);return a==null?extResult(ERR_INVALID_HANDLE,"Invalid BLE connection handle"):extAsync(bt_le_descriptor_read(a,s,ch,d),"Descriptor read could not start");}
+	public int bluetooth_le_descriptor_write(long c,String s,String ch,String d,String v){String a=extLeAddress(c);return a==null?extResult(ERR_INVALID_HANDLE,"Invalid BLE connection handle"):extAsync(bt_le_descriptor_write(a,s,ch,d,v),"Descriptor write could not start");}
+
+	public int bluetooth_le_advertise_start(String settings_json,String data_json){if(!extHasAdvertisePermission())return extResult(ERR_PERMISSION_DENIED,"Bluetooth advertise permission is not granted");return extAsync(bt_le_advertise_start(settings_json,data_json),"BLE advertising could not start");}
+	public int bluetooth_le_advertise_stop(){return extAsync(bt_le_advertise_stop(),"BLE advertising could not stop");}
+	public boolean bluetooth_le_advertise_is_running(){return bt_le_advertise_is_active()>.5;}
+	public int bluetooth_le_server_start(){if(!extHasConnectPermission())return extResult(ERR_PERMISSION_DENIED,"Bluetooth connect permission is not granted");return extAsync(bt_le_server_open(),"GATT server could not start");}
+	public int bluetooth_le_server_stop(){return extAsync(bt_le_server_close(),"GATT server could not stop");}
+	public boolean bluetooth_le_server_is_running(){return bluetoothGattServerManager.bluetoothGattServer!=null;}
+	public int bluetooth_le_server_add_service(String service_json){return extAsync(bt_le_server_add_service(service_json),"GATT service could not be added");}
+	public int bluetooth_le_server_clear_services(){return extAsync(bt_le_server_clear_services(),"GATT services could not be cleared");}
+	public int bluetooth_le_server_respond_read(int request_id,int status,String value_base64){return extAsync(bt_le_server_respond_read(request_id,status,value_base64),"GATT read response failed");}
+	public int bluetooth_le_server_respond_write(int request_id,int status){return extAsync(bt_le_server_respond_write(request_id,status),"GATT write response failed");}
+	public int bluetooth_le_server_notify_value(String service_uuid,String characteristic_uuid,String value_base64){return extAsync(bt_le_server_notify_value(service_uuid,characteristic_uuid,value_base64),"GATT notification failed");}
+
+	@Override public boolean bluetooth_set_callback_device_found(GMFunction cb){extCallbackDeviceFound=cb;return true;}
+	@Override public boolean bluetooth_remove_callback_device_found(){extCallbackDeviceFound=null;return true;}
+	@Override public boolean bluetooth_set_callback_scan_stopped(GMFunction cb){extCallbackScanStopped=cb;return true;}
+	@Override public boolean bluetooth_remove_callback_scan_stopped(){extCallbackScanStopped=null;return true;}
+	@Override public boolean bluetooth_set_callback_classic_client_connected(GMFunction cb){extCallbackClassicClientConnected=cb;return true;}
+	@Override public boolean bluetooth_remove_callback_classic_client_connected(){extCallbackClassicClientConnected=null;return true;}
+	@Override public boolean bluetooth_set_callback_classic_data(GMFunction cb){extCallbackClassicData=cb;return true;}
+	@Override public boolean bluetooth_remove_callback_classic_data(){extCallbackClassicData=null;return true;}
+	@Override public boolean bluetooth_set_callback_classic_disconnected(GMFunction cb){extCallbackClassicDisconnected=cb;return true;}
+	@Override public boolean bluetooth_remove_callback_classic_disconnected(){extCallbackClassicDisconnected=null;return true;}
+	public boolean bluetooth_set_callback_le_event(GMFunction cb){extCallbackLeEvent=cb;return true;}
+	public boolean bluetooth_remove_callback_le_event(){extCallbackLeEvent=null;return true;}
 
-
-/**
- * Android implementation of GMBluetooth.
- *
- * This follows the normal Extension Generator Android pattern used by official
- * extensions such as GMAdMob:
- *
- *     GMBluetooth extends GMBluetoothInternal
- *
- * GMBluetoothInternal exposes the generated __EXT_NATIVE__ entry points and
- * forwards them to the methods implemented in this class.
- *
- * Android Bluetooth itself is provided by android.bluetooth.*.
- */
-public class GMBluetooth extends GMBluetoothInternal
-{
-    // =========================================================================
-    // Public constants -- must match spec.gmidl
-    // =========================================================================
-
-    private static final int OK                 = 0;
-    private static final int UNKNOWN            = 1;
-    private static final int NOT_SUPPORTED      = 2;
-    private static final int NOT_INITIALIZED    = 3;
-    private static final int BLUETOOTH_DISABLED = 4;
-    private static final int PERMISSION_DENIED  = 5;
-    private static final int INVALID_ARGUMENT   = 6;
-    private static final int INVALID_HANDLE     = 7;
-    private static final int BUSY               = 8;
-    private static final int TIMEOUT            = 9;
-    private static final int NOT_FOUND          = 10;
-    private static final int CONNECTION_FAILED  = 11;
-    private static final int DISCONNECTED       = 12;
-    private static final int OPERATION_FAILED   = 13;
-
-    private static final int TRANSPORT_UNKNOWN = 0;
-    private static final int TRANSPORT_CLASSIC = 1;
-    private static final int TRANSPORT_LE      = 2;
-
-    private static final int PERMISSION_UNKNOWN = 0;
-    private static final int PERMISSION_GRANTED = 1;
-    private static final int PERMISSION_DENIED_STATUS = 2;
-
-    // Keep handles inside 48 bits so callback handles are exactly representable
-    // when delivered to GML as doubles.
-    private static final long HANDLE_MAGIC = 0x42L;
-    private static final long HANDLE_TYPE_DEVICE = 0x01L;
-    private static final long HANDLE_TYPE_CLASSIC_CONNECTION = 0x02L;
-
-    private static final int REQUEST_CODE_BLUETOOTH = 0xB710;
-
-
-    // =========================================================================
-    // Android Bluetooth state
-    // =========================================================================
-
-    private volatile BluetoothAdapter adapter = null;
-    private volatile BluetoothLeScanner leScanner = null;
-
-    private final AtomicBoolean leScanning = new AtomicBoolean(false);
-    private final AtomicBoolean classicScanning = new AtomicBoolean(false);
-    private final AtomicBoolean serverRunning = new AtomicBoolean(false);
-
-    private volatile BluetoothServerSocket serverSocket = null;
-    private volatile boolean receiverRegistered = false;
-
-    private volatile boolean initialized = false;
-
-    // Incrementing this invalidates callbacks from worker threads belonging to
-    // an older initialize/shutdown session.
-    private final AtomicLong generation = new AtomicLong(1);
-
-
-    // =========================================================================
-    // Error state
-    // =========================================================================
-
-    private volatile int lastErrorCode = OK;
-    private volatile String lastErrorMessage = "";
-
-
-    // =========================================================================
-    // Device handles
-    // =========================================================================
-
-    private static final class DeviceEntry
-    {
-        long handle;
-        int transport;
-        String id = "";
-        String name = "";
-        String address = "";
-        boolean addressAvailable = false;
-        int rssi = 0;
-        boolean rssiAvailable = false;
-        boolean connectable = false;
-        BluetoothDevice androidDevice = null;
-    }
-
-    private final Object deviceLock = new Object();
-    private final HashMap<String, Long> deviceById = new HashMap<>();
-    private final LinkedHashMap<Long, DeviceEntry> devices = new LinkedHashMap<>();
-    private final ArrayList<Long> deviceOrder = new ArrayList<>();
-    private long nextDeviceId = 1;
-
-
-    // =========================================================================
-    // Classic connection handles / receive queues
-    // =========================================================================
-
-    private static final class ConnectionEntry
-    {
-        long handle;
-        long device;
-        volatile BluetoothSocket socket = null;
-        volatile boolean connected = false;
-        volatile boolean manualClosing = false;
-
-        final Object receiveLock = new Object();
-        final ArrayDeque<byte[]> receiveChunks = new ArrayDeque<>();
-        int receiveAvailable = 0;
-    }
-
-    private final Object connectionLock = new Object();
-    private final HashMap<Long, ConnectionEntry> connections = new HashMap<>();
-    private long nextConnectionId = 1;
-
-
-    // =========================================================================
-    // GML callbacks
-    // =========================================================================
-
-    private volatile GMFunction callbackDeviceFound = null;
-    private volatile GMFunction callbackScanStopped = null;
-    private volatile GMFunction callbackClassicClientConnected = null;
-    private volatile GMFunction callbackClassicData = null;
-    private volatile GMFunction callbackClassicDisconnected = null;
-
-
-    // =========================================================================
-    // Event queue
-    // =========================================================================
-
-    private static final int EVENT_DEVICE_FOUND = 1;
-    private static final int EVENT_SCAN_STOPPED = 2;
-    private static final int EVENT_CLASSIC_CONNECTED = 3;
-    private static final int EVENT_CLASSIC_CLIENT_CONNECTED = 4;
-    private static final int EVENT_CLASSIC_DATA = 5;
-    private static final int EVENT_CLASSIC_DISCONNECTED = 6;
-
-    private static final class Event
-    {
-        int type;
-        int transport = TRANSPORT_UNKNOWN;
-        int error = OK;
-        int value = 0;
-        long device = 0;
-        long connection = 0;
-        String message = "";
-        GMFunction connectCallback = null;
-    }
-
-    private final ConcurrentLinkedQueue<Event> events =
-        new ConcurrentLinkedQueue<>();
-
-
-    // =========================================================================
-    // Construction
-    // =========================================================================
-
-    public GMBluetooth()
-    {
-    }
-
-
-    // =========================================================================
-    // Helpers
-    // =========================================================================
-
-    private static Activity activity()
-    {
-        return RunnerActivity.CurrentActivity;
-    }
-
-
-    private static Context context()
-    {
-        Activity current = activity();
-        return current != null ? current.getApplicationContext() : null;
-    }
-
-
-    private void setLastError(int code, String message)
-    {
-        lastErrorCode = code;
-        lastErrorMessage = message != null ? message : "";
-    }
-
-
-    private int result(int code, String message)
-    {
-        setLastError(code, message);
-        return code;
-    }
-
-
-    private static String throwableMessage(Throwable throwable)
-    {
-        if (throwable == null)
-            return "";
-
-        String message = throwable.getMessage();
-        return message != null ? message : throwable.toString();
-    }
-
-
-    private long makeHandle(long type, long id)
-    {
-        return (HANDLE_MAGIC << 40) |
-               (type << 32) |
-               (id & 0xFFFFFFFFL);
-    }
-
-
-    private boolean isHandleType(long handle, long type)
-    {
-        return ((handle >> 40) & 0xFFL) == HANDLE_MAGIC &&
-               ((handle >> 32) & 0xFFL) == type;
-    }
-
-
-    private DeviceEntry copyDevice(long handle)
-    {
-        if (!isHandleType(handle, HANDLE_TYPE_DEVICE))
-            return null;
-
-        synchronized (deviceLock)
-        {
-            DeviceEntry source = devices.get(handle);
-            if (source == null)
-                return null;
-
-            DeviceEntry copy = new DeviceEntry();
-            copy.handle = source.handle;
-            copy.transport = source.transport;
-            copy.id = source.id;
-            copy.name = source.name;
-            copy.address = source.address;
-            copy.addressAvailable = source.addressAvailable;
-            copy.rssi = source.rssi;
-            copy.rssiAvailable = source.rssiAvailable;
-            copy.connectable = source.connectable;
-            copy.androidDevice = source.androidDevice;
-            return copy;
-        }
-    }
-
-
-    private ConnectionEntry getConnection(long handle)
-    {
-        if (!isHandleType(handle, HANDLE_TYPE_CLASSIC_CONNECTION))
-            return null;
-
-        synchronized (connectionLock)
-        {
-            return connections.get(handle);
-        }
-    }
-
-
-    private long createConnection(long device)
-    {
-        synchronized (connectionLock)
-        {
-            long handle = makeHandle(
-                HANDLE_TYPE_CLASSIC_CONNECTION,
-                nextConnectionId++);
-
-            ConnectionEntry entry = new ConnectionEntry();
-            entry.handle = handle;
-            entry.device = device;
-            connections.put(handle, entry);
-            return handle;
-        }
-    }
-
-
-    private void eraseConnection(long handle)
-    {
-        synchronized (connectionLock)
-        {
-            connections.remove(handle);
-        }
-    }
-
-
-    private long upsertDevice(
-        int transport,
-        String id,
-        String name,
-        String address,
-        int rssi,
-        boolean hasRssi,
-        boolean connectable,
-        BluetoothDevice androidDevice)
-    {
-        String safeId = id != null ? id : "";
-        String safeName = name != null ? name : "";
-        String safeAddress = address != null ? address : "";
-
-        boolean created = false;
-        long handle;
-
-        synchronized (deviceLock)
-        {
-            Long existing = deviceById.get(safeId);
-            DeviceEntry entry;
-
-            if (existing == null)
-            {
-                handle = makeHandle(HANDLE_TYPE_DEVICE, nextDeviceId++);
-
-                entry = new DeviceEntry();
-                entry.handle = handle;
-                entry.id = safeId;
-
-                devices.put(handle, entry);
-                deviceById.put(safeId, handle);
-                deviceOrder.add(handle);
-                created = true;
-            }
-            else
-            {
-                handle = existing;
-                entry = devices.get(handle);
-                if (entry == null)
-                    return 0;
-            }
-
-            entry.transport = transport;
-
-            if (!safeName.isEmpty())
-                entry.name = safeName;
-
-            if (!safeAddress.isEmpty())
-            {
-                entry.address = safeAddress;
-                entry.addressAvailable = true;
-            }
-
-            entry.rssi = rssi;
-            entry.rssiAvailable = hasRssi;
-            entry.connectable = connectable;
-
-            if (androidDevice != null)
-                entry.androidDevice = androidDevice;
-        }
-
-        if (created)
-        {
-            Event event = new Event();
-            event.type = EVENT_DEVICE_FOUND;
-            event.transport = transport;
-            event.device = handle;
-            events.offer(event);
-        }
-
-        return handle;
-    }
-
-
-    private static String safeName(BluetoothDevice device)
-    {
-        if (device == null)
-            return "";
-
-        try
-        {
-            String value = device.getName();
-            return value != null ? value : "";
-        }
-        catch (SecurityException ignored)
-        {
-            return "";
-        }
-    }
-
-
-    private static String safeAddress(BluetoothDevice device)
-    {
-        if (device == null)
-            return "";
-
-        try
-        {
-            String value = device.getAddress();
-            return value != null ? value : "";
-        }
-        catch (SecurityException ignored)
-        {
-            return "";
-        }
-    }
-
-
-    private String deviceId(int transport, BluetoothDevice device)
-    {
-        String address = safeAddress(device);
-
-        if (!address.isEmpty())
-        {
-            return transport == TRANSPORT_LE
-                ? "android:ble:" + address
-                : "android:classic:" + address;
-        }
-
-        return (transport == TRANSPORT_LE
-            ? "android:ble:object:"
-            : "android:classic:object:") +
-            System.identityHashCode(device);
-    }
-
-
-    private boolean hasPermission(String permission)
-    {
-        Context current = context();
-
-        if (current == null)
-            return false;
-
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M)
-            return true;
-
-        return current.checkSelfPermission(permission) ==
-            PackageManager.PERMISSION_GRANTED;
-    }
-
-
-    private boolean hasScanPermission()
-    {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-            return hasPermission(Manifest.permission.BLUETOOTH_SCAN);
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
-            return hasPermission(Manifest.permission.ACCESS_FINE_LOCATION);
-
-        return true;
-    }
-
-
-    private boolean hasConnectPermission()
-    {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-            return hasPermission(Manifest.permission.BLUETOOTH_CONNECT);
-
-        return true;
-    }
-
-
-    private boolean adapterEnabled()
-    {
-        BluetoothAdapter current = adapter;
-
-        if (current == null)
-            return false;
-
-        try
-        {
-            return current.isEnabled();
-        }
-        catch (SecurityException ignored)
-        {
-            return false;
-        }
-    }
-
-
-    private void enqueueScanStopped(int transport, int error, String message)
-    {
-        Event event = new Event();
-        event.type = EVENT_SCAN_STOPPED;
-        event.transport = transport;
-        event.error = error;
-        event.message = message != null ? message : "";
-        events.offer(event);
-    }
-
-
-    private void enqueueConnectResult(
-        long connection,
-        long device,
-        int error,
-        String message,
-        GMFunction callback)
-    {
-        Event event = new Event();
-        event.type = EVENT_CLASSIC_CONNECTED;
-        event.transport = TRANSPORT_CLASSIC;
-        event.connection = connection;
-        event.device = device;
-        event.error = error;
-        event.message = message != null ? message : "";
-        event.connectCallback = callback;
-        events.offer(event);
-    }
-
-
-    private void enqueueDisconnected(
-        long connection,
-        int error,
-        String message)
-    {
-        Event event = new Event();
-        event.type = EVENT_CLASSIC_DISCONNECTED;
-        event.transport = TRANSPORT_CLASSIC;
-        event.connection = connection;
-        event.error = error;
-        event.message = message != null ? message : "";
-        events.offer(event);
-    }
-
-
-    private void appendReceived(long connection, byte[] data)
-    {
-        if (data == null || data.length == 0)
-            return;
-
-        ConnectionEntry entry = getConnection(connection);
-        if (entry == null)
-            return;
-
-        int available;
-
-        synchronized (entry.receiveLock)
-        {
-            entry.receiveChunks.addLast(data);
-            entry.receiveAvailable += data.length;
-            available = entry.receiveAvailable;
-        }
-
-        Event event = new Event();
-        event.type = EVENT_CLASSIC_DATA;
-        event.transport = TRANSPORT_CLASSIC;
-        event.connection = connection;
-        event.value = available;
-        events.offer(event);
-    }
-
-
-    private void invoke(GMFunction callback, Object... arguments)
-    {
-        if (callback == null)
-            return;
-
-        try
-        {
-            callback.call(arguments);
-        }
-        catch (Throwable ignored)
-        {
-        }
-    }
-
-
-    // =========================================================================
-    // Lifecycle
-    // =========================================================================
-
-    @Override
-    public boolean bluetooth_initialize()
-    {
-        if (initialized)
-        {
-            setLastError(OK, "");
-            return true;
-        }
-
-        Context current = context();
-
-        if (current == null)
-        {
-            setLastError(
-                OPERATION_FAILED,
-                "Android application context is unavailable");
-            return false;
-        }
-
-        try
-        {
-            BluetoothManager manager =
-                (BluetoothManager) current.getSystemService(
-                    Context.BLUETOOTH_SERVICE);
-
-            adapter = manager != null
-                ? manager.getAdapter()
-                : BluetoothAdapter.getDefaultAdapter();
-
-            if (adapter == null)
-            {
-                setLastError(
-                    NOT_SUPPORTED,
-                    "Android BluetoothAdapter is unavailable");
-                return false;
-            }
-
-            generation.incrementAndGet();
-            initialized = true;
-            setLastError(OK, "");
-            return true;
-        }
-        catch (Throwable throwable)
-        {
-            adapter = null;
-            initialized = false;
-            setLastError(OPERATION_FAILED, throwableMessage(throwable));
-            return false;
-        }
-    }
-
-
-    @Override
-    public void bluetooth_shutdown()
-    {
-        if (!initialized)
-            return;
-
-        initialized = false;
-        generation.incrementAndGet();
-
-        // Stop scanner without emitting callbacks during shutdown.
-        try
-        {
-            BluetoothLeScanner scanner = leScanner;
-            if (scanner != null && leScanning.get() && hasScanPermission())
-                scanner.stopScan(leScanCallback);
-        }
-        catch (Throwable ignored)
-        {
-        }
-
-        leScanning.set(false);
-        leScanner = null;
-
-        try
-        {
-            BluetoothAdapter current = adapter;
-            if (current != null && current.isDiscovering())
-                current.cancelDiscovery();
-        }
-        catch (Throwable ignored)
-        {
-        }
-
-        classicScanning.set(false);
-        unregisterClassicReceiver();
-
-        stopServerInternal();
-
-        ArrayList<ConnectionEntry> openConnections = new ArrayList<>();
-
-        synchronized (connectionLock)
-        {
-            openConnections.addAll(connections.values());
-            connections.clear();
-        }
-
-        for (ConnectionEntry entry : openConnections)
-        {
-            entry.manualClosing = true;
-
-            BluetoothSocket socket = entry.socket;
-            if (socket != null)
-            {
-                try
-                {
-                    socket.close();
-                }
-                catch (Throwable ignored)
-                {
-                }
-            }
-        }
-
-        synchronized (deviceLock)
-        {
-            deviceById.clear();
-            devices.clear();
-            deviceOrder.clear();
-        }
-
-        events.clear();
-
-        callbackDeviceFound = null;
-        callbackScanStopped = null;
-        callbackClassicClientConnected = null;
-        callbackClassicData = null;
-        callbackClassicDisconnected = null;
-
-        adapter = null;
-        setLastError(OK, "");
-    }
-
-
-    @Override
-    public int bluetooth_update()
-    {
-        int dispatched = 0;
-
-        while (true)
-        {
-            Event event = events.poll();
-
-            if (event == null)
-                break;
-
-            switch (event.type)
-            {
-                case EVENT_DEVICE_FOUND:
-                    invoke(
-                        callbackDeviceFound,
-                        (double) event.device);
-                    break;
-
-                case EVENT_SCAN_STOPPED:
-                    if (event.error != OK)
-                        setLastError(event.error, event.message);
-
-                    invoke(
-                        callbackScanStopped,
-                        event.error,
-                        event.message);
-                    break;
-
-                case EVENT_CLASSIC_CONNECTED:
-                {
-                    ConnectionEntry entry = getConnection(event.connection);
-
-                    if (event.error == OK)
-                    {
-                        if (entry != null)
-                            entry.connected = true;
-                    }
-                    else
-                    {
-                        eraseConnection(event.connection);
-                        setLastError(event.error, event.message);
-                    }
-
-                    invoke(
-                        event.connectCallback,
-                        event.error,
-                        event.message,
-                        (double) event.connection,
-                        (double) event.device);
-                    break;
-                }
-
-                case EVENT_CLASSIC_CLIENT_CONNECTED:
-                {
-                    ConnectionEntry entry = getConnection(event.connection);
-
-                    if (entry != null)
-                        entry.connected = true;
-
-                    invoke(
-                        callbackClassicClientConnected,
-                        (double) event.connection,
-                        (double) event.device);
-                    break;
-                }
-
-                case EVENT_CLASSIC_DATA:
-                    invoke(
-                        callbackClassicData,
-                        (double) event.connection,
-                        event.value);
-                    break;
-
-                case EVENT_CLASSIC_DISCONNECTED:
-                    invoke(
-                        callbackClassicDisconnected,
-                        (double) event.connection,
-                        event.error,
-                        event.message);
-
-                    eraseConnection(event.connection);
-
-                    if (event.error != OK)
-                        setLastError(event.error, event.message);
-                    break;
-
-                default:
-                    break;
-            }
-
-            ++dispatched;
-        }
-
-        return dispatched;
-    }
-
-
-    @Override
-    public boolean bluetooth_is_initialized()
-    {
-        return initialized;
-    }
-
-
-    // =========================================================================
-    // Error state
-    // =========================================================================
-
-    @Override
-    public int bluetooth_last_error_code()
-    {
-        return lastErrorCode;
-    }
-
-
-    @Override
-    public String bluetooth_last_error_message()
-    {
-        return lastErrorMessage;
-    }
-
-
-    // =========================================================================
-    // Capabilities / permissions
-    // =========================================================================
-
-    @Override
-    public boolean bluetooth_le_is_supported()
-    {
-        if (!initialized || adapter == null)
-            return false;
-
-        Context current = context();
-
-        return current != null &&
-            current.getPackageManager().hasSystemFeature(
-                PackageManager.FEATURE_BLUETOOTH_LE);
-    }
-
-
-    @Override
-    public boolean bluetooth_classic_is_supported()
-    {
-        return initialized && adapter != null;
-    }
-
-
-    @Override
-    public boolean bluetooth_classic_server_is_supported()
-    {
-        return initialized && adapter != null;
-    }
-
-
-    @Override
-    public int bluetooth_permission_get_status()
-    {
-        if (!initialized)
-            return PERMISSION_UNKNOWN;
-
-        return hasScanPermission() && hasConnectPermission()
-            ? PERMISSION_GRANTED
-            : PERMISSION_DENIED_STATUS;
-    }
-
-
-    @Override
-    public int bluetooth_permission_request()
-    {
-        if (!initialized)
-            return result(
-                NOT_INITIALIZED,
-                "Bluetooth is not initialized");
-
-        Activity current = activity();
-
-        if (current == null)
-            return result(
-                NOT_INITIALIZED,
-                "Current Android Activity is unavailable");
-
-        if (bluetooth_permission_get_status() == PERMISSION_GRANTED)
-            return result(OK, "");
-
-        try
-        {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-            {
-                current.requestPermissions(
-                    new String[] {
-                        Manifest.permission.BLUETOOTH_SCAN,
-                        Manifest.permission.BLUETOOTH_CONNECT
-                    },
-                    REQUEST_CODE_BLUETOOTH);
-            }
-            else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
-            {
-                current.requestPermissions(
-                    new String[] {
-                        Manifest.permission.ACCESS_FINE_LOCATION
-                    },
-                    REQUEST_CODE_BLUETOOTH);
-            }
-
-            return result(OK, "");
-        }
-        catch (Throwable throwable)
-        {
-            return result(
-                OPERATION_FAILED,
-                throwableMessage(throwable));
-        }
-    }
-
-
-    // =========================================================================
-    // BLE scanning
-    // =========================================================================
-
-    private final ScanCallback leScanCallback = new ScanCallback()
-    {
-        @Override
-        public void onScanResult(int callbackType, ScanResult scanResult)
-        {
-            if (!initialized || scanResult == null)
-                return;
-
-            BluetoothDevice device = scanResult.getDevice();
-
-            if (device == null)
-                return;
-
-            boolean connectable = true;
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                connectable = scanResult.isConnectable();
-
-            int rssi = scanResult.getRssi();
-
-            upsertDevice(
-                TRANSPORT_LE,
-                deviceId(TRANSPORT_LE, device),
-                safeName(device),
-                safeAddress(device),
-                rssi,
-                rssi != 127,
-                connectable,
-                device);
-        }
-
-
-        @Override
-        public void onScanFailed(int errorCode)
-        {
-            if (!initialized)
-                return;
-
-            leScanning.set(false);
-
-            enqueueScanStopped(
-                TRANSPORT_LE,
-                OPERATION_FAILED,
-                "Android BLE scan failed: " + errorCode);
-        }
-    };
-
-
-    @Override
-    public int bluetooth_le_scan_start(boolean active)
-    {
-        // Android's scanner does not expose a direct active/passive flag in the
-        // same sense as Windows. Keep the API argument for cross-platform parity.
-        if (!initialized || adapter == null)
-            return result(
-                NOT_INITIALIZED,
-                "Bluetooth is not initialized");
-
-        if (!hasScanPermission())
-            return result(
-                PERMISSION_DENIED,
-                "Bluetooth scan permission is not granted");
-
-        if (!adapterEnabled())
-            return result(
-                BLUETOOTH_DISABLED,
-                "Bluetooth is disabled");
-
-        if (leScanning.get())
-            return result(OK, "");
-
-        try
-        {
-            leScanner = adapter.getBluetoothLeScanner();
-
-            if (leScanner == null)
-                return result(
-                    NOT_SUPPORTED,
-                    "Bluetooth LE scanner is unavailable");
-
-            leScanner.startScan(leScanCallback);
-            leScanning.set(true);
-
-            return result(OK, "");
-        }
-        catch (SecurityException exception)
-        {
-            return result(
-                PERMISSION_DENIED,
-                throwableMessage(exception));
-        }
-        catch (Throwable throwable)
-        {
-            return result(
-                OPERATION_FAILED,
-                throwableMessage(throwable));
-        }
-    }
-
-
-    @Override
-    public int bluetooth_le_scan_stop()
-    {
-        if (!initialized)
-            return result(
-                NOT_INITIALIZED,
-                "Bluetooth is not initialized");
-
-        if (!leScanning.getAndSet(false))
-            return result(OK, "");
-
-        try
-        {
-            BluetoothLeScanner scanner = leScanner;
-
-            if (scanner != null && hasScanPermission())
-                scanner.stopScan(leScanCallback);
-        }
-        catch (Throwable ignored)
-        {
-        }
-
-        enqueueScanStopped(TRANSPORT_LE, OK, "");
-        return result(OK, "");
-    }
-
-
-    @Override
-    public boolean bluetooth_le_scan_is_running()
-    {
-        return initialized && leScanning.get();
-    }
-
-
-    // =========================================================================
-    // Classic discovery
-    // =========================================================================
-
-    private final BroadcastReceiver classicReceiver = new BroadcastReceiver()
-    {
-        @Override
-        public void onReceive(Context receiverContext, Intent intent)
-        {
-            if (!initialized || intent == null)
-                return;
-
-            String action = intent.getAction();
-
-            if (BluetoothDevice.ACTION_FOUND.equals(action))
-            {
-                BluetoothDevice device;
-
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
-                {
-                    device = intent.getParcelableExtra(
-                        BluetoothDevice.EXTRA_DEVICE,
-                        BluetoothDevice.class);
-                }
-                else
-                {
-                    //noinspection deprecation
-                    device = intent.getParcelableExtra(
-                        BluetoothDevice.EXTRA_DEVICE);
-                }
-
-                if (device == null)
-                    return;
-
-                short rssi = intent.getShortExtra(
-                    BluetoothDevice.EXTRA_RSSI,
-                    Short.MIN_VALUE);
-
-                upsertDevice(
-                    TRANSPORT_CLASSIC,
-                    deviceId(TRANSPORT_CLASSIC, device),
-                    safeName(device),
-                    safeAddress(device),
-                    rssi,
-                    rssi != Short.MIN_VALUE,
-                    true,
-                    device);
-            }
-            else if (
-                BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action))
-            {
-                if (classicScanning.getAndSet(false))
-                    enqueueScanStopped(
-                        TRANSPORT_CLASSIC,
-                        OK,
-                        "");
-            }
-        }
-    };
-
-
-    private void ensureClassicReceiver()
-    {
-        if (receiverRegistered)
-            return;
-
-        Activity current = activity();
-
-        if (current == null)
-            return;
-
-        IntentFilter filter = new IntentFilter();
-        filter.addAction(BluetoothDevice.ACTION_FOUND);
-        filter.addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED);
-
-        //noinspection deprecation
-        current.registerReceiver(classicReceiver, filter);
-        receiverRegistered = true;
-    }
-
-
-    private void unregisterClassicReceiver()
-    {
-        if (!receiverRegistered)
-            return;
-
-        Activity current = activity();
-
-        if (current != null)
-        {
-            try
-            {
-                current.unregisterReceiver(classicReceiver);
-            }
-            catch (Throwable ignored)
-            {
-            }
-        }
-
-        receiverRegistered = false;
-    }
-
-
-    @Override
-    public int bluetooth_classic_scan_start()
-    {
-        if (!initialized || adapter == null)
-            return result(
-                NOT_INITIALIZED,
-                "Bluetooth is not initialized");
-
-        if (!hasScanPermission() || !hasConnectPermission())
-            return result(
-                PERMISSION_DENIED,
-                "Bluetooth scan/connect permission is not granted");
-
-        if (!adapterEnabled())
-            return result(
-                BLUETOOTH_DISABLED,
-                "Bluetooth is disabled");
-
-        if (classicScanning.get())
-            return result(OK, "");
-
-        try
-        {
-            ensureClassicReceiver();
-
-            Set<BluetoothDevice> bonded = adapter.getBondedDevices();
-
-            if (bonded != null)
-            {
-                for (BluetoothDevice device : bonded)
-                {
-                    upsertDevice(
-                        TRANSPORT_CLASSIC,
-                        deviceId(TRANSPORT_CLASSIC, device),
-                        safeName(device),
-                        safeAddress(device),
-                        0,
-                        false,
-                        true,
-                        device);
-                }
-            }
-
-            if (adapter.isDiscovering())
-                adapter.cancelDiscovery();
-
-            if (!adapter.startDiscovery())
-                return result(
-                    OPERATION_FAILED,
-                    "Android Bluetooth discovery could not start");
-
-            classicScanning.set(true);
-            return result(OK, "");
-        }
-        catch (SecurityException exception)
-        {
-            return result(
-                PERMISSION_DENIED,
-                throwableMessage(exception));
-        }
-        catch (Throwable throwable)
-        {
-            return result(
-                OPERATION_FAILED,
-                throwableMessage(throwable));
-        }
-    }
-
-
-    @Override
-    public int bluetooth_classic_scan_stop()
-    {
-        if (!initialized)
-            return result(
-                NOT_INITIALIZED,
-                "Bluetooth is not initialized");
-
-        if (!classicScanning.get())
-            return result(OK, "");
-
-        try
-        {
-            if (adapter != null && adapter.isDiscovering())
-                adapter.cancelDiscovery();
-        }
-        catch (Throwable ignored)
-        {
-        }
-
-        if (classicScanning.getAndSet(false))
-            enqueueScanStopped(
-                TRANSPORT_CLASSIC,
-                OK,
-                "");
-
-        return result(OK, "");
-    }
-
-
-    @Override
-    public boolean bluetooth_classic_scan_is_running()
-    {
-        return initialized && classicScanning.get();
-    }
-
-
-    // =========================================================================
-    // Device cache
-    // =========================================================================
-
-    @Override
-    public void bluetooth_device_clear()
-    {
-        synchronized (deviceLock)
-        {
-            deviceById.clear();
-            devices.clear();
-            deviceOrder.clear();
-        }
-    }
-
-
-    @Override
-    public int bluetooth_device_get_count()
-    {
-        synchronized (deviceLock)
-        {
-            return deviceOrder.size();
-        }
-    }
-
-
-    @Override
-    public long bluetooth_device_get_at(int index)
-    {
-        synchronized (deviceLock)
-        {
-            if (index < 0 || index >= deviceOrder.size())
-                return 0;
-
-            return deviceOrder.get(index);
-        }
-    }
-
-
-    @Override
-    public boolean bluetooth_device_is_valid(long device)
-    {
-        return copyDevice(device) != null;
-    }
-
-
-    @Override
-    public int bluetooth_device_get_transport(long device)
-    {
-        DeviceEntry entry = copyDevice(device);
-        return entry != null ? entry.transport : TRANSPORT_UNKNOWN;
-    }
-
-
-    @Override
-    public String bluetooth_device_get_id(long device)
-    {
-        DeviceEntry entry = copyDevice(device);
-        return entry != null ? entry.id : "";
-    }
-
-
-    @Override
-    public String bluetooth_device_get_name(long device)
-    {
-        DeviceEntry entry = copyDevice(device);
-        return entry != null ? entry.name : "";
-    }
-
-
-    @Override
-    public boolean bluetooth_device_has_address(long device)
-    {
-        DeviceEntry entry = copyDevice(device);
-        return entry != null && entry.addressAvailable;
-    }
-
-
-    @Override
-    public String bluetooth_device_get_address(long device)
-    {
-        DeviceEntry entry = copyDevice(device);
-        return entry != null && entry.addressAvailable
-            ? entry.address
-            : "";
-    }
-
-
-    @Override
-    public boolean bluetooth_device_has_rssi(long device)
-    {
-        DeviceEntry entry = copyDevice(device);
-        return entry != null && entry.rssiAvailable;
-    }
-
-
-    @Override
-    public int bluetooth_device_get_rssi(long device)
-    {
-        DeviceEntry entry = copyDevice(device);
-        return entry != null && entry.rssiAvailable
-            ? entry.rssi
-            : 0;
-    }
-
-
-    @Override
-    public boolean bluetooth_device_is_connectable(long device)
-    {
-        DeviceEntry entry = copyDevice(device);
-        return entry != null && entry.connectable;
-    }
-
-
-    // =========================================================================
-    // Classic RFCOMM client
-    // =========================================================================
-
-    @Override
-    public long bluetooth_classic_connect(
-        long device,
-        String service_uuid,
-        GMFunction callback)
-    {
-        if (!initialized || adapter == null)
-        {
-            setLastError(
-                NOT_INITIALIZED,
-                "Bluetooth is not initialized");
-            return 0;
-        }
-
-        DeviceEntry deviceEntry = copyDevice(device);
-
-        if (
-            deviceEntry == null ||
-            deviceEntry.transport != TRANSPORT_CLASSIC)
-        {
-            setLastError(
-                INVALID_HANDLE,
-                "Expected a Bluetooth Classic device handle");
-            return 0;
-        }
-
-        if (service_uuid == null || service_uuid.isEmpty())
-        {
-            setLastError(
-                INVALID_ARGUMENT,
-                "service_uuid cannot be empty");
-            return 0;
-        }
-
-        if (!hasConnectPermission())
-        {
-            setLastError(
-                PERMISSION_DENIED,
-                "Bluetooth connect permission is not granted");
-            return 0;
-        }
-
-        if (!adapterEnabled())
-        {
-            setLastError(
-                BLUETOOTH_DISABLED,
-                "Bluetooth is disabled");
-            return 0;
-        }
-
-        final UUID uuid;
-
-        try
-        {
-            uuid = UUID.fromString(service_uuid);
-        }
-        catch (Throwable throwable)
-        {
-            setLastError(
-                INVALID_ARGUMENT,
-                "service_uuid is not a valid UUID");
-            return 0;
-        }
-
-        final long connection = createConnection(device);
-        final long workerGeneration = generation.get();
-
-        setLastError(OK, "");
-
-        Thread thread = new Thread(
-            () ->
-            {
-                BluetoothSocket socket = null;
-
-                try
-                {
-                    if (
-                        !initialized ||
-                        generation.get() != workerGeneration)
-                    {
-                        return;
-                    }
-
-                    try
-                    {
-                        if (adapter.isDiscovering())
-                            adapter.cancelDiscovery();
-                    }
-                    catch (Throwable ignored)
-                    {
-                    }
-
-                    BluetoothDevice androidDevice =
-                        deviceEntry.androidDevice;
-
-                    if (androidDevice == null)
-                    {
-                        if (
-                            deviceEntry.address == null ||
-                            deviceEntry.address.isEmpty())
-                        {
-                            enqueueConnectResult(
-                                connection,
-                                device,
-                                INVALID_ARGUMENT,
-                                "Bluetooth Classic device has no usable address",
-                                callback);
-                            return;
-                        }
-
-                        androidDevice =
-                            adapter.getRemoteDevice(
-                                deviceEntry.address);
-                    }
-
-                    socket =
-                        androidDevice.createRfcommSocketToServiceRecord(
-                            uuid);
-
-                    ConnectionEntry connectionEntry =
-                        getConnection(connection);
-
-                    if (connectionEntry == null)
-                    {
-                        try
-                        {
-                            socket.close();
-                        }
-                        catch (Throwable ignored)
-                        {
-                        }
-                        return;
-                    }
-
-                    connectionEntry.socket = socket;
-                    socket.connect();
-
-                    if (
-                        !initialized ||
-                        generation.get() != workerGeneration)
-                    {
-                        try
-                        {
-                            socket.close();
-                        }
-                        catch (Throwable ignored)
-                        {
-                        }
-                        return;
-                    }
-
-                    enqueueConnectResult(
-                        connection,
-                        device,
-                        OK,
-                        "",
-                        callback);
-
-                    startReadLoop(
-                        connection,
-                        socket,
-                        workerGeneration);
-                }
-                catch (SecurityException exception)
-                {
-                    if (socket != null)
-                    {
-                        try
-                        {
-                            socket.close();
-                        }
-                        catch (Throwable ignored)
-                        {
-                        }
-                    }
-
-                    if (generation.get() == workerGeneration)
-                    {
-                        enqueueConnectResult(
-                            connection,
-                            device,
-                            PERMISSION_DENIED,
-                            throwableMessage(exception),
-                            callback);
-                    }
-                }
-                catch (IOException exception)
-                {
-                    if (socket != null)
-                    {
-                        try
-                        {
-                            socket.close();
-                        }
-                        catch (Throwable ignored)
-                        {
-                        }
-                    }
-
-                    if (generation.get() == workerGeneration)
-                    {
-                        enqueueConnectResult(
-                            connection,
-                            device,
-                            CONNECTION_FAILED,
-                            throwableMessage(exception),
-                            callback);
-                    }
-                }
-                catch (Throwable throwable)
-                {
-                    if (socket != null)
-                    {
-                        try
-                        {
-                            socket.close();
-                        }
-                        catch (Throwable ignored)
-                        {
-                        }
-                    }
-
-                    if (generation.get() == workerGeneration)
-                    {
-                        enqueueConnectResult(
-                            connection,
-                            device,
-                            OPERATION_FAILED,
-                            throwableMessage(throwable),
-                            callback);
-                    }
-                }
-            },
-            "GMBluetooth-RFCOMM-Connect-" + connection);
-
-        thread.setDaemon(true);
-        thread.start();
-
-        return connection;
-    }
-
-
-    private void startReadLoop(
-        final long connection,
-        final BluetoothSocket socket,
-        final long workerGeneration)
-    {
-        Thread thread = new Thread(
-            () ->
-            {
-                try
-                {
-                    InputStream input = socket.getInputStream();
-                    byte[] buffer = new byte[4096];
-
-                    while (
-                        initialized &&
-                        generation.get() == workerGeneration)
-                    {
-                        int count = input.read(buffer);
-
-                        if (count < 0)
-                            break;
-
-                        if (count == 0)
-                            continue;
-
-                        appendReceived(
-                            connection,
-                            Arrays.copyOf(buffer, count));
-                    }
-
-                    ConnectionEntry entry =
-                        getConnection(connection);
-
-                    boolean manual =
-                        entry != null && entry.manualClosing;
-
-                    if (
-                        initialized &&
-                        generation.get() == workerGeneration)
-                    {
-                        enqueueDisconnected(
-                            connection,
-                            OK,
-                            manual
-                                ? "Disconnected"
-                                : "Remote device disconnected");
-                    }
-                }
-                catch (IOException exception)
-                {
-                    ConnectionEntry entry =
-                        getConnection(connection);
-
-                    boolean manual =
-                        entry != null && entry.manualClosing;
-
-                    if (
-                        initialized &&
-                        generation.get() == workerGeneration)
-                    {
-                        enqueueDisconnected(
-                            connection,
-                            manual ? OK : DISCONNECTED,
-                            manual
-                                ? "Disconnected"
-                                : throwableMessage(exception));
-                    }
-                }
-                catch (Throwable throwable)
-                {
-                    if (
-                        initialized &&
-                        generation.get() == workerGeneration)
-                    {
-                        enqueueDisconnected(
-                            connection,
-                            OPERATION_FAILED,
-                            throwableMessage(throwable));
-                    }
-                }
-                finally
-                {
-                    try
-                    {
-                        socket.close();
-                    }
-                    catch (Throwable ignored)
-                    {
-                    }
-                }
-            },
-            "GMBluetooth-RFCOMM-Read-" + connection);
-
-        thread.setDaemon(true);
-        thread.start();
-    }
-
-
-    @Override
-    public int bluetooth_classic_disconnect(long connection)
-    {
-        ConnectionEntry entry = getConnection(connection);
-
-        if (entry == null)
-            return result(
-                INVALID_HANDLE,
-                "Invalid Bluetooth Classic connection handle");
-
-        BluetoothSocket socket = entry.socket;
-
-        if (socket == null)
-            return result(
-                INVALID_HANDLE,
-                "Bluetooth Classic socket is not connected");
-
-        entry.manualClosing = true;
-
-        try
-        {
-            socket.close();
-            return result(OK, "");
-        }
-        catch (IOException exception)
-        {
-            return result(
-                OPERATION_FAILED,
-                throwableMessage(exception));
-        }
-    }
-
-
-    @Override
-    public boolean bluetooth_classic_connection_is_valid(
-        long connection)
-    {
-        return getConnection(connection) != null;
-    }
-
-
-    @Override
-    public boolean bluetooth_classic_connection_is_connected(
-        long connection)
-    {
-        ConnectionEntry entry = getConnection(connection);
-
-        if (entry == null || !entry.connected)
-            return false;
-
-        BluetoothSocket socket = entry.socket;
-
-        return socket != null && socket.isConnected();
-    }
-
-
-    @Override
-    public long bluetooth_classic_connection_get_device(
-        long connection)
-    {
-        ConnectionEntry entry = getConnection(connection);
-        return entry != null ? entry.device : 0;
-    }
-
-
-    @Override
-    public int bluetooth_classic_receive_available(
-        long connection)
-    {
-        ConnectionEntry entry = getConnection(connection);
-
-        if (entry == null)
-            return 0;
-
-        synchronized (entry.receiveLock)
-        {
-            return entry.receiveAvailable;
-        }
-    }
-
-
-    @Override
-    public int bluetooth_classic_send(
-        long connection,
-        ByteBuffer data,
-        int offset,
-        int size)
-    {
-        // TODO: Implement GameMaker ByteBuffer -> RFCOMM byte transfer.
-        //
-        // Intentionally left unimplemented until the project's preferred
-        // GameMaker buffer convention is supplied.
-        //
-        // The BluetoothSocket transport itself is implemented and ready.
-        setLastError(
-            NOT_SUPPORTED,
-            "TODO: GameMaker buffer send bridge not implemented yet");
-
-        return NOT_SUPPORTED;
-    }
-
-
-    @Override
-    public int bluetooth_classic_receive(
-        long connection,
-        ByteBuffer out_data,
-        int offset,
-        int max_size)
-    {
-        // TODO: Implement RFCOMM receive queue -> GameMaker ByteBuffer transfer.
-        //
-        // Incoming RFCOMM bytes are already queued by startReadLoop() and
-        // bluetooth_classic_receive_available() reports their byte count.
-        // Only the final GameMaker buffer-copy convention is deferred.
-        setLastError(
-            NOT_SUPPORTED,
-            "TODO: GameMaker buffer receive bridge not implemented yet");
-
-        return 0;
-    }
-
-
-    // =========================================================================
-    // Classic RFCOMM server
-    // =========================================================================
-
-    @Override
-    public int bluetooth_classic_server_start(
-        String name,
-        String service_uuid)
-    {
-        if (!initialized || adapter == null)
-            return result(
-                NOT_INITIALIZED,
-                "Bluetooth is not initialized");
-
-        if (!hasConnectPermission())
-            return result(
-                PERMISSION_DENIED,
-                "Bluetooth connect permission is not granted");
-
-        if (!adapterEnabled())
-            return result(
-                BLUETOOTH_DISABLED,
-                "Bluetooth is disabled");
-
-        if (serverRunning.get())
-            return result(OK, "");
-
-        if (service_uuid == null || service_uuid.isEmpty())
-            return result(
-                INVALID_ARGUMENT,
-                "service_uuid cannot be empty");
-
-        final UUID uuid;
-
-        try
-        {
-            uuid = UUID.fromString(service_uuid);
-        }
-        catch (Throwable throwable)
-        {
-            return result(
-                INVALID_ARGUMENT,
-                "service_uuid is not a valid UUID");
-        }
-
-        try
-        {
-            serverSocket =
-                adapter.listenUsingRfcommWithServiceRecord(
-                    name == null || name.isEmpty()
-                        ? "GMBluetooth RFCOMM"
-                        : name,
-                    uuid);
-
-            serverRunning.set(true);
-        }
-        catch (SecurityException exception)
-        {
-            return result(
-                PERMISSION_DENIED,
-                throwableMessage(exception));
-        }
-        catch (IOException exception)
-        {
-            return result(
-                OPERATION_FAILED,
-                throwableMessage(exception));
-        }
-
-        final long workerGeneration = generation.get();
-
-        Thread thread = new Thread(
-            () ->
-            {
-                while (
-                    initialized &&
-                    serverRunning.get() &&
-                    generation.get() == workerGeneration)
-                {
-                    try
-                    {
-                        BluetoothServerSocket server =
-                            serverSocket;
-
-                        if (server == null)
-                            break;
-
-                        BluetoothSocket socket =
-                            server.accept();
-
-                        if (socket == null)
-                            continue;
-
-                        BluetoothDevice remote =
-                            socket.getRemoteDevice();
-
-                        long device = upsertDevice(
-                            TRANSPORT_CLASSIC,
-                            deviceId(
-                                TRANSPORT_CLASSIC,
-                                remote),
-                            safeName(remote),
-                            safeAddress(remote),
-                            0,
-                            false,
-                            true,
-                            remote);
-
-                        long connection =
-                            createConnection(device);
-
-                        ConnectionEntry entry =
-                            getConnection(connection);
-
-                        if (entry == null)
-                        {
-                            try
-                            {
-                                socket.close();
-                            }
-                            catch (Throwable ignored)
-                            {
-                            }
-                            continue;
-                        }
-
-                        entry.socket = socket;
-
-                        Event event = new Event();
-                        event.type =
-                            EVENT_CLASSIC_CLIENT_CONNECTED;
-                        event.transport =
-                            TRANSPORT_CLASSIC;
-                        event.connection =
-                            connection;
-                        event.device =
-                            device;
-                        events.offer(event);
-
-                        startReadLoop(
-                            connection,
-                            socket,
-                            workerGeneration);
-                    }
-                    catch (IOException exception)
-                    {
-                        if (
-                            initialized &&
-                            serverRunning.get() &&
-                            generation.get() ==
-                                workerGeneration)
-                        {
-                            setLastError(
-                                OPERATION_FAILED,
-                                throwableMessage(exception));
-                        }
-
-                        break;
-                    }
-                    catch (Throwable throwable)
-                    {
-                        if (
-                            initialized &&
-                            generation.get() ==
-                                workerGeneration)
-                        {
-                            setLastError(
-                                OPERATION_FAILED,
-                                throwableMessage(throwable));
-                        }
-
-                        break;
-                    }
-                }
-
-                serverRunning.set(false);
-            },
-            "GMBluetooth-RFCOMM-Accept");
-
-        thread.setDaemon(true);
-        thread.start();
-
-        return result(OK, "");
-    }
-
-
-    private void stopServerInternal()
-    {
-        serverRunning.set(false);
-
-        BluetoothServerSocket server = serverSocket;
-        serverSocket = null;
-
-        if (server != null)
-        {
-            try
-            {
-                server.close();
-            }
-            catch (Throwable ignored)
-            {
-            }
-        }
-    }
-
-
-    @Override
-    public int bluetooth_classic_server_stop()
-    {
-        if (!initialized)
-            return result(
-                NOT_INITIALIZED,
-                "Bluetooth is not initialized");
-
-        stopServerInternal();
-        return result(OK, "");
-    }
-
-
-    @Override
-    public boolean bluetooth_classic_server_is_running()
-    {
-        return initialized && serverRunning.get();
-    }
-
-
-    // =========================================================================
-    // Callback registration
-    // =========================================================================
-
-    @Override
-    public boolean bluetooth_set_callback_device_found(
-        GMFunction callback)
-    {
-        callbackDeviceFound = callback;
-        return true;
-    }
-
-
-    @Override
-    public boolean bluetooth_remove_callback_device_found()
-    {
-        callbackDeviceFound = null;
-        return true;
-    }
-
-
-    @Override
-    public boolean bluetooth_set_callback_scan_stopped(
-        GMFunction callback)
-    {
-        callbackScanStopped = callback;
-        return true;
-    }
-
-
-    @Override
-    public boolean bluetooth_remove_callback_scan_stopped()
-    {
-        callbackScanStopped = null;
-        return true;
-    }
-
-
-    @Override
-    public boolean bluetooth_set_callback_classic_client_connected(
-        GMFunction callback)
-    {
-        callbackClassicClientConnected = callback;
-        return true;
-    }
-
-
-    @Override
-    public boolean bluetooth_remove_callback_classic_client_connected()
-    {
-        callbackClassicClientConnected = null;
-        return true;
-    }
-
-
-    @Override
-    public boolean bluetooth_set_callback_classic_data(
-        GMFunction callback)
-    {
-        callbackClassicData = callback;
-        return true;
-    }
-
-
-    @Override
-    public boolean bluetooth_remove_callback_classic_data()
-    {
-        callbackClassicData = null;
-        return true;
-    }
-
-
-    @Override
-    public boolean bluetooth_set_callback_classic_disconnected(
-        GMFunction callback)
-    {
-        callbackClassicDisconnected = callback;
-        return true;
-    }
-
-
-    @Override
-    public boolean bluetooth_remove_callback_classic_disconnected()
-    {
-        callbackClassicDisconnected = null;
-        return true;
-    }
 }

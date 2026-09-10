@@ -115,7 +115,7 @@
     {
       "name": "ios-xcframework-release",
       "displayName": "iOS XCFramework (Release)",
-      "hidden": true,
+      "hidden": false,
       "inherits": "base-xcode",
       "cacheVariables": {
         "CMAKE_SYSTEM_NAME": "iOS",
@@ -128,7 +128,7 @@
     {
       "name": "ios-xcframework-debug",
       "displayName": "iOS XCFramework (Debug)",
-      "hidden": true,
+      "hidden": false,
       "inherits": "base-xcode",
       "cacheVariables": {
         "CMAKE_SYSTEM_NAME": "iOS",
@@ -141,7 +141,7 @@
     {
       "name": "ios-xcframework-native-release",
       "displayName": "iOS XCFramework Native (Release)",
-      "hidden": false,
+      "hidden": true,
       "inherits": "ios-xcframework-release",
       "cacheVariables": {
         "EXT_APPLE_NATIVE_FRAMEWORK": "ON",
@@ -151,7 +151,7 @@
     {
       "name": "ios-xcframework-native-debug",
       "displayName": "iOS XCFramework Native (Debug)",
-      "hidden": false,
+      "hidden": true,
       "inherits": "ios-xcframework-debug",
       "cacheVariables": {
         "EXT_APPLE_NATIVE_FRAMEWORK": "ON",
@@ -209,7 +209,7 @@
     {
       "name": "ios-gamemaker-integrate",
       "displayName": "iOS: Integrate into GameMaker Xcode project",
-      "hidden": true,
+      "hidden": false,
       "inherits": [ "ios-xcframework-debug", "base-xcode-gm" ],
       "cacheVariables": {
         "EXT_APPLE_NATIVE_FRAMEWORK": "OFF"

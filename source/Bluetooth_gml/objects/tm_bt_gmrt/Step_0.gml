@@ -10,7 +10,8 @@ if (!bt_ready)
 // Dispatch Bluetooth events to GML
 // ------------------------------------------------------------
 
-bluetooth_update();
+var _events_processed = bluetooth_update();
+show_debug_message($"[GML] bluetooth_update() called - events processed: {_events_processed}");
 
 
 // ------------------------------------------------------------
@@ -22,8 +23,9 @@ var _permission =
 
 if (_permission != last_permission_status)
 {
+    show_debug_message($"[GML] *** PERMISSION CHANGED ***");
     show_debug_message(
-        $"Bluetooth permission changed: " +
+        $"[GML] Permission changed: " +
         $"{bluetooth_permission_to_string(last_permission_status)} -> " +
         $"{bluetooth_permission_to_string(_permission)}"
     );
@@ -39,6 +41,7 @@ if (
     auto_scan_after_permission &&
     _permission == BluetoothPermissionStatus.Granted)
 {
+    show_debug_message("[GML] Auto-starting BLE scan after permission granted");
     auto_scan_after_permission = false;
     permission_request_sent = false;
 

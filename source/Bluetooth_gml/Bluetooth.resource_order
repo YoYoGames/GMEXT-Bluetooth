@@ -47,6 +47,7 @@
     {"name":"obj_room_goto","order":1,"path":"objects/obj_room_goto/obj_room_goto.yy",},
     {"name":"Obj_YoYo_text","order":1,"path":"objects/Obj_YoYo_text/Obj_YoYo_text.yy",},
     {"name":"Obj_YoYo_textbox","order":2,"path":"objects/Obj_YoYo_textbox/Obj_YoYo_textbox.yy",},
+    {"name":"tm_bt_gmrt_calssic","order":11,"path":"objects/tm_bt_gmrt_calssic/tm_bt_gmrt_calssic.yy",},
     {"name":"tm_bt_gmrt","order":3,"path":"objects/tm_bt_gmrt/tm_bt_gmrt.yy",},
     {"name":"rm_bt_classic_client","order":1,"path":"rooms/rm_bt_classic_client/rm_bt_classic_client.yy",},
     {"name":"rm_bt_classic_match","order":2,"path":"rooms/rm_bt_classic_match/rm_bt_classic_match.yy",},
