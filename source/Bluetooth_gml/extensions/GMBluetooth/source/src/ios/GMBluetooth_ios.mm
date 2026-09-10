@@ -1,10 +1,5 @@
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wredeclared-class-typedef"
-
 #import "GMBluetooth_ios.h"
 #include "../native/GMBluetooth_native.h"
-
-#pragma clang diagnostic pop
 
 @implementation GMBluetooth
 
@@ -95,7 +90,5 @@
 - (bool)bluetooth_remove_callback_classic_data { return ::bluetooth_remove_callback_classic_data(); }
 - (bool)bluetooth_set_callback_classic_disconnected:(gm::wire::GMFunction)callback { return ::bluetooth_set_callback_classic_disconnected(callback); }
 - (bool)bluetooth_remove_callback_classic_disconnected { return ::bluetooth_remove_callback_classic_disconnected(); }
-- (bool)bluetooth_set_callback_le_event:(gm::wire::GMFunction)callback { return ::bluetooth_set_callback_le_event(callback); }
-- (bool)bluetooth_remove_callback_le_event { return ::bluetooth_remove_callback_le_event(); }
 
 @end
