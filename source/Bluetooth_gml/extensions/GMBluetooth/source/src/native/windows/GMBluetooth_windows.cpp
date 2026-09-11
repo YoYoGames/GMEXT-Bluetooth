@@ -15,8 +15,10 @@
 
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Devices.Bluetooth.h>
 #include <winrt/Windows.Devices.Bluetooth.Advertisement.h>
+#include <winrt/Windows.Devices.Bluetooth.GenericAttributeProfile.h>
 
 #include <algorithm>
 #include <atomic>
@@ -35,6 +37,7 @@ namespace gmbluetooth
 {
     namespace WDB = winrt::Windows::Devices::Bluetooth;
     namespace WDBA = winrt::Windows::Devices::Bluetooth::Advertisement;
+    namespace WDBG = winrt::Windows::Devices::Bluetooth::GenericAttributeProfile;
 
     namespace
     {
@@ -420,6 +423,8 @@ namespace gmbluetooth
         }
 
         bool supports_ble() const override { return true; }
+        bool supports_le_advertise() const override { return true; }
+        bool supports_le_server() const override { return true; }
         bool supports_classic() const override { return true; }
         bool supports_classic_server() const override { return true; }
 
@@ -543,6 +548,160 @@ namespace gmbluetooth
         bool le_scan_is_running() const override
         {
             return le_scanning_.load();
+        }
+
+        // ===== BLE Advertiser =====
+
+        Error le_advertise_start(const std::string& settings_json, const std::string& data_json, std::string& message) override
+        {
+            if (!initialized_)
+                return Error::NotInitialized;
+
+            if (le_advertising_.exchange(true))
+            {
+                message.clear();
+                return Error::Ok;
+            }
+
+            try
+            {
+                // Create advertiser if not exists
+                if (!advertiser_)
+                {
+                    advertiser_ = WDBA::BluetoothLEAdvertisementPublisher();
+                    advertiser_.StatusChanged([this](const WDBA::BluetoothLEAdvertisementPublisher&, const WDBA::BluetoothLEAdvertisementPublisherStatusChangedEventArgs& args)
+                    {
+                        // Handle status changes (Started, Stopped, Aborted, etc)
+                    });
+                }
+
+                // Parse and configure advertisement
+                auto advertisement = advertiser_.Advertisement();
+
+                // TODO: Parse settings_json and data_json to configure:
+                // - Local name
+                // - Service UUIDs
+                // - Manufacturer data
+                // - TX power level
+
+                advertiser_.Start();
+                message.clear();
+                return Error::Ok;
+            }
+            catch (const winrt::hresult_error& error)
+            {
+                le_advertising_.store(false);
+                message = winrt::to_string(error.message());
+                return Error::OperationFailed;
+            }
+        }
+
+        Error le_advertise_stop(std::string& message) override
+        {
+            if (!advertiser_)
+            {
+                le_advertising_.store(false);
+                message.clear();
+                return Error::Ok;
+            }
+
+            try
+            {
+                advertiser_.Stop();
+                le_advertising_.store(false);
+                message.clear();
+                return Error::Ok;
+            }
+            catch (const winrt::hresult_error& error)
+            {
+                le_advertising_.store(false);
+                message = winrt::to_string(error.message());
+                return Error::OperationFailed;
+            }
+        }
+
+        bool le_advertise_is_running() const override
+        {
+            return le_advertising_.load();
+        }
+
+        // ===== BLE GATT Server =====
+
+        Error le_server_start(std::string& message) override
+        {
+            if (le_server_open_.exchange(true))
+            {
+                message.clear();
+                return Error::Ok;
+            }
+            message.clear();
+            return Error::Ok;
+        }
+
+        Error le_server_stop(std::string& message) override
+        {
+            le_server_open_.store(false);
+            gatt_services_.clear();
+            message.clear();
+            return Error::Ok;
+        }
+
+        bool le_server_is_running() const override
+        {
+            return le_server_open_.load();
+        }
+
+        Error le_server_add_service(const std::string& service_json, std::string& message) override
+        {
+            if (!le_server_open_.load())
+            {
+                message = "Server is not open";
+                return Error::InvalidHandle;
+            }
+
+            try
+            {
+                // TODO: Parse service_json and create GATT service
+                // GattServiceProvider::CreateAsync(serviceUuid)
+                // Add characteristics and descriptors
+                // Store in gatt_services_ map
+
+                message.clear();
+                return Error::Ok;
+            }
+            catch (const winrt::hresult_error& error)
+            {
+                message = winrt::to_string(error.message());
+                return Error::OperationFailed;
+            }
+        }
+
+        Error le_server_clear_services(std::string& message) override
+        {
+            gatt_services_.clear();
+            message.clear();
+            return Error::Ok;
+        }
+
+        Error le_server_respond_read(std::int32_t request_id, std::int32_t status, const std::string& value_base64, std::string& message) override
+        {
+            // TODO: Implement read request response
+            message = "Not yet implemented";
+            return Error::NotSupported;
+        }
+
+        Error le_server_respond_write(std::int32_t request_id, std::int32_t status, std::string& message) override
+        {
+            // TODO: Implement write request response
+            message = "Not yet implemented";
+            return Error::NotSupported;
+        }
+
+        Error le_server_notify_value(const std::string& service_uuid, const std::string& characteristic_uuid, const std::string& value_base64, std::string& message) override
+        {
+            // TODO: Implement notification
+            message = "Not yet implemented";
+            return Error::NotSupported;
         }
 
         Error classic_scan_start(std::string& message) override
@@ -1073,6 +1232,14 @@ namespace gmbluetooth
         WDBA::BluetoothLEAdvertisementWatcher watcher_{nullptr};
         winrt::event_token received_token_{};
         winrt::event_token stopped_token_{};
+
+        std::atomic_bool le_advertising_{false};
+        WDBA::BluetoothLEAdvertisementPublisher advertiser_{nullptr};
+        winrt::event_token advertiser_status_token_{};
+
+        std::atomic_bool le_server_open_{false};
+        WDBG::GattServiceProvider gatt_service_provider_{nullptr};
+        std::unordered_map<std::string, WDBG::GattServiceProvider> gatt_services_;
 
         std::atomic_bool classic_scanning_{false};
         std::atomic_bool classic_scan_stop_requested_{false};

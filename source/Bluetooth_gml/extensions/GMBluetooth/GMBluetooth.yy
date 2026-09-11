@@ -17,7 +17,7 @@
     "android.permission.BLUETOOTH_ADVERTISE",
   ],
   "androidProps":true,
-  "androidsourcedir":"",
+  "androidsourcedir":"AndroidSource",
   "author":"",
   "classname":"GMBluetooth",
   "copyToTargets":-1,

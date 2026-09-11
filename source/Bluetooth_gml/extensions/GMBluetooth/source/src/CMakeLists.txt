@@ -39,7 +39,11 @@ elseif(APPLE)
   list(APPEND TARGET_SRCS ${APPLE_SRCS})
 
 elseif(ANDROID)
-  file(GLOB TARGET_SRCS CONFIGURE_DEPENDS "${SRC_DIR}/android/*.cpp")
+  # Android is implemented entirely in Java (GMBluetooth extends GMBluetoothInternal,
+  # see AndroidSource/Java/GMBluetooth.java) — no native/JNI sources are compiled here.
+  # src/android/GMBluetooth_android.cpp is a leftover from an earlier JNI-based
+  # approach and is intentionally not globbed in; see third_party/CMakeLists.txt.
+  set(TARGET_SRCS "")
 
 elseif(UNIX)
   file(GLOB TARGET_SRCS CONFIGURE_DEPENDS "${SRC_DIR}/native/*.cpp")

@@ -15,6 +15,27 @@ namespace
     std::string g_last_error_message;
     Error g_last_error = Error::Ok;
 
+    // Callback storage
+    std::mutex g_callback_mutex;
+    GMFunction g_callback_device_found;
+    GMFunction g_callback_scan_stopped;
+    GMFunction g_callback_classic_client_connected;
+    GMFunction g_callback_classic_data;
+    GMFunction g_callback_classic_disconnected;
+
+    // Connect callbacks are one-shot and tied to a specific connection handle,
+    // not a persistently-registered callback like the others.
+    std::mutex g_pending_connect_mutex;
+    std::unordered_map<std::uint64_t, GMFunction> g_pending_connect_callbacks;
+
+    // Device found event queue (separate because it needs device handle)
+    struct DeviceFoundEvent
+    {
+        std::uint64_t device_handle;
+    };
+    std::mutex g_device_found_queue_mutex;
+    std::vector<DeviceFoundEvent> g_device_found_queue;
+
     class DeviceManager
     {
     public:
@@ -75,6 +96,10 @@ namespace
 
     DeviceManager g_device_manager;
 
+    // Event queue for callback dispatch
+    std::mutex g_event_queue_mutex;
+    std::vector<BackendEvent> g_event_queue;
+
     class ClassicConnectionManager
     {
     public:
@@ -131,6 +156,13 @@ namespace
                 device.rssi,
                 device.rssi_available ? 1 : 0,
                 device.connectable ? 1 : 0);
+
+            // Queue device_found event for callback dispatch
+            {
+                std::scoped_lock lock(g_device_found_queue_mutex);
+                g_device_found_queue.push_back(DeviceFoundEvent{handle});
+            }
+
             return handle;
         };
         hooks.create_classic_connection = [](std::uint64_t device) {
@@ -141,14 +173,15 @@ namespace
             return connection;
         };
         hooks.push_event = [](BackendEvent event) {
-            const std::uint64_t dropped = g_dropped_events.fetch_add(1) + 1;
-            // TODO: Queue events for GML callback dispatch
-            GMBT_LOG("event DROPPED (no dispatch queue implemented): type=%d transport=%d event_type='%s' json=%s [dropped so far: %llu]",
+            {
+                std::scoped_lock lock(g_event_queue_mutex);
+                g_event_queue.push_back(event);
+            }
+            GMBT_LOG("event QUEUED: type=%d transport=%d event_type='%s' queue_size=%zu",
                 static_cast<int>(event.type),
                 static_cast<int>(event.transport),
                 event.event_type.c_str(),
-                event.json.c_str(),
-                static_cast<unsigned long long>(dropped));
+                g_event_queue.size());
         };
         return hooks;
     }
@@ -204,20 +237,149 @@ void bluetooth_shutdown()
 
 std::int32_t bluetooth_update()
 {
-    // TODO: Process queued events
-    //
-    // Called every frame, so this cannot log unconditionally. Report the
-    // missing dispatch once, then stay quiet: push_event already logs each
-    // individual event it drops.
-    static bool warned = false;
-    if (!warned)
+    int dispatched_count = 0;
+
+    // Dispatch device_found events
     {
-        warned = true;
-        GMBT_LOG("WARNING: event dispatch is not implemented - bluetooth_update() will always report 0 "
-                 "and no GML callback will ever fire. This message is logged once.");
+        std::vector<DeviceFoundEvent> devices_to_dispatch;
+        {
+            std::scoped_lock lock(g_device_found_queue_mutex);
+            devices_to_dispatch = std::move(g_device_found_queue);
+            g_device_found_queue.clear();
+        }
+
+        GMFunction callback;
+        {
+            std::scoped_lock lock(g_callback_mutex);
+            callback = g_callback_device_found;
+        }
+
+        if (callback)
+        {
+            for (const auto& device_event : devices_to_dispatch)
+            {
+                try
+                {
+                    callback.call(device_event.device_handle);
+                    ++dispatched_count;
+                }
+                catch (const std::exception& e)
+                {
+                    GMBT_LOG("Error dispatching device_found callback: %s", e.what());
+                }
+            }
+        }
     }
 
-    return 0;
+    // Dispatch other backend events
+    {
+        std::vector<BackendEvent> events_to_dispatch;
+        {
+            std::scoped_lock lock(g_event_queue_mutex);
+            events_to_dispatch = std::move(g_event_queue);
+            g_event_queue.clear();
+        }
+
+        for (const auto& event : events_to_dispatch)
+        {
+            // The connect completion callback is one-shot and per-connection,
+            // not one of the persistently-registered callbacks below.
+            if (event.type == BackendEventType::ClassicConnected)
+            {
+                GMFunction callback;
+                {
+                    std::scoped_lock lock(g_pending_connect_mutex);
+                    const auto it = g_pending_connect_callbacks.find(event.connection);
+                    if (it != g_pending_connect_callbacks.end())
+                    {
+                        callback = it->second;
+                        g_pending_connect_callbacks.erase(it);
+                    }
+                }
+
+                if (callback)
+                {
+                    try
+                    {
+                        // callback(error_code, message, connection, device)
+                        callback.call(
+                            static_cast<double>(event.error),
+                            event.message,
+                            static_cast<double>(event.connection),
+                            static_cast<double>(event.device)
+                        );
+                        ++dispatched_count;
+                    }
+                    catch (const std::exception& e)
+                    {
+                        GMBT_LOG("Error dispatching classic_connect callback: %s", e.what());
+                    }
+                }
+                continue;
+            }
+
+            GMFunction callback;
+
+            // Select callback based on event type
+            {
+                std::scoped_lock lock(g_callback_mutex);
+                if (event.type == BackendEventType::ScanStopped && g_callback_scan_stopped)
+                {
+                    callback = g_callback_scan_stopped;
+                }
+                else if (event.type == BackendEventType::ClassicDataAvailable && g_callback_classic_data)
+                {
+                    callback = g_callback_classic_data;
+                }
+                else if (event.type == BackendEventType::ClassicClientConnected && g_callback_classic_client_connected)
+                {
+                    callback = g_callback_classic_client_connected;
+                }
+                else if (event.type == BackendEventType::ClassicDisconnected && g_callback_classic_disconnected)
+                {
+                    callback = g_callback_classic_disconnected;
+                }
+            }
+
+            // Dispatch callback if found, using the signature spec.gmidl documents
+            // for this event type — these differ per callback, they are not
+            // interchangeable.
+            if (callback)
+            {
+                try
+                {
+                    switch (event.type)
+                    {
+                    case BackendEventType::ScanStopped:
+                        // callback(error_code, message)
+                        callback.call(static_cast<double>(event.error), event.message);
+                        break;
+                    case BackendEventType::ClassicDataAvailable:
+                        // callback(connection, available_bytes)
+                        callback.call(static_cast<double>(event.connection), static_cast<double>(event.value));
+                        break;
+                    case BackendEventType::ClassicClientConnected:
+                        // callback(connection, device)
+                        callback.call(static_cast<double>(event.connection), static_cast<double>(event.device));
+                        break;
+                    case BackendEventType::ClassicDisconnected:
+                        // callback(connection, error_code, message)
+                        callback.call(static_cast<double>(event.connection), static_cast<double>(event.error), event.message);
+                        break;
+                    default:
+                        break;
+                    }
+                    ++dispatched_count;
+                }
+                catch (const std::exception& e)
+                {
+                    GMBT_LOG("Error dispatching callback: %s", e.what());
+                }
+            }
+        }
+    }
+
+    return dispatched_count;
 }
 
 bool bluetooth_is_initialized()
@@ -455,7 +617,7 @@ bool bluetooth_device_is_connectable(std::uint64_t device)
     return dev ? dev->connectable : false;
 }
 
-std::uint64_t bluetooth_classic_connect(std::uint64_t device, std::string_view service_uuid, const gm::wire::GMFunction&)
+std::uint64_t bluetooth_classic_connect(std::uint64_t device, std::string_view service_uuid, const gm::wire::GMFunction& callback)
 {
     if (!g_backend)
     {
@@ -473,6 +635,15 @@ std::uint64_t bluetooth_classic_connect(std::uint64_t device, std::string_view s
     }
 
     const std::uint64_t connection = g_classic_connection_manager.create_connection(device);
+
+    // Registered before calling the backend: connect runs asynchronously and may
+    // push its ClassicConnected completion event before this call even returns.
+    if (callback)
+    {
+        std::scoped_lock lock(g_pending_connect_mutex);
+        g_pending_connect_callbacks[connection] = callback;
+    }
+
     std::string message;
     const Error error = g_backend->classic_connect(connection, *dev, std::string(service_uuid), message);
     g_last_error = error;
@@ -481,6 +652,10 @@ std::uint64_t bluetooth_classic_connect(std::uint64_t device, std::string_view s
     if (error != Error::Ok)
     {
         g_classic_connection_manager.remove_connection(connection);
+        {
+            std::scoped_lock lock(g_pending_connect_mutex);
+            g_pending_connect_callbacks.erase(connection);
+        }
         return 0;
     }
 
@@ -587,80 +762,83 @@ bool bluetooth_classic_server_is_running()
     return g_backend && g_backend->classic_server_is_running();
 }
 
-// Every setter below reports success to GML while discarding the GMFunction,
-// so a caller has no way to tell registration apart from a callback that simply
-// never fires. Log loudly until the dispatch queue exists.
-#define GMBT_LOG_CALLBACK_STUB(what) \
-    GMBT_LOG("STUB: %s - accepted and DISCARDED, this callback will never fire", what)
-
-bool bluetooth_set_callback_device_found(const gm::wire::GMFunction&)
+// Callback registration functions
+bool bluetooth_set_callback_device_found(const gm::wire::GMFunction& callback)
 {
-    // TODO: Store callback for device found events
-    GMBT_LOG_CALLBACK_STUB("set_callback_device_found");
+    std::scoped_lock lock(g_callback_mutex);
+    g_callback_device_found = callback;
+    GMBT_LOG("Device found callback registered");
     return true;
 }
 
 bool bluetooth_remove_callback_device_found()
 {
-    // TODO: Remove device found callback
-    GMBT_LOG_CALLBACK_STUB("remove_callback_device_found");
+    std::scoped_lock lock(g_callback_mutex);
+    g_callback_device_found = GMFunction();
+    GMBT_LOG("Device found callback removed");
     return true;
 }
 
-bool bluetooth_set_callback_scan_stopped(const gm::wire::GMFunction&)
+bool bluetooth_set_callback_scan_stopped(const gm::wire::GMFunction& callback)
 {
-    // TODO: Store callback for scan stopped events
-    GMBT_LOG_CALLBACK_STUB("set_callback_scan_stopped");
+    std::scoped_lock lock(g_callback_mutex);
+    g_callback_scan_stopped = callback;
+    GMBT_LOG("Scan stopped callback registered");
     return true;
 }
 
 bool bluetooth_remove_callback_scan_stopped()
 {
-    // TODO: Remove scan stopped callback
-    GMBT_LOG_CALLBACK_STUB("remove_callback_scan_stopped");
+    std::scoped_lock lock(g_callback_mutex);
+    g_callback_scan_stopped = GMFunction();
+    GMBT_LOG("Scan stopped callback removed");
     return true;
 }
 
-bool bluetooth_set_callback_classic_client_connected(const gm::wire::GMFunction&)
+bool bluetooth_set_callback_classic_client_connected(const gm::wire::GMFunction& callback)
 {
-    // TODO: Store callback for classic client connected events
-    GMBT_LOG_CALLBACK_STUB("set_callback_classic_client_connected");
+    std::scoped_lock lock(g_callback_mutex);
+    g_callback_classic_client_connected = callback;
+    GMBT_LOG("Classic client connected callback registered");
     return true;
 }
 
 bool bluetooth_remove_callback_classic_client_connected()
 {
-    // TODO: Remove classic client connected callback
-    GMBT_LOG_CALLBACK_STUB("remove_callback_classic_client_connected");
+    std::scoped_lock lock(g_callback_mutex);
+    g_callback_classic_client_connected = GMFunction();
+    GMBT_LOG("Classic client connected callback removed");
     return true;
 }
 
-bool bluetooth_set_callback_classic_data(const gm::wire::GMFunction&)
+bool bluetooth_set_callback_classic_data(const gm::wire::GMFunction& callback)
 {
-    // TODO: Store callback for classic data available events
-    GMBT_LOG_CALLBACK_STUB("set_callback_classic_data");
+    std::scoped_lock lock(g_callback_mutex);
+    g_callback_classic_data = callback;
+    GMBT_LOG("Classic data callback registered");
     return true;
 }
 
 bool bluetooth_remove_callback_classic_data()
 {
-    // TODO: Remove classic data callback
-    GMBT_LOG_CALLBACK_STUB("remove_callback_classic_data");
+    std::scoped_lock lock(g_callback_mutex);
+    g_callback_classic_data = GMFunction();
+    GMBT_LOG("Classic data callback removed");
     return true;
 }
 
-bool bluetooth_set_callback_classic_disconnected(const gm::wire::GMFunction&)
+bool bluetooth_set_callback_classic_disconnected(const gm::wire::GMFunction& callback)
 {
-    // TODO: Store callback for classic disconnected events
-    GMBT_LOG_CALLBACK_STUB("set_callback_classic_disconnected");
+    std::scoped_lock lock(g_callback_mutex);
+    g_callback_classic_disconnected = callback;
+    GMBT_LOG("Classic disconnected callback registered");
     return true;
 }
 
 bool bluetooth_remove_callback_classic_disconnected()
 {
-    // TODO: Remove classic disconnected callback
-    GMBT_LOG_CALLBACK_STUB("remove_callback_classic_disconnected");
+    std::scoped_lock lock(g_callback_mutex);
+    g_callback_classic_disconnected = GMFunction();
+    GMBT_LOG("Classic disconnected callback removed");
     return true;
 }
-
-#undef GMBT_LOG_CALLBACK_STUB
