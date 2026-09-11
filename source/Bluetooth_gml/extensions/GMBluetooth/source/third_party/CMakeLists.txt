@@ -1,18 +1,7 @@
 cmake_minimum_required(VERSION 3.18)
 
 # =============================================================================
-# GMBluetooth platform integration
-#
-# Android uses the ExtGen Java template implementation:
-#   AndroidSource/Java/GMBluetooth.java
-#
-# iOS uses the ExtGen Objective-C++ template implementation:
-#   source/src/ios/GMBluetooth_ios.mm
-# which delegates to the common native core and shared Apple CoreBluetooth
-# backend.
-#
-# macOS uses the same common native core + Apple CoreBluetooth backend directly.
-# Linux is intentionally omitted for this milestone.
+# iOS-only build (macOS/Android/Windows deferred)
 # =============================================================================
 
 add_library(ext_third_party INTERFACE)
@@ -26,82 +15,36 @@ set(_GMBLUETOOTH_COMMON_CPP
 set(_GMBLUETOOTH_APPLE_MM
     "${_GMBLUETOOTH_NATIVE_DIR}/apple/GMBluetooth_apple.mm")
 
+# Include directories
 target_include_directories(ext_third_party
     INTERFACE
         "${_GMBLUETOOTH_NATIVE_DIR}")
 
-# -----------------------------------------------------------------------------
-# Windows
-# -----------------------------------------------------------------------------
-if(WIN32)
+# iOS: Add native C++ implementation and Apple backend
+if(CMAKE_OSX_SYSROOT MATCHES "iphone")
     target_sources(${EXT_MAIN_TARGET}
         PRIVATE
             "${_GMBLUETOOTH_COMMON_CPP}"
-            "${_GMBLUETOOTH_NATIVE_DIR}/windows/GMBluetooth_windows.cpp")
+            "${_GMBLUETOOTH_APPLE_MM}")
 
-    target_link_libraries(ext_third_party
-        INTERFACE
-            windowsapp
-            Ws2_32
-            Bthprops
-            Ole32)
-
-    target_compile_definitions(ext_third_party
-        INTERFACE
-            _WIN32_WINNT=0x0A00)
-
-# -----------------------------------------------------------------------------
-# Android
-# -----------------------------------------------------------------------------
-elseif(ANDROID)
-    # Intentionally empty. Android is an ExtGen Java implementation, matching
-    # the supplied GMBluetooth.java template:
-    #
-    #   public class GMBluetooth extends GMBluetoothInternal
-    #
-    # Do not route Android through C++/JNI again.
-
-# -----------------------------------------------------------------------------
-# Apple: iOS + macOS
-# -----------------------------------------------------------------------------
-elseif(APPLE)
-    # ExtGen's macOS native build already discovers src/native/*.cpp. The iOS
-    # native-framework path does not, so add the shared common core explicitly
-    # for iOS only.
-    if(CMAKE_OSX_SYSROOT MATCHES "iphone")
-        target_sources(${EXT_MAIN_TARGET}
-            PRIVATE
-                "${_GMBLUETOOTH_COMMON_CPP}")
-    endif()
-
-    # Note: GMBluetooth_apple.mm is added by src/CMakeLists.txt to avoid duplicates
-    # with macOS, which would cause linker errors. This file handles only the
-    # iOS-specific native.cpp inclusion and framework linking.
-
-    # Link frameworks directly to the extension target for iOS
-    # Using both interface library and direct linking for maximum compatibility
+    # Link required iOS frameworks
     target_link_libraries(ext_third_party
         INTERFACE
             "-framework CoreBluetooth"
             "-framework Foundation"
             "-framework CoreLocation")
 
-    # Also link directly to the main target to ensure Xcode picks them up
     target_link_libraries(${EXT_MAIN_TARGET}
         PRIVATE
             "-framework CoreBluetooth"
             "-framework Foundation"
             "-framework CoreLocation")
 
-    # Add framework search paths for iOS SDK
-    if(CMAKE_OSX_SYSROOT MATCHES "iphone")
-        # Set for Xcode generator to properly link frameworks
-        set_target_properties(${EXT_MAIN_TARGET} PROPERTIES
-            XCODE_ATTRIBUTE_FRAMEWORK_SEARCH_PATHS "${CMAKE_OSX_SYSROOT}/System/Library/Frameworks")
+    # Framework search paths for Xcode
+    set_target_properties(${EXT_MAIN_TARGET} PROPERTIES
+        XCODE_ATTRIBUTE_FRAMEWORK_SEARCH_PATHS "${CMAKE_OSX_SYSROOT}/System/Library/Frameworks")
 
-        # Also set as linker option for non-Xcode generators
-        target_link_options(${EXT_MAIN_TARGET}
-            PRIVATE
-                "-F${CMAKE_OSX_SYSROOT}/System/Library/Frameworks")
-    endif()
+    target_link_options(${EXT_MAIN_TARGET}
+        PRIVATE
+            "-F${CMAKE_OSX_SYSROOT}/System/Library/Frameworks")
 endif()

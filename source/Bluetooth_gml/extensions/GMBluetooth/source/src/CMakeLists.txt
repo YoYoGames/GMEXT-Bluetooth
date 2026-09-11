@@ -22,27 +22,12 @@ set(EXT_PUBLIC_HEADERS_TVOS
 # =============================================================================
 # User implementation sources per platform (editable template)
 # =============================================================================
-if(WIN32)
-  file(GLOB TARGET_SRCS CONFIGURE_DEPENDS "${SRC_DIR}/native/*.cpp")
-
-elseif(APPLE)
-  if(CMAKE_OSX_SYSROOT MATCHES "iphone")
-    # iOS: only add the iOS wrapper, common native implementation is added by third_party
-    file(GLOB TARGET_SRCS CONFIGURE_DEPENDS "${SRC_DIR}/ios/*.mm" "${SRC_DIR}/ios/*.cpp" "${SRC_DIR}/ios/*.swift")
-  elseif(CMAKE_OSX_SYSROOT MATCHES "appletv")
-    file(GLOB TARGET_SRCS CONFIGURE_DEPENDS "${SRC_DIR}/tvos/*.mm" "${SRC_DIR}/tvos/*.cpp" "${SRC_DIR}/tvos/*.swift")
-  else()
-    # macOS: include both native implementation and Apple backend
-    file(GLOB APPLE_SRCS CONFIGURE_DEPENDS "${SRC_DIR}/native/apple/*.mm" "${SRC_DIR}/native/apple/*.cpp")
-    file(GLOB TARGET_SRCS CONFIGURE_DEPENDS "${SRC_DIR}/native/*.mm" "${SRC_DIR}/native/*.cpp" "${SRC_DIR}/native/*.swift")
-    list(APPEND TARGET_SRCS ${APPLE_SRCS})
-  endif()
-
-elseif(ANDROID)
-  file(GLOB TARGET_SRCS CONFIGURE_DEPENDS "${SRC_DIR}/android/*.cpp")
-
-elseif(UNIX)
-  file(GLOB TARGET_SRCS CONFIGURE_DEPENDS "${SRC_DIR}/native/*.cpp")
+# iOS-only build (macOS/tvOS/Windows deferred)
+if(CMAKE_OSX_SYSROOT MATCHES "iphone")
+  # iOS: add iOS wrapper and shared native implementation
+  file(GLOB TARGET_SRCS CONFIGURE_DEPENDS
+    "${SRC_DIR}/ios/*.mm"
+    "${SRC_DIR}/ios/*.cpp")
 endif()
 
 target_sources(${PROJECT_NAME} PRIVATE ${TARGET_SRCS})
