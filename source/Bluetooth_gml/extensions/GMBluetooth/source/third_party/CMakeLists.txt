@@ -80,4 +80,27 @@ elseif(CMAKE_OSX_SYSROOT MATCHES "iphone")
         PRIVATE
             "-F${CMAKE_OSX_SYSROOT}/System/Library/Frameworks")
 
+# -----------------------------------------------------------------------------
+# macOS
+# -----------------------------------------------------------------------------
+elseif(APPLE AND NOT EXTGEN_IS_APPLE_MOBILE)
+    # Sources are NOT added here. Unlike iOS - whose src/ branch only picks up
+    # src/ios/* - the macOS branch of src/CMakeLists.txt already globs
+    # native/*.cpp and native/apple/*.mm. Adding them again would be redundant.
+    #
+    # macOS ships as a .dylib rather than a static archive, so it records its
+    # own framework dependencies at link time. That is why macOS needs no
+    # equivalent of the iOS "iosSystemFrameworkEntries" in GMBluetooth.yy.
+    target_link_libraries(ext_third_party
+        INTERFACE
+            "-framework CoreBluetooth"
+            "-framework Foundation"
+            "-framework CoreLocation")
+
+    target_link_libraries(${EXT_MAIN_TARGET}
+        PRIVATE
+            "-framework CoreBluetooth"
+            "-framework Foundation"
+            "-framework CoreLocation")
+
 endif()

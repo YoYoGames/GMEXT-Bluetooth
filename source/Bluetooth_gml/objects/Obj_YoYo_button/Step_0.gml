@@ -19,4 +19,8 @@ else {
 	image_index = 0
 }
 
-if (platform_mobile() && !mouse_check_button(mb_left)) image_index = 0;
+// Was scripts/platform_mobile, which went away with the legacy Bluetooth demo.
+// Inlined rather than restored: this is now its only caller.
+var _is_mobile = (os_type == os_android || os_type == os_ios);
+
+if (_is_mobile && !mouse_check_button(mb_left)) image_index = 0;

@@ -79,6 +79,7 @@
         {"$GMExtensionFunction":"","%Name":"__GMBluetooth_invocation_handler","argCount":2,"args":[1,2,],"documentation":"@param {Pointer} _buffer_ptr\r\n@param {Real} _buffer_size","externalName":"__EXT_NATIVE__GMBluetooth_invocation_handler","help":"","hidden":true,"kind":4,"name":"__GMBluetooth_invocation_handler","resourceType":"GMExtensionFunction","resourceVersion":"2.0","returnType":2,},
         {"$GMExtensionFunction":"","%Name":"__GMBluetooth_queue_buffer","argCount":2,"args":[1,2,],"documentation":"@param {Pointer} _buffer_ptr\r\n@param {Real} _buffer_size","externalName":"__EXT_NATIVE__GMBluetooth_queue_buffer","help":"","hidden":true,"kind":4,"name":"__GMBluetooth_queue_buffer","resourceType":"GMExtensionFunction","resourceVersion":"2.0","returnType":2,},
       ],"init":"","kind":4,"name":"","origname":"","ProxyFiles":[
+        {"$GMProxyFile":"","%Name":"libGMBluetooth.dylib","name":"libGMBluetooth.dylib","resourceType":"GMProxyFile","resourceVersion":"2.0","TargetMask":1,},
         {"$GMProxyFile":"","%Name":"GMBluetooth.dll","name":"GMBluetooth.dll","resourceType":"GMProxyFile","resourceVersion":"2.0","TargetMask":6,},
       ],"resourceType":"GMExtensionFile","resourceVersion":"2.0","uncompress":false,"usesRunnerInterface":false,},
   ],
@@ -93,9 +94,10 @@
   "iosCocoaPods":"",
   "ioscodeinjection":"",
   "iosdelegatename":"",
-  "iosplistinject":null,
+  "iosplistinject":"\n<key>NSBluetoothPeripheralUsageDescription</key><string>Advertisement would like to use bluetooth.</string>\n<key>NSBluetoothAlwaysUsageDescription</key><string>This app uses Bluetooth for multiplayer features or electronic devices communication</string>\n",
   "iosProps":true,
   "iosSystemFrameworkEntries":[
+    {"$GMExtensionFrameworkEntry":"","%Name":"CoreBluetooth.framework","embed":0,"name":"CoreBluetooth.framework","resourceType":"GMExtensionFrameworkEntry","resourceVersion":"2.0","weakReference":false,},
     {"$GMExtensionFrameworkEntry":"","%Name":"CoreLocation.framework","embed":0,"name":"CoreLocation.framework","resourceType":"GMExtensionFrameworkEntry","resourceVersion":"2.0","weakReference":false,},
   ],
   "iosThirdPartyFrameworkEntries":[
