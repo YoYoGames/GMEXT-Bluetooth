@@ -1,4 +1,5 @@
 #include "GMBluetooth_backend.h"
+#include "GMBluetooth_log.h"
 
 #if defined(__APPLE__)
 
@@ -404,19 +405,43 @@
 static bool _isScanning = false;
 
 - (double) bt_le_scan_start {
-    
-    if (_isScanning) return -1;
-    
+
+    if (_isScanning) {
+        NSLog(@"[GMBluetooth] bt_le_scan_start REJECTED: _isScanning latch is already set "
+              @"(CBCentralManager.isScanning=%d, state=%d). The latch is only cleared by "
+              @"bt_le_scan_stop, so a scan that never actually started leaves it stuck.",
+              (int)[_centralManager isScanning], (int)_centralManager.state);
+        return -1;
+    }
+
     // Clear discovered peripherals mutable array
     [self.discoveredPeripherals removeAllObjects];
-    
+
     _isScanning = true;
     int asyncId = [self generateAsyncId];
-    
+
+    // CoreBluetooth silently ignores scanForPeripheralsWithServices: unless the
+    // central is PoweredOn (5). It is Unknown (0) until centralManagerDidUpdateState:
+    // lands, which is one or more runloop turns after bt_init.
+    int authorization = -1;
+    if (@available(iOS 13.0, macOS 10.15, *)) {
+        authorization = (int)[CBManager authorization];
+    }
+    NSLog(@"[GMBluetooth] bt_le_scan_start: asyncId=%d CBCentralManager.state=%d (5=PoweredOn) authorization=%d",
+          asyncId, (int)_centralManager.state, authorization);
+
+    if (_centralManager.state != CBManagerStatePoweredOn) {
+        NSLog(@"[GMBluetooth] bt_le_scan_start WARNING: central is not PoweredOn - CoreBluetooth "
+              @"will drop this scan request and no device will ever be discovered.");
+    }
+
     [_centralManager scanForPeripheralsWithServices:nil options:nil];
-    
+
+    NSLog(@"[GMBluetooth] bt_le_scan_start: after request CBCentralManager.isScanning=%d",
+          (int)[_centralManager isScanning]);
+
     [self notifyAsyncOperationSuccess:@"bt_le_scan_start" asyncId:asyncId extraParams:nil];
-    
+
     return asyncId;
 }
 
@@ -425,9 +450,12 @@ static bool _isScanning = false;
 }
 
 - (double) bt_le_scan_stop {
-    
-    if (!_isScanning) return -1;
-    
+
+    if (!_isScanning) {
+        NSLog(@"[GMBluetooth] bt_le_scan_stop REJECTED: no scan latched as running");
+        return -1;
+    }
+
     _isScanning = false;
     int asyncId = [self generateAsyncId];
     
@@ -1850,13 +1878,19 @@ namespace
 
         Error initialize(std::string& message) override
         {
-            if (transport_) return Error::Ok;
+            if (transport_)
+            {
+                GMBT_LOG("Apple transport already created");
+                return Error::Ok;
+            }
             transport_ = [GMBluetoothAppleTransport new];
             AppleBackend* self = this;
             transport_.eventSink = ^(NSString* type, NSDictionary* params) {
                 self->on_event(type, params);
             };
             [transport_ bt_init];
+            GMBT_LOG("Apple transport created and bt_init sent. CoreBluetooth powers on asynchronously - "
+                     "watch for 'CBCentralManager state changed: PoweredOn' before expecting a scan to work.");
             message.clear();
             return Error::Ok;
         }
@@ -2007,7 +2041,14 @@ namespace
 
         void on_event(NSString* type, NSDictionary* params)
         {
-            if (!type) return;
+            if (!type)
+            {
+                GMBT_LOG("transport raised an event with no type - ignored");
+                return;
+            }
+            GMBT_LOG("transport event '%s' -> normalized '%s'",
+                to_string(type).c_str(), normalized_event_type(type).c_str());
+
             NSString* address = [params[@"address"] isKindOfClass:[NSString class]] ? params[@"address"] : nil;
             if ([type isEqualToString:@"bt_le_scan_result"] && address)
             {

@@ -22,6 +22,11 @@ permission_request_sent = false;
 auto_scan_after_permission = true;
 last_permission_status = BluetoothPermissionStatus.Unknown;
 
+// Polled by Step so it can log transitions instead of every frame.
+last_device_count = 0;
+last_scanning = false;
+log_tick = 0;
+
 ui_margin = 24;
 ui_gap = 12;
 ui_button_h = 64;
@@ -240,6 +245,17 @@ bluetooth_start_ble_scan = function()
     else
     {
         show_debug_message("[GML] *** BLE SCANNING STARTED SUCCESSFULLY ***");
+
+        // On iOS the call above reports Ok even when CoreBluetooth silently
+        // dropped it because the central had not powered on yet. The only way
+        // to catch that from GML is to ask whether a scan is really running.
+        if (!bluetooth_le_scan_is_running())
+        {
+            show_debug_message(
+                "[GML] *** WARNING: start reported Ok but no scan is running - " +
+                "check the native log for the CBCentralManager state ***"
+            );
+        }
     }
 };
 

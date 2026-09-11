@@ -10,8 +10,66 @@ if (!bt_ready)
 // Dispatch Bluetooth events to GML
 // ------------------------------------------------------------
 
-var _events_processed = bluetooth_update();
-show_debug_message($"[GML] bluetooth_update() called - events processed: {_events_processed}");
+// bluetooth_update() runs 60x/second, so logging every call buries everything
+// else in the output. Report only what actually changed since last frame.
+
+var _events_processed =
+    bluetooth_update();
+
+if (_events_processed != 0)
+{
+    show_debug_message(
+        $"[GML] bluetooth_update() processed {_events_processed} event(s)"
+    );
+}
+
+log_tick += 1;
+
+
+// ------------------------------------------------------------
+// Device cache
+//
+// The device_found callback cannot fire while the native event
+// queue is unimplemented, so polling the cache is currently the
+// only evidence that discovery is working at all.
+// ------------------------------------------------------------
+
+var _device_count =
+    bluetooth_device_get_count();
+
+if (_device_count != last_device_count)
+{
+    show_debug_message(
+        $"[GML] *** DEVICE COUNT CHANGED: " +
+        $"{last_device_count} -> {_device_count} ***"
+    );
+
+    for (var i = last_device_count; i < _device_count; ++i)
+    {
+        bluetooth_print_device(
+            bluetooth_device_get_at(i)
+        );
+    }
+
+    last_device_count = _device_count;
+}
+
+
+// ------------------------------------------------------------
+// Scan state
+// ------------------------------------------------------------
+
+var _scanning =
+    bluetooth_le_scan_is_running();
+
+if (_scanning != last_scanning)
+{
+    show_debug_message(
+        $"[GML] *** SCAN STATE CHANGED: {last_scanning} -> {_scanning} ***"
+    );
+
+    last_scanning = _scanning;
+}
 
 
 // ------------------------------------------------------------
@@ -46,6 +104,27 @@ if (
     permission_request_sent = false;
 
     bluetooth_start_ble_scan();
+}
+
+
+// ------------------------------------------------------------
+// Heartbeat
+//
+// Once a second, so an otherwise silent log can be told apart
+// from a hung or crashed extension.
+// ------------------------------------------------------------
+
+if (log_tick >= game_get_speed(gamespeed_fps))
+{
+    log_tick = 0;
+
+    show_debug_message(
+        $"[GML] heartbeat - " +
+        $"init: {bluetooth_is_initialized()}, " +
+        $"perm: {bluetooth_permission_to_string(_permission)}, " +
+        $"scanning: {_scanning}, " +
+        $"devices: {_device_count}"
+    );
 }
 
 
@@ -93,6 +172,7 @@ if (device_mouse_check_button_pressed(0, mb_left))
             _x1 + _button_w,
             _row1_y + ui_button_h))
     {
+        show_debug_message("[GML] BUTTON: REQUEST PERMISSION");
         bluetooth_request_permissions();
     }
 
@@ -107,6 +187,11 @@ if (device_mouse_check_button_pressed(0, mb_left))
             _x2 + _button_w,
             _row1_y + ui_button_h))
     {
+        show_debug_message(
+            $"[GML] BUTTON: START BLE (permission = " +
+            $"{bluetooth_permission_to_string(_permission)})"
+        );
+
         if (_permission == BluetoothPermissionStatus.Granted)
         {
             bluetooth_start_ble_scan();
@@ -129,10 +214,26 @@ if (device_mouse_check_button_pressed(0, mb_left))
             _x1 + _button_w,
             _row2_y + ui_button_h))
     {
-        if (bluetooth_le_scan_is_running())
+        show_debug_message(
+            $"[GML] BUTTON: STOP BLE (running = {_scanning})"
+        );
+
+        if (_scanning)
         {
-            show_debug_message("Stopping BLE scan...");
-            bluetooth_le_scan_stop();
+            var _error =
+                bluetooth_le_scan_stop();
+
+            show_debug_message(
+                $"[GML] bluetooth_le_scan_stop() returned: {_error}"
+            );
+
+            if (_error != BluetoothError.Ok)
+            {
+                show_debug_message(
+                    $"[GML] Error: {bluetooth_last_error_code()} - " +
+                    $"{bluetooth_last_error_message()}"
+                );
+            }
         }
     }
 
@@ -147,10 +248,11 @@ if (device_mouse_check_button_pressed(0, mb_left))
             _x2 + _button_w,
             _row2_y + ui_button_h))
     {
-        bluetooth_device_clear();
-
         show_debug_message(
-            "Bluetooth device cache cleared."
+            $"[GML] BUTTON: CLEAR DEVICES ({_device_count} cached)"
         );
+
+        bluetooth_device_clear();
+        last_device_count = 0;
     }
 }
