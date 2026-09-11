@@ -95,7 +95,9 @@
   "iosdelegatename":"",
   "iosplistinject":null,
   "iosProps":true,
-  "iosSystemFrameworkEntries":[],
+  "iosSystemFrameworkEntries":[
+    {"$GMExtensionFrameworkEntry":"","%Name":"CoreLocation.framework","embed":0,"name":"CoreLocation.framework","resourceType":"GMExtensionFrameworkEntry","resourceVersion":"2.0","weakReference":false,},
+  ],
   "iosThirdPartyFrameworkEntries":[
     {"$GMExtensionFrameworkEntry":"","%Name":"GMBluetooth.xcframework","embed":0,"name":"GMBluetooth.xcframework","resourceType":"GMExtensionFrameworkEntry","resourceVersion":"2.0","weakReference":false,},
   ],
