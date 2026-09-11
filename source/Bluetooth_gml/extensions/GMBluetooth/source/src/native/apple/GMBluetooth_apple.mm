@@ -22,59 +22,59 @@
 
 
 
-@interface QueuedMutableDictionary : NSObject
+@interface GMBTQueuedMutableDictionary : NSObject
 @property (nonatomic, strong) NSNumber *asyncId;
 @property (nonatomic, strong) NSMutableDictionary *dictionary;
 
 - (instancetype)initWithAsyncId:(NSNumber *)asyncId dictionary:(NSMutableDictionary *)dictionary;
 @end
 
-@interface QueuedMutableService : NSObject
+@interface GMBTQueuedMutableService : NSObject
 @property (nonatomic, strong) NSNumber *asyncId;
 @property (nonatomic, strong) CBMutableService *service;
 
 - (instancetype)initWithAsyncId:(NSNumber *)asyncId service:(CBMutableService *)service;
 @end
 
-@interface QueuedPeripheral : NSObject
+@interface GMBTQueuedPeripheral : NSObject
 @property (nonatomic, strong) NSNumber *asyncId;
 @property (nonatomic, strong) CBPeripheral *peripheral;
 
 - (instancetype)initWithAsyncId:(NSNumber *)asyncId peripheral:(CBPeripheral *)peripheral;
 @end
 
-@interface QueuedTimedPeripheral : QueuedPeripheral
+@interface GMBTQueuedTimedPeripheral : GMBTQueuedPeripheral
 @property (nonatomic, strong) CBCentralManager *manager;
 @property (nonatomic, strong) NSTimer *timer;
 
 - (instancetype)initWithAsyncId:(NSNumber *)asyncId peripheral:(CBPeripheral *)peripheral timer:(NSTimer *)timer;
 @end
 
-@interface QueuedService : QueuedPeripheral
+@interface GMBTQueuedService : GMBTQueuedPeripheral
 @property (nonatomic, strong) CBService *service;
 
 - (instancetype)initWithAsyncId:(NSNumber *)asyncId peripheral:(CBPeripheral *)peripheral service:(CBService *) service;
 @end
 
-@interface QueuedCharacteristic : QueuedPeripheral
+@interface GMBTQueuedCharacteristic : GMBTQueuedPeripheral
 @property (nonatomic, strong) CBCharacteristic *characteristic;
 
 - (instancetype)initWithAsyncId:(NSNumber *)asyncId peripheral:(CBPeripheral *)peripheral characteristic:(CBCharacteristic *) characteristic;
 @end
 
-@interface QueuedCharacteristicWithData : QueuedCharacteristic
+@interface GMBTQueuedCharacteristicWithData : GMBTQueuedCharacteristic
 @property (nonatomic, strong) NSData* data;
 
 - (instancetype)initWithAsyncId:(NSNumber *)asyncId peripheral:(CBPeripheral *)peripheral characteristic:(CBCharacteristic *) characteristic data:(NSData*) data;
 @end
 
-@interface QueuedDescriptor : QueuedPeripheral
+@interface GMBTQueuedDescriptor : GMBTQueuedPeripheral
 @property (nonatomic, strong) CBDescriptor *descriptor;
 
 - (instancetype)initWithAsyncId:(NSNumber *)asyncId peripheral:(CBPeripheral *)peripheral descriptor:(CBDescriptor *) descriptor;
 @end
 
-@interface QueuedDescriptorWithData : QueuedDescriptor
+@interface GMBTQueuedDescriptorWithData : GMBTQueuedDescriptor
 @property (nonatomic, strong) NSData* data;
 
 - (instancetype)initWithAsyncId:(NSNumber *)asyncId peripheral:(CBPeripheral *)peripheral descriptor:(CBDescriptor *) descriptor data:(NSData*) data;
@@ -89,18 +89,18 @@
 @property(nonatomic, strong) CBCentralManager *centralManager;
 @property(nonatomic, strong) CLLocationManager *locationManager;
 
-@property(nonatomic, strong) NSMutableArray<QueuedPeripheral *> *openPeripheralQueue;
-@property(nonatomic, strong) NSMutableArray<QueuedPeripheral *> *closePeripheralQueue;
+@property(nonatomic, strong) NSMutableArray<GMBTQueuedPeripheral *> *openPeripheralQueue;
+@property(nonatomic, strong) NSMutableArray<GMBTQueuedPeripheral *> *closePeripheralQueue;
 
-@property(nonatomic, strong) NSMutableArray<QueuedPeripheral *> *fetchServicesQueue;
-@property(nonatomic, strong) NSMutableArray<QueuedService *> *fetchCharacteristicsQueue;
-@property(nonatomic, strong) NSMutableArray<QueuedCharacteristic *> *fetchDescriptorsQueue;
+@property(nonatomic, strong) NSMutableArray<GMBTQueuedPeripheral *> *fetchServicesQueue;
+@property(nonatomic, strong) NSMutableArray<GMBTQueuedService *> *fetchCharacteristicsQueue;
+@property(nonatomic, strong) NSMutableArray<GMBTQueuedCharacteristic *> *fetchDescriptorsQueue;
 
-@property(nonatomic, strong) NSMutableArray<QueuedCharacteristic *> *readCharacteristicQueue;
-@property(nonatomic, strong) NSMutableArray<QueuedCharacteristicWithData *> *writeCharacteristicQueue;
-@property(nonatomic, strong) NSMutableArray<QueuedCharacteristicWithData *> *notifyCharacteristicQueue;
-@property(nonatomic, strong) NSMutableArray<QueuedDescriptor *> *readDescriptorQueue;
-@property(nonatomic, strong) NSMutableArray<QueuedDescriptorWithData *> *writeDescriptorQueue;
+@property(nonatomic, strong) NSMutableArray<GMBTQueuedCharacteristic *> *readCharacteristicQueue;
+@property(nonatomic, strong) NSMutableArray<GMBTQueuedCharacteristicWithData *> *writeCharacteristicQueue;
+@property(nonatomic, strong) NSMutableArray<GMBTQueuedCharacteristicWithData *> *notifyCharacteristicQueue;
+@property(nonatomic, strong) NSMutableArray<GMBTQueuedDescriptor *> *readDescriptorQueue;
+@property(nonatomic, strong) NSMutableArray<GMBTQueuedDescriptorWithData *> *writeDescriptorQueue;
 
 @property(nonatomic, strong) NSMutableDictionary <NSString *, CBPeripheral *> *discoveredPeripherals;
 @property(nonatomic, strong) NSMutableDictionary <NSString *, CBPeripheral *> *openedPeripherals;
@@ -110,8 +110,8 @@
 
 @property(nonatomic, strong) CBPeripheralManager *peripheralManager;
 
-@property(nonatomic, strong) NSMutableArray <QueuedMutableService *> *addServiceQueue;
-@property(nonatomic, strong) NSMutableArray <QueuedMutableDictionary *> *startAdvertisementQueue;
+@property(nonatomic, strong) NSMutableArray <GMBTQueuedMutableService *> *addServiceQueue;
+@property(nonatomic, strong) NSMutableArray <GMBTQueuedMutableDictionary *> *startAdvertisementQueue;
 
 @property(nonatomic, strong) NSMutableDictionary <NSString *, CBMutableService *> *addedServices;
 
@@ -121,7 +121,7 @@
 @end
 
 
-@implementation QueuedMutableDictionary
+@implementation GMBTQueuedMutableDictionary
 - (instancetype)initWithAsyncId:(NSNumber *)asyncId dictionary:(NSMutableDictionary *)dictionary {
     self = [super init];
     if (self) {
@@ -132,7 +132,7 @@
 }
 @end
 
-@implementation QueuedMutableService
+@implementation GMBTQueuedMutableService
 - (instancetype)initWithAsyncId:(NSNumber *)asyncId service:(CBMutableService *)service {
     self = [super init];
     if (self) {
@@ -143,7 +143,7 @@
 }
 @end
 
-@implementation QueuedPeripheral
+@implementation GMBTQueuedPeripheral
 - (instancetype)initWithAsyncId:(NSNumber *)asyncId peripheral:(CBPeripheral *)peripheral {
     self = [super init];
     if (self) {
@@ -154,7 +154,7 @@
 }
 @end
 
-@implementation QueuedTimedPeripheral
+@implementation GMBTQueuedTimedPeripheral
 - (instancetype)initWithAsyncId:(NSNumber *)asyncId peripheral:(CBPeripheral *)peripheral timer:(NSTimer *)timer {
     self = [super initWithAsyncId:asyncId peripheral:peripheral];
     if (self) {
@@ -164,7 +164,7 @@
 }
 @end
 
-@implementation QueuedService
+@implementation GMBTQueuedService
 - (instancetype)initWithAsyncId:(NSNumber *)asyncId peripheral:(CBPeripheral *)peripheral service:(CBService *) service {
     self = [super initWithAsyncId:asyncId peripheral:peripheral];
     if (self) {
@@ -174,7 +174,7 @@
 }
 @end
 
-@implementation QueuedCharacteristic
+@implementation GMBTQueuedCharacteristic
 - (instancetype)initWithAsyncId:(NSNumber *)asyncId peripheral:(CBPeripheral *)peripheral characteristic:(CBCharacteristic *) characteristic {
     self = [super initWithAsyncId:asyncId peripheral:peripheral];
     if (self) {
@@ -184,7 +184,7 @@
 }
 @end
 
-@implementation QueuedCharacteristicWithData
+@implementation GMBTQueuedCharacteristicWithData
 - (instancetype)initWithAsyncId:(NSNumber *)asyncId peripheral:(CBPeripheral *)peripheral characteristic:(CBCharacteristic *) characteristic data:(NSData*) data {
     self = [super initWithAsyncId:asyncId peripheral:peripheral characteristic:characteristic];
     if (self) {
@@ -194,7 +194,7 @@
 }
 @end
 
-@implementation QueuedDescriptor
+@implementation GMBTQueuedDescriptor
 - (instancetype)initWithAsyncId:(NSNumber *)asyncId peripheral:(CBPeripheral *)peripheral descriptor:(CBDescriptor *) descriptor {
     self = [super initWithAsyncId:asyncId peripheral:peripheral];
     if (self) {
@@ -204,7 +204,7 @@
 }
 @end
 
-@implementation QueuedDescriptorWithData
+@implementation GMBTQueuedDescriptorWithData
 - (instancetype)initWithAsyncId:(NSNumber *)asyncId peripheral:(CBPeripheral *)peripheral descriptor:(CBDescriptor *) descriptor data:(NSData*) data {
     self = [super initWithAsyncId:asyncId peripheral:peripheral descriptor:descriptor];
     if (self) {
@@ -401,7 +401,7 @@
 // # SCANNER
 // ####################################################################################
 
-bool _isScanning = false;
+static bool _isScanning = false;
 
 - (double) bt_le_scan_start {
     
@@ -473,10 +473,10 @@ bool _isScanning = false;
 // # ADVERTISER
 // ####################################################################################
 
-bool _isAdvertising = false;
+static bool _isAdvertising = false;
 
 - (void) handleStartAdvertisementQueue {
-    [self handleQueue:_startAdvertisementQueue withBlock:^(QueuedMutableDictionary *queuedMutableDictionary) {
+    [self handleQueue:_startAdvertisementQueue withBlock:^(GMBTQueuedMutableDictionary *queuedMutableDictionary) {
         [self->_peripheralManager startAdvertising:queuedMutableDictionary.dictionary];
     }];
 }
@@ -545,7 +545,7 @@ bool _isAdvertising = false;
     // Generate new asyncId for this task
     int asyncId = [self generateAsyncId];
     
-    QueuedMutableDictionary* queuedMutableDictionary = [[QueuedMutableDictionary alloc] initWithAsyncId:@(asyncId) dictionary:advertisementData];
+    GMBTQueuedMutableDictionary* queuedMutableDictionary = [[GMBTQueuedMutableDictionary alloc] initWithAsyncId:@(asyncId) dictionary:advertisementData];
     [self queueEnqueue:_startAdvertisementQueue value:queuedMutableDictionary withHandler:^(){ [self handleStartAdvertisementQueue]; }];
     
     // Return asyncId
@@ -570,7 +570,7 @@ bool _isAdvertising = false;
 
 - (void) peripheralManagerDidStartAdvertising:(CBPeripheralManager *)peripheral error:(NSError *)error {
     
-    QueuedMutableDictionary* queuedAdvertisementData = [self queueDequeue:_startAdvertisementQueue];
+    GMBTQueuedMutableDictionary* queuedAdvertisementData = [self queueDequeue:_startAdvertisementQueue];
     
     int asyncId = [queuedAdvertisementData.asyncId intValue];
     NSString* functionName = @"bt_le_advertise_start";
@@ -585,10 +585,10 @@ bool _isAdvertising = false;
 // # SERVER
 // ####################################################################################
 
-bool _isServerOpen = false;
+static bool _isServerOpen = false;
 
 - (void) handleAddServiceQueue {
-    [self handleQueue:_addServiceQueue withBlock:^(QueuedMutableService *queuedMutableService) {
+    [self handleQueue:_addServiceQueue withBlock:^(GMBTQueuedMutableService *queuedMutableService) {
         [self->_peripheralManager addService:queuedMutableService.service];
     }];
 }
@@ -663,7 +663,7 @@ bool _isServerOpen = false;
     service.characteristics = characteristicsArray;
     
     int asyncId = [self generateAsyncId];
-    QueuedMutableService *queueService = [[QueuedMutableService alloc] initWithAsyncId:@(asyncId) service:service];
+    GMBTQueuedMutableService *queueService = [[GMBTQueuedMutableService alloc] initWithAsyncId:@(asyncId) service:service];
     
     [self queueEnqueue:_addServiceQueue value:queueService withHandler:^(){ [self handleAddServiceQueue]; }];
         
@@ -795,7 +795,7 @@ bool _isServerOpen = false;
 }
 
 - (void) peripheralManager:(CBPeripheralManager *)peripheral didAddService:(CBService *)service error:(NSError *)error {
-    QueuedMutableService *queuedService = _addServiceQueue.firstObject;
+    GMBTQueuedMutableService *queuedService = _addServiceQueue.firstObject;
     [_addServiceQueue removeObjectAtIndex:0];
     
     NSString *functionName = @"bt_le_server_add_service";
@@ -984,12 +984,12 @@ bool _isServerOpen = false;
     }
 }
 
-NSData *KCharacteristicUnsubscribe = [NSData dataWithBytes:(int[]){1} length:sizeof(int)];
-NSData *KCharacteristicNotify = [NSData dataWithBytes:(int[]){2} length:sizeof(int)];
-NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length:sizeof(int)];
+static NSData *KCharacteristicUnsubscribe = [NSData dataWithBytes:(int[]){1} length:sizeof(int)];
+static NSData *KCharacteristicNotify = [NSData dataWithBytes:(int[]){2} length:sizeof(int)];
+static NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length:sizeof(int)];
 
 - (void) handleOpenPeripheralQueue {
-    [self handleQueue:_openPeripheralQueue withBlock:^(QueuedTimedPeripheral *queuedTimedPeripheral) {
+    [self handleQueue:_openPeripheralQueue withBlock:^(GMBTQueuedTimedPeripheral *queuedTimedPeripheral) {
         [self->_centralManager connectPeripheral:queuedTimedPeripheral.peripheral options:nil];
         queuedTimedPeripheral.timer = [NSTimer scheduledTimerWithTimeInterval:10 target:self selector:@selector(connectionDidTimeout) userInfo:nil repeats:NO];
         
@@ -997,50 +997,50 @@ NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length:sizeof
 }
 
 - (void) handleFetchServicesQueue {
-    [self handleQueue:_fetchServicesQueue withBlock:^(QueuedPeripheral *queuedPeripheral) {
+    [self handleQueue:_fetchServicesQueue withBlock:^(GMBTQueuedPeripheral *queuedPeripheral) {
         [queuedPeripheral.peripheral discoverServices: nil];
     }];
 }
 
 - (void) handleFetchCharacteristicsQueue {
-    [self handleQueue:_fetchCharacteristicsQueue withBlock:^(QueuedService *queueService) {
+    [self handleQueue:_fetchCharacteristicsQueue withBlock:^(GMBTQueuedService *queueService) {
         [queueService.peripheral discoverCharacteristics:nil forService:queueService.service];
     }];
 }
 
 - (void) handleFetchDescriptorsQueue {
-    [self handleQueue:_fetchDescriptorsQueue withBlock:^(QueuedCharacteristic *queuedCharacteristic) {
+    [self handleQueue:_fetchDescriptorsQueue withBlock:^(GMBTQueuedCharacteristic *queuedCharacteristic) {
         [queuedCharacteristic.peripheral discoverDescriptorsForCharacteristic: queuedCharacteristic.characteristic];
     }];
 }
 
 - (void) handleReadCharacteristicQueue {
-    [self handleQueue:_readCharacteristicQueue withBlock:^(QueuedCharacteristic *queuedCharacteristic) {
+    [self handleQueue:_readCharacteristicQueue withBlock:^(GMBTQueuedCharacteristic *queuedCharacteristic) {
         [queuedCharacteristic.peripheral readValueForCharacteristic: queuedCharacteristic.characteristic];
     }];
 }
 
 - (void) handleWriteCharacteristicQueue {
-    [self handleQueue:_writeCharacteristicQueue withBlock:^(QueuedCharacteristicWithData *queuedCharacteristicData) {
+    [self handleQueue:_writeCharacteristicQueue withBlock:^(GMBTQueuedCharacteristicWithData *queuedCharacteristicData) {
         [queuedCharacteristicData.peripheral writeValue:queuedCharacteristicData.data forCharacteristic:queuedCharacteristicData.characteristic type: CBCharacteristicWriteWithResponse];
     }];
 }
 
 - (void) handleNotifyCharacteristicQueue {
-    [self handleQueue:_notifyCharacteristicQueue withBlock:^(QueuedCharacteristicWithData *queuedCharacteristicData) {
+    [self handleQueue:_notifyCharacteristicQueue withBlock:^(GMBTQueuedCharacteristicWithData *queuedCharacteristicData) {
         BOOL enable = [queuedCharacteristicData.data isEqualToData: KCharacteristicUnsubscribe] ? false : true;
         [queuedCharacteristicData.peripheral setNotifyValue:enable forCharacteristic:queuedCharacteristicData.characteristic];
     }];
 }
 
 - (void) handleReadDescriptorQueue {
-    [self handleQueue:_readCharacteristicQueue withBlock:^(QueuedDescriptor *queuedDescriptor) {
+    [self handleQueue:_readCharacteristicQueue withBlock:^(GMBTQueuedDescriptor *queuedDescriptor) {
         [queuedDescriptor.peripheral readValueForDescriptor: queuedDescriptor.descriptor];
     }];
 }
 
 - (void) handleWriteDescriptorQueue {
-    [self handleQueue:_writeCharacteristicQueue withBlock:^(QueuedDescriptorWithData *queuedDescriptorWithData) {
+    [self handleQueue:_writeCharacteristicQueue withBlock:^(GMBTQueuedDescriptorWithData *queuedDescriptorWithData) {
         [queuedDescriptorWithData.peripheral writeValue:queuedDescriptorWithData.data forDescriptor:queuedDescriptorWithData.descriptor];
     }];
 }
@@ -1068,7 +1068,7 @@ NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length:sizeof
     if (!peripheral) return -1;
         
     int asyncId = [self generateAsyncId];
-    QueuedTimedPeripheral *queuePeripheral = [[QueuedTimedPeripheral alloc] initWithAsyncId:@(asyncId) peripheral:peripheral];
+    GMBTQueuedTimedPeripheral *queuePeripheral = [[GMBTQueuedTimedPeripheral alloc] initWithAsyncId:@(asyncId) peripheral:peripheral];
     
     [self queueEnqueue:_openPeripheralQueue value:queuePeripheral withHandler:^{ [self handleOpenPeripheralQueue]; }];
     
@@ -1122,7 +1122,7 @@ NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length:sizeof
     if (!peripheral) return -1;
     
     int asyncId = [self generateAsyncId];
-    QueuedPeripheral *queuePeripheral = [[QueuedPeripheral alloc] initWithAsyncId:@(asyncId) peripheral:peripheral];
+    GMBTQueuedPeripheral *queuePeripheral = [[GMBTQueuedPeripheral alloc] initWithAsyncId:@(asyncId) peripheral:peripheral];
 
     [self queueEnqueue:_fetchServicesQueue value:queuePeripheral withHandler:^{ [self handleFetchServicesQueue]; }];
     
@@ -1153,7 +1153,7 @@ NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length:sizeof
     if (!service) return -1;
 
     int asyncId = [self generateAsyncId];
-    QueuedService *queuedService = [[QueuedService alloc] initWithAsyncId:@(asyncId) peripheral:peripheral service:service];
+    GMBTQueuedService *queuedService = [[GMBTQueuedService alloc] initWithAsyncId:@(asyncId) peripheral:peripheral service:service];
 
     [self queueEnqueue:_fetchCharacteristicsQueue value:queuedService withHandler:^{ [self handleFetchCharacteristicsQueue]; }];
     
@@ -1192,7 +1192,7 @@ NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length:sizeof
     
     
     int asyncId = [self generateAsyncId];
-    QueuedCharacteristic *queuedCharacteristic = [[QueuedCharacteristic alloc] initWithAsyncId:@(asyncId) peripheral:peripheral characteristic:characteristic];
+    GMBTQueuedCharacteristic *queuedCharacteristic = [[GMBTQueuedCharacteristic alloc] initWithAsyncId:@(asyncId) peripheral:peripheral characteristic:characteristic];
 
     [self queueEnqueue:_fetchDescriptorsQueue value:queuedCharacteristic withHandler:^{ [self handleFetchDescriptorsQueue]; }];
     
@@ -1213,7 +1213,7 @@ NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length:sizeof
     if (!characteristic) return -1;
     
     int asyncId = [self generateAsyncId];
-    QueuedCharacteristic *queuedCharacteristic = [[QueuedCharacteristic alloc] initWithAsyncId:@(asyncId) peripheral:peripheral characteristic:characteristic];
+    GMBTQueuedCharacteristic *queuedCharacteristic = [[GMBTQueuedCharacteristic alloc] initWithAsyncId:@(asyncId) peripheral:peripheral characteristic:characteristic];
 
     [self queueEnqueue:_readCharacteristicQueue value:queuedCharacteristic withHandler:^{ [self handleReadCharacteristicQueue]; }];
     
@@ -1235,7 +1235,7 @@ NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length:sizeof
     if (!data) return -1;
     
     int asyncId = [self generateAsyncId];
-    QueuedCharacteristicWithData *queuedCharacteristicData = [[QueuedCharacteristicWithData alloc] initWithAsyncId:@(asyncId) peripheral:peripheral characteristic:characteristic data:data];
+    GMBTQueuedCharacteristicWithData *queuedCharacteristicData = [[GMBTQueuedCharacteristicWithData alloc] initWithAsyncId:@(asyncId) peripheral:peripheral characteristic:characteristic data:data];
 
     [self queueEnqueue:_writeCharacteristicQueue value:queuedCharacteristicData withHandler:^{ [self handleWriteCharacteristicQueue]; }];
     
@@ -1275,7 +1275,7 @@ NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length:sizeof
     if (!characteristic) return -1;
     
     int asyncId = [self generateAsyncId];
-    QueuedCharacteristicWithData *queuedCharacteristicData = [[QueuedCharacteristicWithData alloc] initWithAsyncId:@(asyncId) peripheral:peripheral characteristic:characteristic data:type];
+    GMBTQueuedCharacteristicWithData *queuedCharacteristicData = [[GMBTQueuedCharacteristicWithData alloc] initWithAsyncId:@(asyncId) peripheral:peripheral characteristic:characteristic data:type];
     
     [self queueEnqueue:_notifyCharacteristicQueue value:queuedCharacteristicData withHandler:^{ [self handleNotifyCharacteristicQueue]; }];
         
@@ -1331,7 +1331,7 @@ NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length:sizeof
     if (!descriptor) return -1;
     
     int asyncId = [self generateAsyncId];
-    QueuedDescriptor *queuedDescriptor = [[QueuedDescriptor alloc] initWithAsyncId:@(asyncId) peripheral:peripheral descriptor:descriptor];
+    GMBTQueuedDescriptor *queuedDescriptor = [[GMBTQueuedDescriptor alloc] initWithAsyncId:@(asyncId) peripheral:peripheral descriptor:descriptor];
 
     [self queueEnqueue:_readDescriptorQueue value:queuedDescriptor withHandler:^{ [self handleReadDescriptorQueue]; }];
     
@@ -1359,7 +1359,7 @@ NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length:sizeof
     if (!data) return -1;
     
     int asyncId = [self generateAsyncId];
-    QueuedDescriptorWithData *queuedDescriptorWithData = [[QueuedDescriptorWithData alloc] initWithAsyncId:@(asyncId) peripheral:peripheral descriptor:descriptor data:data];
+    GMBTQueuedDescriptorWithData *queuedDescriptorWithData = [[GMBTQueuedDescriptorWithData alloc] initWithAsyncId:@(asyncId) peripheral:peripheral descriptor:descriptor data:data];
 
     [self queueEnqueue:_writeDescriptorQueue value:queuedDescriptorWithData withHandler:^{ [self handleWriteDescriptorQueue]; }];
     
@@ -1368,7 +1368,7 @@ NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length:sizeof
 
 - (void) centralManager:(CBCentralManager *)central didConnectPeripheral:(CBPeripheral *)peripheral {
 	
-    QueuedTimedPeripheral *queuedPeripheral = [self queueDequeue:_openPeripheralQueue];
+    GMBTQueuedTimedPeripheral *queuedPeripheral = [self queueDequeue:_openPeripheralQueue];
     
     [queuedPeripheral.timer invalidate];
     
@@ -1389,7 +1389,7 @@ NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length:sizeof
 
 - (void) centralManager:(CBCentralManager *)central didFailToConnectPeripheral:(CBPeripheral *)peripheral error:(NSError *)error {
     
-    QueuedTimedPeripheral *queuedPeripheral = [self queueDequeue:_openPeripheralQueue];
+    GMBTQueuedTimedPeripheral *queuedPeripheral = [self queueDequeue:_openPeripheralQueue];
     
     [queuedPeripheral.timer invalidate];
     
@@ -1404,7 +1404,7 @@ NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length:sizeof
 }
 
 - (void) connectionDidTimeout {
-    QueuedPeripheral *queuedPeripheral = [self queueDequeue:_openPeripheralQueue];
+    GMBTQueuedPeripheral *queuedPeripheral = [self queueDequeue:_openPeripheralQueue];
     
     [_centralManager cancelPeripheralConnection: queuedPeripheral.peripheral];
     
@@ -1483,7 +1483,7 @@ NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length:sizeof
 
 - (void) peripheral:(CBPeripheral *)peripheral didDiscoverServices:(NSError *)error {
 	
-    QueuedPeripheral *queuedPeripheral = [self queueDequeue:_fetchServicesQueue];
+    GMBTQueuedPeripheral *queuedPeripheral = [self queueDequeue:_fetchServicesQueue];
     	
     NSString* type = @"bt_le_peripheral_get_services";
     int asyncId = [queuedPeripheral.asyncId intValue];
@@ -1531,7 +1531,7 @@ NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length:sizeof
 
 - (void) peripheral:(CBPeripheral *)peripheral didDiscoverCharacteristicsForService:(CBService *)service error:(NSError *)error {
     
-    QueuedService *queuedService = [self queueDequeue: _fetchCharacteristicsQueue];
+    GMBTQueuedService *queuedService = [self queueDequeue: _fetchCharacteristicsQueue];
     
     NSString* type = @"bt_le_service_get_characteristics";
     int asyncId = [queuedService.asyncId intValue];
@@ -1578,7 +1578,7 @@ NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length:sizeof
 
 - (void) peripheral:(CBPeripheral *)peripheral didDiscoverDescriptorsForCharacteristic:(CBCharacteristic *)characteristic error:(NSError *)error {
 	
-    QueuedCharacteristic *queuedCharacteristic = [self queueDequeue:_fetchDescriptorsQueue];
+    GMBTQueuedCharacteristic *queuedCharacteristic = [self queueDequeue:_fetchDescriptorsQueue];
     
     NSString* type = @"bt_le_characteristic_get_descriptors";
     int asyncId = [queuedCharacteristic.asyncId intValue];
@@ -1597,7 +1597,7 @@ NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length:sizeof
 
 - (void) peripheral:(CBPeripheral *)peripheral didUpdateNotificationStateForCharacteristic:(CBCharacteristic *)characteristic error:(NSError *)error {
     
-    QueuedCharacteristicWithData *queuedCharacteristicWithData = [self queueDequeue:_notifyCharacteristicQueue];
+    GMBTQueuedCharacteristicWithData *queuedCharacteristicWithData = [self queueDequeue:_notifyCharacteristicQueue];
     
     int asyncId = [queuedCharacteristicWithData.asyncId intValue];
     NSData* data = queuedCharacteristicWithData.data;
@@ -1630,7 +1630,7 @@ NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length:sizeof
     // Convert the value to a base64 string
     NSString *valueString = [characteristic.value base64EncodedStringWithOptions:0];
     
-    QueuedCharacteristic *queuedCharacteristic = [self queuePeek:_readCharacteristicQueue];
+    GMBTQueuedCharacteristic *queuedCharacteristic = [self queuePeek:_readCharacteristicQueue];
     
     if (queuedCharacteristic.characteristic != characteristic) {
         queuedCharacteristic = nil;
@@ -1660,7 +1660,7 @@ NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length:sizeof
 
 - (void) peripheral:(CBPeripheral *)peripheral didWriteValueForCharacteristic:(CBCharacteristic *)characteristic error:(NSError *)error {
     
-    QueuedCharacteristicWithData *queuedCharacteristicWithData = [self queueDequeue:_writeCharacteristicQueue];
+    GMBTQueuedCharacteristicWithData *queuedCharacteristicWithData = [self queueDequeue:_writeCharacteristicQueue];
         
     NSString* type = @"bt_le_characteristic_write_request";
     int asyncId = [queuedCharacteristicWithData.asyncId intValue];
@@ -1673,7 +1673,7 @@ NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length:sizeof
 
 - (void) peripheral:(CBPeripheral *)peripheral didUpdateValueForDescriptor:(CBDescriptor *)descriptor error:(nullable NSError *)error {
     
-    QueuedDescriptor *queuedDescriptor = [self queueDequeue:_readDescriptorQueue];
+    GMBTQueuedDescriptor *queuedDescriptor = [self queueDequeue:_readDescriptorQueue];
     
     NSString *type = @"bt_le_descriptor_read";
     int asyncId = [queuedDescriptor.asyncId intValue];
@@ -1687,7 +1687,7 @@ NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length:sizeof
 
 - (void) peripheral:(CBPeripheral *)peripheral didWriteValueForDescriptor:(CBDescriptor *)descriptor error:(nullable NSError *)error {
     
-    QueuedDescriptorWithData *queuedDescriptorWithData = [self queueDequeue:_writeDescriptorQueue];
+    GMBTQueuedDescriptorWithData *queuedDescriptorWithData = [self queueDequeue:_writeDescriptorQueue];
     
     NSString *type = @"bt_le_descriptor_write";
     int asyncId = [queuedDescriptorWithData.asyncId intValue];
