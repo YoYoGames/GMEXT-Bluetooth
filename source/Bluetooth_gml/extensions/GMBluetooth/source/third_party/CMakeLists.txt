@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.18)
 
 # =============================================================================
-# iOS-only build (macOS/Android/Windows deferred)
+# GMBluetooth platform integration
 # =============================================================================
 
 add_library(ext_third_party INTERFACE)
@@ -15,13 +15,45 @@ set(_GMBLUETOOTH_COMMON_CPP
 set(_GMBLUETOOTH_APPLE_MM
     "${_GMBLUETOOTH_NATIVE_DIR}/apple/GMBluetooth_apple.mm")
 
-# Include directories
 target_include_directories(ext_third_party
     INTERFACE
         "${_GMBLUETOOTH_NATIVE_DIR}")
 
-# iOS: Add native C++ implementation and Apple backend
-if(CMAKE_OSX_SYSROOT MATCHES "iphone")
+# -----------------------------------------------------------------------------
+# Windows
+# -----------------------------------------------------------------------------
+if(WIN32)
+    target_sources(${EXT_MAIN_TARGET}
+        PRIVATE
+            "${_GMBLUETOOTH_COMMON_CPP}"
+            "${_GMBLUETOOTH_NATIVE_DIR}/windows/GMBluetooth_windows.cpp")
+
+    target_link_libraries(ext_third_party
+        INTERFACE
+            windowsapp
+            Ws2_32
+            Bthprops
+            Ole32)
+
+    target_compile_definitions(ext_third_party
+        INTERFACE
+            _WIN32_WINNT=0x0A00)
+
+# -----------------------------------------------------------------------------
+# Android
+# -----------------------------------------------------------------------------
+elseif(ANDROID)
+    # Intentionally empty. Android is an ExtGen Java implementation, matching
+    # the supplied GMBluetooth.java template:
+    #
+    #   public class GMBluetooth extends GMBluetoothInternal
+    #
+    # Do not route Android through C++/JNI again.
+
+# -----------------------------------------------------------------------------
+# iOS: Add native implementation and frameworks
+# =============================================================================
+elseif(CMAKE_OSX_SYSROOT MATCHES "iphone")
     target_sources(${EXT_MAIN_TARGET}
         PRIVATE
             "${_GMBLUETOOTH_COMMON_CPP}"
@@ -47,4 +79,5 @@ if(CMAKE_OSX_SYSROOT MATCHES "iphone")
     target_link_options(${EXT_MAIN_TARGET}
         PRIVATE
             "-F${CMAKE_OSX_SYSROOT}/System/Library/Frameworks")
+
 endif()
