@@ -330,9 +330,39 @@
     return self;
 }
 
+// Scan state. Declared here rather than in the SCANNER section below because
+// bt_end has to reset them.
+static bool _isScanning = false;
+
+// A scan asked for before the central reached PoweredOn. CoreBluetooth reaches
+// that state asynchronously, several runloop turns after bt_init, and discards
+// any scan requested in the meantime - so the request is held here and replayed
+// from centralManagerDidUpdateState: instead of being silently lost.
+static bool _scanPendingPowerOn = false;
+static int _pendingScanAsyncId = 0;
+
 - (void) bt_init {
-	_centralManager = [[CBCentralManager alloc] initWithDelegate:self queue:nil options:nil];
-    _peripheralManager = [[CBPeripheralManager alloc] initWithDelegate: self queue: nil options: nil];
+    // This class implements centralManager:willRestoreState: and
+    // peripheralManager:willRestoreState:. CoreBluetooth logs
+    // "API MISUSE: ... has no restore identifier but the delegate implements
+    // the ...:willRestoreState: method" unless a restore identifier is supplied
+    // alongside them, so pass one. State restoration itself additionally
+    // requires the bluetooth-central / bluetooth-peripheral UIBackgroundModes;
+    // without those the identifier is simply inert rather than harmful.
+    //
+    // The restore-identifier options are iOS/tvOS only - macOS has no
+    // CoreBluetooth state restoration and does not declare these constants.
+    #if TARGET_OS_IOS || TARGET_OS_TV
+    _centralManager = [[CBCentralManager alloc] initWithDelegate:self queue:nil options:@{
+        CBCentralManagerOptionRestoreIdentifierKey: @"GMBluetoothCentralManager"
+    }];
+    _peripheralManager = [[CBPeripheralManager alloc] initWithDelegate:self queue:nil options:@{
+        CBPeripheralManagerOptionRestoreIdentifierKey: @"GMBluetoothPeripheralManager"
+    }];
+    #else
+    _centralManager = [[CBCentralManager alloc] initWithDelegate:self queue:nil options:nil];
+    _peripheralManager = [[CBPeripheralManager alloc] initWithDelegate:self queue:nil options:nil];
+    #endif
 
     // iOS 12+ requires CLLocationManager for BLE scanning
     #if TARGET_OS_IOS
@@ -345,8 +375,17 @@
     }
     #endif
 
+    // registerForConnectionEventsWithOptions: is deliberately NOT called here.
+    // The central is still in the Unknown state at this point, and CoreBluetooth
+    // answers with "API MISUSE: ... can only accept this command while in the
+    // powered on state" and ignores it. centralManagerDidUpdateState: issues it
+    // once the central actually reaches PoweredOn.
+}
+
+// Commands CoreBluetooth only accepts once the central is powered on.
+- (void) applyPoweredOnCentralOptions {
     #if TARGET_OS_OSX
-    // This functions doesnt work on Macos..
+    // Not available on macOS.
     #else
     if (@available(iOS 13.0, *)) {
         NSDictionary *options = @{
@@ -360,6 +399,11 @@
 }
 
 - (void) bt_end {
+    // These outlive the managers (file-scope), so a shutdown mid-scan would
+    // otherwise leave the next bt_init believing a scan is already under way.
+    _isScanning = false;
+    _scanPendingPowerOn = false;
+
     _centralManager = nil;
     _peripheralManager = nil;
     _locationManager = nil;
@@ -402,14 +446,12 @@
 // # SCANNER
 // ####################################################################################
 
-static bool _isScanning = false;
-
 - (double) bt_le_scan_start {
 
-    if (_isScanning) {
-        NSLog(@"[GMBluetooth] bt_le_scan_start REJECTED: _isScanning latch is already set "
-              @"(CBCentralManager.isScanning=%d, state=%d). The latch is only cleared by "
-              @"bt_le_scan_stop, so a scan that never actually started leaves it stuck.",
+    if (_isScanning || _scanPendingPowerOn) {
+        NSLog(@"[GMBluetooth] bt_le_scan_start REJECTED: a scan is already %@ "
+              @"(CBCentralManager.isScanning=%d, state=%d)",
+              _scanPendingPowerOn ? @"pending power-on" : @"running",
               (int)[_centralManager isScanning], (int)_centralManager.state);
         return -1;
     }
@@ -417,12 +459,8 @@ static bool _isScanning = false;
     // Clear discovered peripherals mutable array
     [self.discoveredPeripherals removeAllObjects];
 
-    _isScanning = true;
     int asyncId = [self generateAsyncId];
 
-    // CoreBluetooth silently ignores scanForPeripheralsWithServices: unless the
-    // central is PoweredOn (5). It is Unknown (0) until centralManagerDidUpdateState:
-    // lands, which is one or more runloop turns after bt_init.
     int authorization = -1;
     if (@available(iOS 13.0, macOS 10.15, *)) {
         authorization = (int)[CBManager authorization];
@@ -431,18 +469,29 @@ static bool _isScanning = false;
           asyncId, (int)_centralManager.state, authorization);
 
     if (_centralManager.state != CBManagerStatePoweredOn) {
-        NSLog(@"[GMBluetooth] bt_le_scan_start WARNING: central is not PoweredOn - CoreBluetooth "
-              @"will drop this scan request and no device will ever be discovered.");
+        _scanPendingPowerOn = true;
+        _pendingScanAsyncId = asyncId;
+        NSLog(@"[GMBluetooth] bt_le_scan_start: central is not PoweredOn yet - scan DEFERRED, "
+              @"it will start automatically from centralManagerDidUpdateState:");
+        return asyncId;
     }
+
+    [self beginScanWithAsyncId:asyncId];
+    return asyncId;
+}
+
+// Issues the actual CoreBluetooth scan. Only ever called with the central
+// already PoweredOn, so _isScanning tracks a scan that really started.
+- (void) beginScanWithAsyncId:(int)asyncId {
+
+    _isScanning = true;
 
     [_centralManager scanForPeripheralsWithServices:nil options:nil];
 
-    NSLog(@"[GMBluetooth] bt_le_scan_start: after request CBCentralManager.isScanning=%d",
-          (int)[_centralManager isScanning]);
+    NSLog(@"[GMBluetooth] beginScan: asyncId=%d CBCentralManager.isScanning=%d",
+          asyncId, (int)[_centralManager isScanning]);
 
     [self notifyAsyncOperationSuccess:@"bt_le_scan_start" asyncId:asyncId extraParams:nil];
-
-    return asyncId;
 }
 
 - (double) bt_le_scan_is_active {
@@ -451,11 +500,14 @@ static bool _isScanning = false;
 
 - (double) bt_le_scan_stop {
 
-    if (!_isScanning) {
-        NSLog(@"[GMBluetooth] bt_le_scan_stop REJECTED: no scan latched as running");
+    if (!_isScanning && !_scanPendingPowerOn) {
+        NSLog(@"[GMBluetooth] bt_le_scan_stop REJECTED: no scan running or pending");
         return -1;
     }
 
+    // Cancels a deferred request too, so stopping before the central powers on
+    // does not leave a scan queued to fire later.
+    _scanPendingPowerOn = false;
     _isScanning = false;
     int asyncId = [self generateAsyncId];
     
@@ -1750,6 +1802,30 @@ static NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length
             break;
     }
     NSLog(@"[GMBluetooth] CBCentralManager state changed: %@ (%d)", stateString, (int)central.state);
+
+    if (central.state == CBManagerStatePoweredOn) {
+        // Deferred out of bt_init: CoreBluetooth rejects this before PoweredOn.
+        [self applyPoweredOnCentralOptions];
+
+        if (_scanPendingPowerOn) {
+            _scanPendingPowerOn = false;
+            NSLog(@"[GMBluetooth] central reached PoweredOn - starting the scan deferred at request time");
+            [self beginScanWithAsyncId:_pendingScanAsyncId];
+        }
+    }
+    else if (_scanPendingPowerOn && central.state != CBManagerStateUnknown &&
+             central.state != CBManagerStateResetting) {
+        // Unsupported / Unauthorized / PoweredOff are terminal for this request -
+        // holding the deferral would stall the caller indefinitely.
+        _scanPendingPowerOn = false;
+        NSLog(@"[GMBluetooth] central reached %@ - the deferred scan cannot start and has been dropped",
+              stateString);
+        [self notifyAsyncOperationError:@"bt_le_scan_start"
+                                asyncId:_pendingScanAsyncId
+                              errorCode:(int)central.state
+                            extraParams:@{ @"state": stateString }];
+    }
+
     [self notifyOperation:@"bt_le_state_update"
               extraParams:@{ @"success": @((int)central.state), @"state": stateString }];
 }
