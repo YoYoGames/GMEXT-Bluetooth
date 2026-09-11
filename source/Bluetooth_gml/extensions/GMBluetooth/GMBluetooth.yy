@@ -92,7 +92,7 @@
   "installdir":"",
   "iosCocoaPodDependencies":"",
   "iosCocoaPods":"",
-  "ioscodeinjection":"",
+  "ioscodeinjection":"<YYIosPlist>\n    <!-- Bluetooth access - iOS 13+ -->\n    <key>NSBluetoothAlwaysUsageDescription</key>\n    <string>This app uses Bluetooth to discover, connect to, and communicate with nearby devices.</string>\n\n    <!-- Bluetooth access - required for deployment targets earlier than iOS 13 -->\n    <key>NSBluetoothPeripheralUsageDescription</key>\n    <string>This app uses Bluetooth to discover, connect to, and communicate with nearby devices.</string>\n\n    <!-- Location permission - keep this if the extension uses CLLocationManager -->\n    <key>NSLocationWhenInUseUsageDescription</key>\n    <string>This app uses location services when required for nearby device discovery.</string>\n\n    <!-- Bluetooth background execution / CBCentralManager state restoration -->\n    <key>UIBackgroundModes</key>\n    <array>\n        <string>bluetooth-central</string>\n        <string>bluetooth-peripheral</string>\n    </array>\n</YYIosPlist>",
   "iosdelegatename":"",
   "iosplistinject":"\n<key>NSBluetoothPeripheralUsageDescription</key><string>Advertisement would like to use bluetooth.</string>\n<key>NSBluetoothAlwaysUsageDescription</key><string>This app uses Bluetooth for multiplayer features or electronic devices communication</string>\n",
   "iosProps":true,
