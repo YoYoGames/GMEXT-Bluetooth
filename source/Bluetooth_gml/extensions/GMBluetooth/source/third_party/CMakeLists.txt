@@ -95,12 +95,14 @@ elseif(APPLE AND NOT EXTGEN_IS_APPLE_MOBILE)
         INTERFACE
             "-framework CoreBluetooth"
             "-framework Foundation"
-            "-framework CoreLocation")
+            "-framework CoreLocation"
+            "-framework IOBluetooth")
 
     target_link_libraries(${EXT_MAIN_TARGET}
         PRIVATE
             "-framework CoreBluetooth"
             "-framework Foundation"
-            "-framework CoreLocation")
+            "-framework CoreLocation"
+            "-framework IOBluetooth")
 
 endif()

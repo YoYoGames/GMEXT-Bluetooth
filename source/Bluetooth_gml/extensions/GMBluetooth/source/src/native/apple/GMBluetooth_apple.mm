@@ -12,9 +12,15 @@
 #import <UIKit/UIKit.h>
 #else
 // macOS only - NSHost is part of Foundation (already imported above)
+#import <IOBluetooth/IOBluetooth.h>
 #endif
 
+#include <algorithm>
+#include <atomic>
+#include <cctype>
 #include <cstdint>
+#include <cstdio>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -486,7 +492,8 @@ static int _pendingScanAsyncId = 0;
 
     _isScanning = true;
 
-    [_centralManager scanForPeripheralsWithServices:nil options:nil];
+    [_centralManager scanForPeripheralsWithServices:nil
+                                             options:@{ CBCentralManagerScanOptionAllowDuplicatesKey: @YES }];
 
     NSLog(@"[GMBluetooth] beginScan: asyncId=%d CBCentralManager.isScanning=%d",
           asyncId, (int)[_centralManager isScanning]);
@@ -1886,6 +1893,72 @@ static NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length
 @end
 
 
+#if TARGET_OS_OSX
+
+// Bluetooth Classic (RFCOMM) support is macOS-only: IOBluetooth is not
+// available on iOS. These small delegate/notification shims translate
+// IOBluetooth's target+selector and delegate-protocol callbacks into blocks
+// so the C++ AppleBackend below can stay in one place.
+
+@interface GMBTClassicChannelDelegate : NSObject <IOBluetoothRFCOMMChannelDelegate>
+@property (nonatomic, copy) void (^onOpenComplete)(IOReturn status);
+@property (nonatomic, copy) void (^onData)(NSData *data);
+@property (nonatomic, copy) void (^onClose)(void);
+@end
+
+@implementation GMBTClassicChannelDelegate
+- (void)rfcommChannelOpenComplete:(IOBluetoothRFCOMMChannel *)rfcommChannel status:(IOReturn)error {
+    if (self.onOpenComplete) self.onOpenComplete(error);
+}
+- (void)rfcommChannelData:(IOBluetoothRFCOMMChannel *)rfcommChannel data:(void *)dataPointer length:(size_t)dataLength {
+    if (self.onData) self.onData([NSData dataWithBytes:dataPointer length:dataLength]);
+}
+- (void)rfcommChannelClosed:(IOBluetoothRFCOMMChannel *)rfcommChannel {
+    if (self.onClose) self.onClose();
+}
+@end
+
+@interface GMBTClassicInquiryDelegate : NSObject <IOBluetoothDeviceInquiryDelegate>
+@property (nonatomic, copy) void (^onDeviceFound)(IOBluetoothDevice *device);
+@property (nonatomic, copy) void (^onComplete)(IOReturn error, BOOL aborted);
+@end
+
+@implementation GMBTClassicInquiryDelegate
+- (void)deviceInquiryDeviceFound:(IOBluetoothDeviceInquiry *)sender device:(IOBluetoothDevice *)device {
+    if (self.onDeviceFound) self.onDeviceFound(device);
+}
+- (void)deviceInquiryComplete:(IOBluetoothDeviceInquiry *)sender error:(IOReturn)error aborted:(BOOL)aborted {
+    if (self.onComplete) self.onComplete(error, aborted);
+}
+@end
+
+// performSDPQuery: does not use a formal delegate protocol - it calls back
+// on whatever object it is given via -sdpQueryComplete:status:.
+@interface GMBTSDPQueryHandler : NSObject
+@property (nonatomic, copy) void (^onComplete)(IOBluetoothDevice *device, IOReturn status);
+@end
+
+@implementation GMBTSDPQueryHandler
+- (void)sdpQueryComplete:(IOBluetoothDevice *)device status:(IOReturn)status {
+    if (self.onComplete) self.onComplete(device, status);
+}
+@end
+
+// registerForChannelOpenNotifications:selector:withChannelID:direction: is
+// likewise a plain target+selector callback, not a delegate protocol.
+@interface GMBTClassicServerHub : NSObject
+@property (nonatomic, copy) void (^onChannelOpened)(IOBluetoothRFCOMMChannel *channel);
+@end
+
+@implementation GMBTClassicServerHub
+- (void)rfcommChannelOpened:(IOBluetoothUserNotification *)notification channel:(IOBluetoothRFCOMMChannel *)channel {
+    if (self.onChannelOpened) self.onChannelOpened(channel);
+}
+@end
+
+#endif // TARGET_OS_OSX
+
+
 namespace gmbluetooth
 {
 namespace
@@ -1973,6 +2046,9 @@ namespace
 
         void shutdown() override
         {
+#if TARGET_OS_OSX
+            classic_shutdown();
+#endif
             if (!transport_) return;
             transport_.eventSink = nil;
             [transport_ bt_end];
@@ -1985,8 +2061,13 @@ namespace
         bool supports_ble() const override { return true; }
         bool supports_le_advertise() const override { return true; }
         bool supports_le_server() const override { return true; }
+#if TARGET_OS_OSX
+        bool supports_classic() const override { return true; }
+        bool supports_classic_server() const override { return true; }
+#else
         bool supports_classic() const override { return false; }
         bool supports_classic_server() const override { return false; }
+#endif
 
         PermissionStatus permission_status() const override
         {
@@ -2076,18 +2157,226 @@ namespace
         Error le_server_respond_write(std::int32_t r,std::int32_t st,std::string&m) override { double x=[transport_ bt_le_server_respond_write:r status:st]; if(x>0){m.clear();return Error::Ok;}m="GATT write response failed";return Error::OperationFailed; }
         Error le_server_notify_value(const std::string&s,const std::string&ch,const std::string&v,std::string&m) override { return async_result([transport_ bt_le_server_notify_value:to_ns(s) characteristicUuid:to_ns(ch) value:to_ns(v)],"GATT notification could not start",m); }
 
-        Error classic_scan_start(std::string&m) override {m="Bluetooth Classic is not implemented by the old Apple transport";return Error::NotSupported;}
+#if TARGET_OS_OSX
+
+        Error classic_scan_start(std::string& message) override
+        {
+            if (classic_inquiry_) { message.clear(); return Error::Ok; }
+
+            GMBTClassicInquiryDelegate* delegate = [GMBTClassicInquiryDelegate new];
+            AppleBackend* self = this;
+            delegate.onDeviceFound = ^(IOBluetoothDevice* device) { self->handle_classic_device_found(device); };
+            delegate.onComplete = ^(IOReturn error, BOOL aborted) { (void)aborted; self->handle_classic_inquiry_complete(error); };
+
+            IOBluetoothDeviceInquiry* inquiry = [IOBluetoothDeviceInquiry inquiryWithDelegate:delegate];
+            [inquiry setInquiryLength:10];
+            [inquiry setUpdateNewDeviceNames:YES];
+            const IOReturn status = [inquiry start];
+            if (status != kIOReturnSuccess)
+            {
+                message = "Bluetooth Classic scan could not start";
+                return Error::OperationFailed;
+            }
+            classic_inquiry_delegate_ = delegate;
+            classic_inquiry_ = inquiry;
+            message.clear();
+            return Error::Ok;
+        }
+
+        Error classic_scan_stop(std::string& message) override
+        {
+            if (classic_inquiry_) [classic_inquiry_ stop];
+            message.clear();
+            return Error::Ok;
+        }
+
+        bool classic_scan_is_running() const override { return classic_inquiry_ != nil; }
+
+        Error classic_connect(std::uint64_t connection, const DiscoveredDevice& device, const std::string& service_uuid, std::string& message) override
+        {
+            if (!device.address_available || device.address.empty())
+            {
+                message = "Classic device address is unavailable";
+                return Error::InvalidArgument;
+            }
+            IOBluetoothDevice* btDevice = classic_device_for_address(device.address);
+            if (!btDevice)
+            {
+                message = "Classic device could not be resolved";
+                return Error::NotFound;
+            }
+
+            auto state = std::make_shared<ClassicConnectionState>();
+            state->connection = connection;
+            {
+                std::scoped_lock lock(classic_mutex_);
+                classic_connections_[connection] = state;
+            }
+
+            GMBTSDPQueryHandler* sdpHandler = [GMBTSDPQueryHandler new];
+            AppleBackend* self = this;
+            const std::string uuidCopy = service_uuid;
+            sdpHandler.onComplete = ^(IOBluetoothDevice* d, IOReturn status) {
+                self->handle_classic_sdp_complete(connection, d, status, uuidCopy);
+            };
+            {
+                std::scoped_lock lock(classic_mutex_);
+                classic_pending_sdp_[connection] = sdpHandler;
+            }
+
+            IOBluetoothSDPUUID* uuid = classic_uuid_from_string(service_uuid);
+            const IOReturn status = uuid ? [btDevice performSDPQuery:sdpHandler uuids:@[ uuid ]]
+                                          : [btDevice performSDPQuery:sdpHandler];
+            if (status != kIOReturnSuccess)
+            {
+                std::scoped_lock lock(classic_mutex_);
+                classic_connections_.erase(connection);
+                classic_pending_sdp_.erase(connection);
+                message = "Classic service discovery could not start";
+                return Error::OperationFailed;
+            }
+            message.clear();
+            return Error::Ok;
+        }
+
+        Error classic_disconnect(std::uint64_t connection, std::string& message) override
+        {
+            std::shared_ptr<ClassicConnectionState> state;
+            {
+                std::scoped_lock lock(classic_mutex_);
+                auto it = classic_connections_.find(connection);
+                if (it == classic_connections_.end()) return invalid_connection(message);
+                state = it->second;
+            }
+            [state->channel closeChannel];
+            message.clear();
+            return Error::Ok;
+        }
+
+        bool classic_connection_is_connected(std::uint64_t connection) const override
+        {
+            std::scoped_lock lock(classic_mutex_);
+            auto it = classic_connections_.find(connection);
+            return it != classic_connections_.end() && it->second->connected;
+        }
+
+        std::int32_t classic_receive_available(std::uint64_t connection) const override
+        {
+            auto state = find_classic_connection(connection);
+            if (!state) return 0;
+            std::scoped_lock lock(state->receive_mutex);
+            return static_cast<std::int32_t>(state->received.size());
+        }
+
+        Error classic_send_bytes(std::uint64_t connection, const std::uint8_t* data, std::size_t size, std::string& message) override
+        {
+            auto state = find_classic_connection(connection);
+            if (!state) return invalid_connection(message);
+            if (!state->connected) { message = "Classic connection is not open"; return Error::Disconnected; }
+
+            const BluetoothRFCOMMMTU mtu = [state->channel getMTU];
+            std::size_t offset = 0;
+            while (offset < size)
+            {
+                const std::size_t chunk = std::min<std::size_t>(mtu > 0 ? mtu : size, size - offset);
+                const IOReturn status = [state->channel writeSync:(void*)(data + offset) length:(UInt16)chunk];
+                if (status != kIOReturnSuccess) { message = "Classic write failed"; return Error::OperationFailed; }
+                offset += chunk;
+            }
+            message.clear();
+            return Error::Ok;
+        }
+
+        std::size_t classic_receive_bytes(std::uint64_t connection, std::uint8_t* out, std::size_t max_size) override
+        {
+            auto state = find_classic_connection(connection);
+            if (!state) return 0;
+            std::scoped_lock lock(state->receive_mutex);
+            const std::size_t n = std::min(max_size, state->received.size());
+            std::copy(state->received.begin(), state->received.begin() + n, out);
+            state->received.erase(state->received.begin(), state->received.begin() + n);
+            return n;
+        }
+
+        Error classic_server_start(const std::string& name, const std::string& service_uuid, std::string& message) override
+        {
+            if (classic_server_running_) { message.clear(); return Error::Ok; }
+
+            IOBluetoothSDPUUID* uuid = classic_uuid_from_string(service_uuid);
+            if (!uuid) { message = "Invalid service UUID"; return Error::InvalidArgument; }
+
+            NSDictionary* serviceDict = @{
+                @"0100 - ServiceName" : to_ns(name),
+                @"0001 - ServiceClassIDList" : @[ uuid ],
+                @"0004 - ProtocolDescriptorList" : @[
+                    @[ [IOBluetoothSDPUUID uuid16:kBluetoothSDPUUID16L2CAP] ],
+                    @[ [IOBluetoothSDPUUID uuid16:kBluetoothSDPUUID16RFCOMM], @0 ],
+                ],
+            };
+
+            IOBluetoothSDPServiceRecord* record = [IOBluetoothSDPServiceRecord publishedServiceRecordWithDictionary:serviceDict];
+            if (!record) { message = "Classic service record could not be published"; return Error::OperationFailed; }
+
+            BluetoothRFCOMMChannelID channelID = 0;
+            if ([record getRFCOMMChannelID:&channelID] != kIOReturnSuccess)
+            {
+                [record removeServiceRecord];
+                message = "Classic service record has no RFCOMM channel";
+                return Error::OperationFailed;
+            }
+
+            GMBTClassicServerHub* hub = [GMBTClassicServerHub new];
+            AppleBackend* self = this;
+            hub.onChannelOpened = ^(IOBluetoothRFCOMMChannel* channel) { self->handle_classic_server_channel_opened(channel); };
+
+            IOBluetoothUserNotification* notification =
+                [IOBluetoothRFCOMMChannel registerForChannelOpenNotifications:hub
+                                                                      selector:@selector(rfcommChannelOpened:channel:)
+                                                                withChannelID:channelID
+                                                                     direction:kIOBluetoothUserNotificationChannelDirectionIncoming];
+            if (!notification)
+            {
+                [record removeServiceRecord];
+                message = "Classic server could not listen for incoming connections";
+                return Error::OperationFailed;
+            }
+
+            classic_server_hub_ = hub;
+            classic_server_notification_ = notification;
+            classic_server_record_ = record;
+            classic_server_running_ = true;
+            message.clear();
+            return Error::Ok;
+        }
+
+        Error classic_server_stop(std::string& message) override
+        {
+            if (classic_server_notification_) { [classic_server_notification_ unregister]; classic_server_notification_ = nil; }
+            if (classic_server_record_) { [classic_server_record_ removeServiceRecord]; classic_server_record_ = nil; }
+            classic_server_hub_ = nil;
+            classic_server_running_ = false;
+            message.clear();
+            return Error::Ok;
+        }
+
+        bool classic_server_is_running() const override { return classic_server_running_; }
+
+#else
+
+        Error classic_scan_start(std::string&m) override {m="Bluetooth Classic is not supported on this platform";return Error::NotSupported;}
         Error classic_scan_stop(std::string&m) override {m.clear();return Error::Ok;}
         bool classic_scan_is_running() const override {return false;}
-        Error classic_connect(std::uint64_t,const DiscoveredDevice&,const std::string&,std::string&m) override {m="Bluetooth Classic is not implemented by the old Apple transport";return Error::NotSupported;}
-        Error classic_disconnect(std::uint64_t,std::string&m) override {m="Bluetooth Classic is not implemented by the old Apple transport";return Error::NotSupported;}
+        Error classic_connect(std::uint64_t,const DiscoveredDevice&,const std::string&,std::string&m) override {m="Bluetooth Classic is not supported on this platform";return Error::NotSupported;}
+        Error classic_disconnect(std::uint64_t,std::string&m) override {m="Bluetooth Classic is not supported on this platform";return Error::NotSupported;}
         bool classic_connection_is_connected(std::uint64_t) const override {return false;}
         std::int32_t classic_receive_available(std::uint64_t) const override {return 0;}
-        Error classic_send_bytes(std::uint64_t,const std::uint8_t*,std::size_t,std::string&m) override {m="Bluetooth Classic is not implemented by the old Apple transport";return Error::NotSupported;}
+        Error classic_send_bytes(std::uint64_t,const std::uint8_t*,std::size_t,std::string&m) override {m="Bluetooth Classic is not supported on this platform";return Error::NotSupported;}
         std::size_t classic_receive_bytes(std::uint64_t,std::uint8_t*,std::size_t) override {return 0;}
-        Error classic_server_start(const std::string&,const std::string&,std::string&m) override {m="Bluetooth Classic server is not implemented by the old Apple transport";return Error::NotSupported;}
+        Error classic_server_start(const std::string&,const std::string&,std::string&m) override {m="Bluetooth Classic server is not supported on this platform";return Error::NotSupported;}
         Error classic_server_stop(std::string&m) override {m.clear();return Error::Ok;}
         bool classic_server_is_running() const override {return false;}
+
+#endif // TARGET_OS_OSX
 
     private:
         CoreHooks hooks_;
@@ -2098,7 +2387,7 @@ namespace
 
         static Error async_result(double value,const char* failure,std::string&message)
         { if(value<0){message=failure;return Error::OperationFailed;}message.clear();return Error::Ok; }
-        static Error invalid_connection(std::string&message){message="Invalid BLE connection handle";return Error::InvalidHandle;}
+        static Error invalid_connection(std::string&message){message="Invalid connection handle";return Error::InvalidHandle;}
 
         std::string id_for_connection(std::uint64_t c) const
         { std::scoped_lock lock(mutex_); auto it=le_connection_to_id_.find(c); return it==le_connection_to_id_.end()?std::string{}:it->second; }
@@ -2115,6 +2404,302 @@ namespace
             return {};
         }
 
+#if TARGET_OS_OSX
+
+        struct ClassicConnectionState
+        {
+            std::uint64_t connection = 0;
+            IOBluetoothRFCOMMChannel* channel = nil;
+            GMBTClassicChannelDelegate* delegate = nil;
+            std::mutex receive_mutex;
+            std::deque<std::uint8_t> received;
+            std::atomic_bool connected{false};
+        };
+
+        mutable std::mutex classic_mutex_;
+        std::unordered_map<std::uint64_t, std::shared_ptr<ClassicConnectionState>> classic_connections_;
+        std::unordered_map<std::string, IOBluetoothDevice*> classic_devices_by_address_;
+        std::unordered_map<std::uint64_t, GMBTSDPQueryHandler*> classic_pending_sdp_;
+
+        IOBluetoothDeviceInquiry* classic_inquiry_ = nil;
+        GMBTClassicInquiryDelegate* classic_inquiry_delegate_ = nil;
+
+        IOBluetoothSDPServiceRecord* classic_server_record_ = nil;
+        IOBluetoothUserNotification* classic_server_notification_ = nil;
+        GMBTClassicServerHub* classic_server_hub_ = nil;
+        std::atomic_bool classic_server_running_{false};
+
+        std::shared_ptr<ClassicConnectionState> find_classic_connection(std::uint64_t connection) const
+        {
+            std::scoped_lock lock(classic_mutex_);
+            auto it = classic_connections_.find(connection);
+            return it == classic_connections_.end() ? nullptr : it->second;
+        }
+
+        // The MAC-style "XX:XX:XX:XX:XX:XX" address stored on DiscoveredDevice
+        // is looked up directly as an IOBluetoothDevice - no string round-trip
+        // is required, unlike Windows' raw-socket SOCKADDR_BTH path.
+        IOBluetoothDevice* classic_device_for_address(const std::string& address)
+        {
+            {
+                std::scoped_lock lock(classic_mutex_);
+                auto it = classic_devices_by_address_.find(address);
+                if (it != classic_devices_by_address_.end()) return it->second;
+            }
+            BluetoothDeviceAddress raw{};
+            unsigned int bytes[6];
+            std::string normalized = address;
+            for (auto& c : normalized) if (c == '-') c = ':';
+            if (std::sscanf(normalized.c_str(), "%02x:%02x:%02x:%02x:%02x:%02x",
+                             &bytes[0], &bytes[1], &bytes[2], &bytes[3], &bytes[4], &bytes[5]) != 6)
+                return nil;
+            for (int i = 0; i < 6; ++i) raw.data[i] = static_cast<unsigned char>(bytes[i]);
+
+            IOBluetoothDevice* device = [IOBluetoothDevice deviceWithAddress:&raw];
+            if (device)
+            {
+                std::scoped_lock lock(classic_mutex_);
+                classic_devices_by_address_[address] = device;
+            }
+            return device;
+        }
+
+        static std::string classic_format_address(NSString* addressString)
+        {
+            std::string s = to_string(addressString);
+            for (auto& c : s) c = (c == '-') ? ':' : static_cast<char>(::toupper(static_cast<unsigned char>(c)));
+            return s;
+        }
+
+        // CBUUID already parses both 16-bit short-form ("1101") and full
+        // 128-bit service UUID strings; reuse it to build the IOBluetoothSDPUUID
+        // IOBluetooth itself expects rather than duplicating that parsing here.
+        static IOBluetoothSDPUUID* classic_uuid_from_string(const std::string& text)
+        {
+            if (text.empty()) return nil;
+            CBUUID* cb = [CBUUID UUIDWithString:to_ns(text)];
+            if (!cb || !cb.data) return nil;
+            return [IOBluetoothSDPUUID uuidWithBytes:cb.data.bytes length:(int)cb.data.length];
+        }
+
+        void handle_classic_device_found(IOBluetoothDevice* device)
+        {
+            if (!device) return;
+            const std::string address = classic_format_address([device addressString]);
+            {
+                std::scoped_lock lock(classic_mutex_);
+                classic_devices_by_address_[address] = device;
+            }
+            DiscoveredDevice d;
+            d.transport = Transport::Classic;
+            d.id = "apple:classic:" + address;
+            d.name = to_string([device name]);
+            d.address = address;
+            d.address_available = true;
+            d.connectable = true;
+            hooks_.upsert_device(d);
+        }
+
+        void handle_classic_inquiry_complete(IOReturn error)
+        {
+            classic_inquiry_ = nil;
+            classic_inquiry_delegate_ = nil;
+            BackendEvent ev;
+            ev.type = BackendEventType::ScanStopped;
+            ev.transport = Transport::Classic;
+            if (error != kIOReturnSuccess) { ev.error = Error::OperationFailed; ev.message = "Classic device inquiry ended with an error"; }
+            hooks_.push_event(std::move(ev));
+        }
+
+        void handle_classic_sdp_complete(std::uint64_t connection, IOBluetoothDevice* device, IOReturn status, std::string service_uuid)
+        {
+            {
+                std::scoped_lock lock(classic_mutex_);
+                classic_pending_sdp_.erase(connection);
+                if (classic_connections_.find(connection) == classic_connections_.end()) return; // disconnected/cancelled meanwhile
+            }
+            if (status != kIOReturnSuccess)
+            {
+                complete_classic_connect(connection, Error::NotFound, "Classic service discovery failed");
+                return;
+            }
+
+            BluetoothRFCOMMChannelID channelID = 0;
+            BOOL found = NO;
+            IOBluetoothSDPUUID* uuid = classic_uuid_from_string(service_uuid);
+            if (uuid)
+            {
+                IOBluetoothSDPServiceRecord* record = [device getServiceRecordForUUID:uuid];
+                if (record && [record getRFCOMMChannelID:&channelID] == kIOReturnSuccess) found = YES;
+            }
+            if (!found)
+            {
+                for (IOBluetoothSDPServiceRecord* record in [device services])
+                {
+                    if ([record getRFCOMMChannelID:&channelID] == kIOReturnSuccess) { found = YES; break; }
+                }
+            }
+            if (!found)
+            {
+                complete_classic_connect(connection, Error::NotFound, "No RFCOMM service was found on the device");
+                return;
+            }
+
+            GMBTClassicChannelDelegate* delegate = [GMBTClassicChannelDelegate new];
+            AppleBackend* self = this;
+            delegate.onOpenComplete = ^(IOReturn openStatus) { self->handle_classic_channel_open_complete(connection, openStatus); };
+            delegate.onData = ^(NSData* data) { self->handle_classic_channel_data(connection, data); };
+            delegate.onClose = ^{ self->handle_classic_channel_closed(connection); };
+
+            IOBluetoothRFCOMMChannel* channel = nil;
+            const IOReturn openStatus = [device openRFCOMMChannelAsync:&channel withChannelID:channelID delegate:delegate];
+            if (openStatus != kIOReturnSuccess || !channel)
+            {
+                complete_classic_connect(connection, Error::ConnectionFailed, "RFCOMM channel could not be opened");
+                return;
+            }
+
+            std::scoped_lock lock(classic_mutex_);
+            auto it = classic_connections_.find(connection);
+            if (it == classic_connections_.end()) { [channel closeChannel]; return; }
+            it->second->channel = channel;
+            it->second->delegate = delegate;
+        }
+
+        void handle_classic_channel_open_complete(std::uint64_t connection, IOReturn status)
+        {
+            if (status != kIOReturnSuccess)
+            {
+                complete_classic_connect(connection, Error::ConnectionFailed, "RFCOMM channel open failed");
+                return;
+            }
+            {
+                std::scoped_lock lock(classic_mutex_);
+                auto it = classic_connections_.find(connection);
+                if (it == classic_connections_.end()) return;
+                it->second->connected = true;
+            }
+            complete_classic_connect(connection, Error::Ok, "");
+        }
+
+        void complete_classic_connect(std::uint64_t connection, Error error, const char* message)
+        {
+            if (error != Error::Ok)
+            {
+                std::scoped_lock lock(classic_mutex_);
+                classic_connections_.erase(connection);
+            }
+            BackendEvent ev;
+            ev.type = BackendEventType::ClassicConnected;
+            ev.transport = Transport::Classic;
+            ev.connection = connection;
+            ev.error = error;
+            ev.message = message ? message : "";
+            hooks_.push_event(std::move(ev));
+        }
+
+        void handle_classic_channel_data(std::uint64_t connection, NSData* data)
+        {
+            auto state = find_classic_connection(connection);
+            if (!state) return;
+            std::int32_t available;
+            {
+                std::scoped_lock lock(state->receive_mutex);
+                const std::uint8_t* bytes = static_cast<const std::uint8_t*>(data.bytes);
+                state->received.insert(state->received.end(), bytes, bytes + data.length);
+                available = static_cast<std::int32_t>(state->received.size());
+            }
+            BackendEvent ev;
+            ev.type = BackendEventType::ClassicDataAvailable;
+            ev.transport = Transport::Classic;
+            ev.connection = connection;
+            ev.value = available;
+            hooks_.push_event(std::move(ev));
+        }
+
+        void handle_classic_channel_closed(std::uint64_t connection)
+        {
+            bool wasConnected = false;
+            {
+                std::scoped_lock lock(classic_mutex_);
+                auto it = classic_connections_.find(connection);
+                if (it == classic_connections_.end()) return;
+                wasConnected = it->second->connected;
+                classic_connections_.erase(it);
+            }
+            // A channel that closes before it ever finished opening is reported
+            // through the ClassicConnected completion path instead, not here.
+            if (!wasConnected) return;
+            BackendEvent ev;
+            ev.type = BackendEventType::ClassicDisconnected;
+            ev.transport = Transport::Classic;
+            ev.connection = connection;
+            ev.error = Error::Disconnected;
+            ev.message = "RFCOMM channel closed";
+            hooks_.push_event(std::move(ev));
+        }
+
+        void handle_classic_server_channel_opened(IOBluetoothRFCOMMChannel* channel)
+        {
+            IOBluetoothDevice* device = [channel getDevice];
+            DiscoveredDevice d;
+            d.transport = Transport::Classic;
+            const std::string address = classic_format_address([device addressString]);
+            d.id = "apple:classic:" + address;
+            d.name = to_string([device name]);
+            d.address = address;
+            d.address_available = true;
+            d.connectable = true;
+            const std::uint64_t device_handle = hooks_.upsert_device(d);
+            const std::uint64_t connection = hooks_.create_classic_connection(device_handle);
+
+            auto state = std::make_shared<ClassicConnectionState>();
+            state->connection = connection;
+            state->connected = true;
+
+            GMBTClassicChannelDelegate* delegate = [GMBTClassicChannelDelegate new];
+            AppleBackend* self = this;
+            delegate.onData = ^(NSData* data) { self->handle_classic_channel_data(connection, data); };
+            delegate.onClose = ^{ self->handle_classic_channel_closed(connection); };
+            [channel setDelegate:delegate];
+            state->channel = channel;
+            state->delegate = delegate;
+
+            {
+                std::scoped_lock lock(classic_mutex_);
+                classic_connections_[connection] = state;
+            }
+
+            BackendEvent ev;
+            ev.type = BackendEventType::ClassicClientConnected;
+            ev.transport = Transport::Classic;
+            ev.connection = connection;
+            ev.device = device_handle;
+            hooks_.push_event(std::move(ev));
+        }
+
+        void classic_shutdown()
+        {
+            if (classic_inquiry_) { [classic_inquiry_ stop]; classic_inquiry_ = nil; }
+            classic_inquiry_delegate_ = nil;
+
+            std::unordered_map<std::uint64_t, std::shared_ptr<ClassicConnectionState>> connections;
+            {
+                std::scoped_lock lock(classic_mutex_);
+                connections.swap(classic_connections_);
+                classic_devices_by_address_.clear();
+                classic_pending_sdp_.clear();
+            }
+            for (auto& [connection, state] : connections) { (void)connection; [state->channel closeChannel]; }
+
+            if (classic_server_notification_) { [classic_server_notification_ unregister]; classic_server_notification_ = nil; }
+            if (classic_server_record_) { [classic_server_record_ removeServiceRecord]; classic_server_record_ = nil; }
+            classic_server_hub_ = nil;
+            classic_server_running_ = false;
+        }
+
+#endif // TARGET_OS_OSX
+
         void on_event(NSString* type, NSDictionary* params)
         {
             if (!type)
@@ -2124,6 +2709,44 @@ namespace
             }
             GMBT_LOG("transport event '%s' -> normalized '%s'",
                 to_string(type).c_str(), normalized_event_type(type).c_str());
+
+            // bt_le_scan_start can fail asynchronously: the transport defers the
+            // request while CBCentralManager's state is still Unknown/Resetting,
+            // then reports failure later from centralManagerDidUpdateState: if the
+            // central lands on a terminal non-PoweredOn state. That failure has no
+            // caller waiting on the original synchronous return value anymore, and
+            // BackendEventType::LeEvent is not dispatched to GML by bluetooth_update()
+            // - so without this, the scan silently never starts and no GML callback
+            // ever fires. Re-signal it on the ScanStopped channel instead, which is
+            // already wired to bluetooth_set_callback_scan_stopped for both scan types.
+            if ([type isEqualToString:@"bt_le_scan_start"] &&
+                params[@"success"] && ![params[@"success"] boolValue])
+            {
+                BackendEvent ev;
+                ev.type = BackendEventType::ScanStopped;
+                ev.transport = Transport::LowEnergy;
+                switch (static_cast<CBManagerState>([params[@"error_code"] intValue]))
+                {
+                    case CBManagerStateUnsupported:
+                        ev.error = Error::NotSupported;
+                        ev.message = "Bluetooth LE is not supported on this device";
+                        break;
+                    case CBManagerStateUnauthorized:
+                        ev.error = Error::PermissionDenied;
+                        ev.message = "Bluetooth permission was denied";
+                        break;
+                    case CBManagerStatePoweredOff:
+                        ev.error = Error::BluetoothDisabled;
+                        ev.message = "Bluetooth is powered off";
+                        break;
+                    default:
+                        ev.error = Error::OperationFailed;
+                        ev.message = "BLE scan could not start";
+                        break;
+                }
+                hooks_.push_event(std::move(ev));
+                return;
+            }
 
             NSString* address = [params[@"address"] isKindOfClass:[NSString class]] ? params[@"address"] : nil;
             if ([type isEqualToString:@"bt_le_scan_result"] && address)
