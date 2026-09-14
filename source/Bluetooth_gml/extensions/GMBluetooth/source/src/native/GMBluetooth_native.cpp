@@ -28,14 +28,6 @@ namespace
     std::mutex g_pending_connect_mutex;
     std::unordered_map<std::uint64_t, GMFunction> g_pending_connect_callbacks;
 
-    // Device found event queue (separate because it needs device handle)
-    struct DeviceFoundEvent
-    {
-        std::uint64_t device_handle;
-    };
-    std::mutex g_device_found_queue_mutex;
-    std::vector<DeviceFoundEvent> g_device_found_queue;
-
     class DeviceManager
     {
     public:
@@ -96,10 +88,6 @@ namespace
 
     DeviceManager g_device_manager;
 
-    // Event queue for callback dispatch
-    std::mutex g_event_queue_mutex;
-    std::vector<BackendEvent> g_event_queue;
-
     class ClassicConnectionManager
     {
     public:
@@ -157,10 +145,22 @@ namespace
                 device.rssi_available ? 1 : 0,
                 device.connectable ? 1 : 0);
 
-            // Queue device_found event for callback dispatch
+            GMFunction callback;
             {
-                std::scoped_lock lock(g_device_found_queue_mutex);
-                g_device_found_queue.push_back(DeviceFoundEvent{handle});
+                std::scoped_lock lock(g_callback_mutex);
+                callback = g_callback_device_found;
+            }
+
+            if (callback)
+            {
+                try
+                {
+                    callback.call(static_cast<double>(handle));
+                }
+                catch (const std::exception& e)
+                {
+                    GMBT_LOG("Error dispatching device_found callback: %s", e.what());
+                }
             }
 
             return handle;
@@ -173,115 +173,11 @@ namespace
             return connection;
         };
         hooks.push_event = [](BackendEvent event) {
-            {
-                std::scoped_lock lock(g_event_queue_mutex);
-                g_event_queue.push_back(event);
-            }
-            GMBT_LOG("event QUEUED: type=%d transport=%d event_type='%s' queue_size=%zu",
+            GMBT_LOG("event: type=%d transport=%d event_type='%s'",
                 static_cast<int>(event.type),
                 static_cast<int>(event.transport),
-                event.event_type.c_str(),
-                g_event_queue.size());
-        };
-        return hooks;
-    }
-}
+                event.event_type.c_str());
 
-bool bluetooth_initialize()
-{
-    if (g_backend)
-    {
-        GMBT_LOG("already initialized, nothing to do");
-        return true;
-    }
-
-    GMBT_LOG("creating platform backend...");
-    g_backend = create_platform_backend(create_core_hooks());
-    if (!g_backend)
-    {
-        g_last_error_message = "Failed to create platform backend";
-        g_last_error = Error::OperationFailed;
-        GMBT_LOG("FAILED: no platform backend for this build");
-        return false;
-    }
-
-    std::string message;
-    const Error error = g_backend->initialize(message);
-    g_last_error = error;
-    g_last_error_message = message;
-
-    GMBT_LOG("backend initialize() -> error=%d message='%s' | ble=%d classic=%d classic_server=%d",
-        static_cast<int>(error),
-        message.c_str(),
-        g_backend->supports_ble() ? 1 : 0,
-        g_backend->supports_classic() ? 1 : 0,
-        g_backend->supports_classic_server() ? 1 : 0);
-
-    return error == Error::Ok;
-}
-
-void bluetooth_shutdown()
-{
-    GMBT_LOG("shutting down (backend=%s, devices cached=%d, events dropped=%llu)",
-        g_backend ? "present" : "null",
-        g_device_manager.get_count(),
-        static_cast<unsigned long long>(g_dropped_events.load()));
-
-    if (g_backend)
-    {
-        g_backend->shutdown();
-        g_backend.reset();
-    }
-    g_device_manager.clear();
-}
-
-std::int32_t bluetooth_update()
-{
-    int dispatched_count = 0;
-
-    // Dispatch device_found events
-    {
-        std::vector<DeviceFoundEvent> devices_to_dispatch;
-        {
-            std::scoped_lock lock(g_device_found_queue_mutex);
-            devices_to_dispatch = std::move(g_device_found_queue);
-            g_device_found_queue.clear();
-        }
-
-        GMFunction callback;
-        {
-            std::scoped_lock lock(g_callback_mutex);
-            callback = g_callback_device_found;
-        }
-
-        if (callback)
-        {
-            for (const auto& device_event : devices_to_dispatch)
-            {
-                try
-                {
-                    callback.call(device_event.device_handle);
-                    ++dispatched_count;
-                }
-                catch (const std::exception& e)
-                {
-                    GMBT_LOG("Error dispatching device_found callback: %s", e.what());
-                }
-            }
-        }
-    }
-
-    // Dispatch other backend events
-    {
-        std::vector<BackendEvent> events_to_dispatch;
-        {
-            std::scoped_lock lock(g_event_queue_mutex);
-            events_to_dispatch = std::move(g_event_queue);
-            g_event_queue.clear();
-        }
-
-        for (const auto& event : events_to_dispatch)
-        {
             // The connect completion callback is one-shot and per-connection,
             // not one of the persistently-registered callbacks below.
             if (event.type == BackendEventType::ClassicConnected)
@@ -308,14 +204,13 @@ std::int32_t bluetooth_update()
                             static_cast<double>(event.connection),
                             static_cast<double>(event.device)
                         );
-                        ++dispatched_count;
                     }
                     catch (const std::exception& e)
                     {
                         GMBT_LOG("Error dispatching classic_connect callback: %s", e.what());
                     }
                 }
-                continue;
+                return;
             }
 
             GMFunction callback;
@@ -369,17 +264,63 @@ std::int32_t bluetooth_update()
                     default:
                         break;
                     }
-                    ++dispatched_count;
                 }
                 catch (const std::exception& e)
                 {
                     GMBT_LOG("Error dispatching callback: %s", e.what());
                 }
             }
-        }
+        };
+        return hooks;
+    }
+}
+
+bool bluetooth_initialize()
+{
+    if (g_backend)
+    {
+        GMBT_LOG("already initialized, nothing to do");
+        return true;
     }
 
-    return dispatched_count;
+    GMBT_LOG("creating platform backend...");
+    g_backend = create_platform_backend(create_core_hooks());
+    if (!g_backend)
+    {
+        g_last_error_message = "Failed to create platform backend";
+        g_last_error = Error::OperationFailed;
+        GMBT_LOG("FAILED: no platform backend for this build");
+        return false;
+    }
+
+    std::string message;
+    const Error error = g_backend->initialize(message);
+    g_last_error = error;
+    g_last_error_message = message;
+
+    GMBT_LOG("backend initialize() -> error=%d message='%s' | ble=%d classic=%d classic_server=%d",
+        static_cast<int>(error),
+        message.c_str(),
+        g_backend->supports_ble() ? 1 : 0,
+        g_backend->supports_classic() ? 1 : 0,
+        g_backend->supports_classic_server() ? 1 : 0);
+
+    return error == Error::Ok;
+}
+
+void bluetooth_shutdown()
+{
+    GMBT_LOG("shutting down (backend=%s, devices cached=%d, events dropped=%llu)",
+        g_backend ? "present" : "null",
+        g_device_manager.get_count(),
+        static_cast<unsigned long long>(g_dropped_events.load()));
+
+    if (g_backend)
+    {
+        g_backend->shutdown();
+        g_backend.reset();
+    }
+    g_device_manager.clear();
 }
 
 bool bluetooth_is_initialized()

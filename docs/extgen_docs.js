@@ -10,12 +10,6 @@
  */
 
 /**
- * @function_partial bluetooth_update
- * @returns {Real}
- * @function_end
- */
-
-/**
  * @function_partial bluetooth_is_initialized
  * @returns {Bool}
  * @function_end

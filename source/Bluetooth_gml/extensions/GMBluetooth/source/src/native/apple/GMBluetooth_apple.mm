@@ -2715,7 +2715,7 @@ namespace
             // then reports failure later from centralManagerDidUpdateState: if the
             // central lands on a terminal non-PoweredOn state. That failure has no
             // caller waiting on the original synchronous return value anymore, and
-            // BackendEventType::LeEvent is not dispatched to GML by bluetooth_update()
+            // BackendEventType::LeEvent has no GML callback wired up in the core
             // - so without this, the scan silently never starts and no GML callback
             // ever fires. Re-signal it on the ScanStopped channel instead, which is
             // already wired to bluetooth_set_callback_scan_stopped for both scan types.

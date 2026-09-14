@@ -38,12 +38,6 @@ GMEXPORT double __EXT_NATIVE__bluetooth_shutdown()
     return 0;
 }
 
-GMEXPORT double __EXT_NATIVE__bluetooth_update()
-{
-    auto&& __result = bluetooth_update();
-    return static_cast<double>(__result);
-}
-
 GMEXPORT double __EXT_NATIVE__bluetooth_is_initialized()
 {
     auto&& __result = bluetooth_is_initialized();

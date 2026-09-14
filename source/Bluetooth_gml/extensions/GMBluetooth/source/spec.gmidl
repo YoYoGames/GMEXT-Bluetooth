@@ -47,10 +47,6 @@ function bluetooth_initialize(): bool;
 [global, bind = typed_gml]
 function bluetooth_shutdown(): unit;
 
-/// Dispatches queued native Bluetooth events to registered GML callbacks.
-/// Call this once per Step.
-[global, bind = typed_gml]
-function bluetooth_update(): int32;
 
 [global, bind = typed_gml]
 function bluetooth_is_initialized(): bool;

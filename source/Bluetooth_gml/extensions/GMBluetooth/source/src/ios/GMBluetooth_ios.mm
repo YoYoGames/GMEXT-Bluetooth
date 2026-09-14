@@ -5,7 +5,6 @@
 
 - (bool)bluetooth_initialize { return ::bluetooth_initialize(); }
 - (void)bluetooth_shutdown { ::bluetooth_shutdown(); }
-- (std::int32_t)bluetooth_update { return ::bluetooth_update(); }
 - (bool)bluetooth_is_initialized { return ::bluetooth_is_initialized(); }
 
 - (std::int32_t)bluetooth_last_error_code { return ::bluetooth_last_error_code(); }

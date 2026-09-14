@@ -11,7 +11,6 @@ GMEXPORT double __EXT_NATIVE__GMBluetooth_queue_buffer(char* __arg_buffer, doubl
 
 GMEXPORT double __EXT_NATIVE__bluetooth_initialize();
 GMEXPORT double __EXT_NATIVE__bluetooth_shutdown();
-GMEXPORT double __EXT_NATIVE__bluetooth_update();
 GMEXPORT double __EXT_NATIVE__bluetooth_is_initialized();
 GMEXPORT double __EXT_NATIVE__bluetooth_last_error_code();
 GMEXPORT char* __EXT_NATIVE__bluetooth_last_error_message();

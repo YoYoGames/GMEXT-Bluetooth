@@ -36,12 +36,6 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         return 0;
     }
 
-    public double __EXT_NATIVE__bluetooth_update()
-    {
-        int __result = bluetooth_update();
-        return (double)__result;
-    }
-
     public double __EXT_NATIVE__bluetooth_is_initialized()
     {
         boolean __result = bluetooth_is_initialized();

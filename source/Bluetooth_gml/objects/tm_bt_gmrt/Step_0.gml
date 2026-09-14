@@ -6,32 +6,11 @@ if (!bt_ready)
     exit;
 
 
-// ------------------------------------------------------------
-// Dispatch Bluetooth events to GML
-// ------------------------------------------------------------
-
-// bluetooth_update() runs 60x/second, so logging every call buries everything
-// else in the output. Report only what actually changed since last frame.
-
-var _events_processed =
-    bluetooth_update();
-
-if (_events_processed != 0)
-{
-    show_debug_message(
-        $"[GML] bluetooth_update() processed {_events_processed} event(s)"
-    );
-}
-
 log_tick += 1;
 
 
 // ------------------------------------------------------------
 // Device cache
-//
-// The device_found callback cannot fire while the native event
-// queue is unimplemented, so polling the cache is currently the
-// only evidence that discovery is working at all.
 // ------------------------------------------------------------
 
 var _device_count =

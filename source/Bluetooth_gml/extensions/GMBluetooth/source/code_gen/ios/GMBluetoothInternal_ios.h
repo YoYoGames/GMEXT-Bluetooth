@@ -68,7 +68,6 @@ namespace gm::wire::details
 @protocol GMBluetoothInterface <NSObject>
 - (bool)bluetooth_initialize;
 - (void)bluetooth_shutdown;
-- (std::int32_t)bluetooth_update;
 - (bool)bluetooth_is_initialized;
 - (std::int32_t)bluetooth_last_error_code;
 - (std::string)bluetooth_last_error_message;
@@ -122,7 +121,6 @@ namespace gm::wire::details
 @interface GMBluetoothInternal : NSObject
 - (double)__EXT_NATIVE__bluetooth_initialize;
 - (double)__EXT_NATIVE__bluetooth_shutdown;
-- (double)__EXT_NATIVE__bluetooth_update;
 - (double)__EXT_NATIVE__bluetooth_is_initialized;
 - (double)__EXT_NATIVE__bluetooth_last_error_code;
 - (char*)__EXT_NATIVE__bluetooth_last_error_message;

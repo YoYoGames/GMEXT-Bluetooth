@@ -32,7 +32,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -174,33 +173,6 @@ public class GMBluetooth extends GMBluetoothInternal
     private volatile GMFunction callbackClassicClientConnected = null;
     private volatile GMFunction callbackClassicData = null;
     private volatile GMFunction callbackClassicDisconnected = null;
-
-
-    // =========================================================================
-    // Event queue
-    // =========================================================================
-
-    private static final int EVENT_DEVICE_FOUND = 1;
-    private static final int EVENT_SCAN_STOPPED = 2;
-    private static final int EVENT_CLASSIC_CONNECTED = 3;
-    private static final int EVENT_CLASSIC_CLIENT_CONNECTED = 4;
-    private static final int EVENT_CLASSIC_DATA = 5;
-    private static final int EVENT_CLASSIC_DISCONNECTED = 6;
-
-    private static final class Event
-    {
-        int type;
-        int transport = TRANSPORT_UNKNOWN;
-        int error = OK;
-        int value = 0;
-        long device = 0;
-        long connection = 0;
-        String message = "";
-        GMFunction connectCallback = null;
-    }
-
-    private final ConcurrentLinkedQueue<Event> events =
-        new ConcurrentLinkedQueue<>();
 
 
     // =========================================================================
@@ -397,11 +369,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
         if (created)
         {
-            Event event = new Event();
-            event.type = EVENT_DEVICE_FOUND;
-            event.transport = transport;
-            event.device = handle;
-            events.offer(event);
+            invoke(callbackDeviceFound, (double) handle);
         }
 
         return handle;
@@ -514,48 +482,64 @@ public class GMBluetooth extends GMBluetoothInternal
     }
 
 
-    private void enqueueScanStopped(int transport, int error, String message)
+    private void dispatchScanStopped(int transport, int error, String message)
     {
-        Event event = new Event();
-        event.type = EVENT_SCAN_STOPPED;
-        event.transport = transport;
-        event.error = error;
-        event.message = message != null ? message : "";
-        events.offer(event);
+        String safeMessage = message != null ? message : "";
+
+        if (error != OK)
+            setLastError(error, safeMessage);
+
+        invoke(callbackScanStopped, error, safeMessage);
     }
 
 
-    private void enqueueConnectResult(
+    private void dispatchConnectResult(
         long connection,
         long device,
         int error,
         String message,
         GMFunction callback)
     {
-        Event event = new Event();
-        event.type = EVENT_CLASSIC_CONNECTED;
-        event.transport = TRANSPORT_CLASSIC;
-        event.connection = connection;
-        event.device = device;
-        event.error = error;
-        event.message = message != null ? message : "";
-        event.connectCallback = callback;
-        events.offer(event);
+        String safeMessage = message != null ? message : "";
+        ConnectionEntry entry = getConnection(connection);
+
+        if (error == OK)
+        {
+            if (entry != null)
+                entry.connected = true;
+        }
+        else
+        {
+            eraseConnection(connection);
+            setLastError(error, safeMessage);
+        }
+
+        invoke(
+            callback,
+            error,
+            safeMessage,
+            (double) connection,
+            (double) device);
     }
 
 
-    private void enqueueDisconnected(
+    private void dispatchDisconnected(
         long connection,
         int error,
         String message)
     {
-        Event event = new Event();
-        event.type = EVENT_CLASSIC_DISCONNECTED;
-        event.transport = TRANSPORT_CLASSIC;
-        event.connection = connection;
-        event.error = error;
-        event.message = message != null ? message : "";
-        events.offer(event);
+        String safeMessage = message != null ? message : "";
+
+        invoke(
+            callbackClassicDisconnected,
+            (double) connection,
+            error,
+            safeMessage);
+
+        eraseConnection(connection);
+
+        if (error != OK)
+            setLastError(error, safeMessage);
     }
 
 
@@ -577,12 +561,10 @@ public class GMBluetooth extends GMBluetoothInternal
             available = entry.receiveAvailable;
         }
 
-        Event event = new Event();
-        event.type = EVENT_CLASSIC_DATA;
-        event.transport = TRANSPORT_CLASSIC;
-        event.connection = connection;
-        event.value = available;
-        events.offer(event);
+        invoke(
+            callbackClassicData,
+            (double) connection,
+            available);
     }
 
 
@@ -727,8 +709,6 @@ public class GMBluetooth extends GMBluetoothInternal
             deviceOrder.clear();
         }
 
-        events.clear();
-
         callbackDeviceFound = null;
         callbackScanStopped = null;
         callbackClassicClientConnected = null;
@@ -737,105 +717,6 @@ public class GMBluetooth extends GMBluetoothInternal
 
         adapter = null;
         setLastError(OK, "");
-    }
-
-
-    @Override
-    public int bluetooth_update()
-    {
-        int dispatched = 0;
-
-        while (true)
-        {
-            Event event = events.poll();
-
-            if (event == null)
-                break;
-
-            switch (event.type)
-            {
-                case EVENT_DEVICE_FOUND:
-                    invoke(
-                        callbackDeviceFound,
-                        (double) event.device);
-                    break;
-
-                case EVENT_SCAN_STOPPED:
-                    if (event.error != OK)
-                        setLastError(event.error, event.message);
-
-                    invoke(
-                        callbackScanStopped,
-                        event.error,
-                        event.message);
-                    break;
-
-                case EVENT_CLASSIC_CONNECTED:
-                {
-                    ConnectionEntry entry = getConnection(event.connection);
-
-                    if (event.error == OK)
-                    {
-                        if (entry != null)
-                            entry.connected = true;
-                    }
-                    else
-                    {
-                        eraseConnection(event.connection);
-                        setLastError(event.error, event.message);
-                    }
-
-                    invoke(
-                        event.connectCallback,
-                        event.error,
-                        event.message,
-                        (double) event.connection,
-                        (double) event.device);
-                    break;
-                }
-
-                case EVENT_CLASSIC_CLIENT_CONNECTED:
-                {
-                    ConnectionEntry entry = getConnection(event.connection);
-
-                    if (entry != null)
-                        entry.connected = true;
-
-                    invoke(
-                        callbackClassicClientConnected,
-                        (double) event.connection,
-                        (double) event.device);
-                    break;
-                }
-
-                case EVENT_CLASSIC_DATA:
-                    invoke(
-                        callbackClassicData,
-                        (double) event.connection,
-                        event.value);
-                    break;
-
-                case EVENT_CLASSIC_DISCONNECTED:
-                    invoke(
-                        callbackClassicDisconnected,
-                        (double) event.connection,
-                        event.error,
-                        event.message);
-
-                    eraseConnection(event.connection);
-
-                    if (event.error != OK)
-                        setLastError(event.error, event.message);
-                    break;
-
-                default:
-                    break;
-            }
-
-            ++dispatched;
-        }
-
-        return dispatched;
     }
 
 
@@ -1001,7 +882,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
             leScanning.set(false);
 
-            enqueueScanStopped(
+            dispatchScanStopped(
                 TRANSPORT_LE,
                 OPERATION_FAILED,
                 "Android BLE scan failed: " + errorCode);
@@ -1083,7 +964,7 @@ public class GMBluetooth extends GMBluetoothInternal
         {
         }
 
-        enqueueScanStopped(TRANSPORT_LE, OK, "");
+        dispatchScanStopped(TRANSPORT_LE, OK, "");
         return result(OK, "");
     }
 
@@ -1147,7 +1028,7 @@ public class GMBluetooth extends GMBluetoothInternal
                 BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action))
             {
                 if (classicScanning.getAndSet(false))
-                    enqueueScanStopped(
+                    dispatchScanStopped(
                         TRANSPORT_CLASSIC,
                         OK,
                         "");
@@ -1288,7 +1169,7 @@ public class GMBluetooth extends GMBluetoothInternal
         }
 
         if (classicScanning.getAndSet(false))
-            enqueueScanStopped(
+            dispatchScanStopped(
                 TRANSPORT_CLASSIC,
                 OK,
                 "");
@@ -1523,7 +1404,7 @@ public class GMBluetooth extends GMBluetoothInternal
                             deviceEntry.address == null ||
                             deviceEntry.address.isEmpty())
                         {
-                            enqueueConnectResult(
+                            dispatchConnectResult(
                                 connection,
                                 device,
                                 INVALID_ARGUMENT,
@@ -1573,7 +1454,7 @@ public class GMBluetooth extends GMBluetoothInternal
                         return;
                     }
 
-                    enqueueConnectResult(
+                    dispatchConnectResult(
                         connection,
                         device,
                         OK,
@@ -1600,7 +1481,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
                     if (generation.get() == workerGeneration)
                     {
-                        enqueueConnectResult(
+                        dispatchConnectResult(
                             connection,
                             device,
                             PERMISSION_DENIED,
@@ -1623,7 +1504,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
                     if (generation.get() == workerGeneration)
                     {
-                        enqueueConnectResult(
+                        dispatchConnectResult(
                             connection,
                             device,
                             CONNECTION_FAILED,
@@ -1646,7 +1527,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
                     if (generation.get() == workerGeneration)
                     {
-                        enqueueConnectResult(
+                        dispatchConnectResult(
                             connection,
                             device,
                             OPERATION_FAILED,
@@ -1704,7 +1585,7 @@ public class GMBluetooth extends GMBluetoothInternal
                         initialized &&
                         generation.get() == workerGeneration)
                     {
-                        enqueueDisconnected(
+                        dispatchDisconnected(
                             connection,
                             manual ? OK : DISCONNECTED,
                             manual
@@ -1724,7 +1605,7 @@ public class GMBluetooth extends GMBluetoothInternal
                         initialized &&
                         generation.get() == workerGeneration)
                     {
-                        enqueueDisconnected(
+                        dispatchDisconnected(
                             connection,
                             manual ? OK : DISCONNECTED,
                             manual
@@ -1738,7 +1619,7 @@ public class GMBluetooth extends GMBluetoothInternal
                         initialized &&
                         generation.get() == workerGeneration)
                     {
-                        enqueueDisconnected(
+                        dispatchDisconnected(
                             connection,
                             OPERATION_FAILED,
                             throwableMessage(throwable));
@@ -2101,17 +1982,12 @@ public class GMBluetooth extends GMBluetoothInternal
                         }
 
                         entry.socket = socket;
+                        entry.connected = true;
 
-                        Event event = new Event();
-                        event.type =
-                            EVENT_CLASSIC_CLIENT_CONNECTED;
-                        event.transport =
-                            TRANSPORT_CLASSIC;
-                        event.connection =
-                            connection;
-                        event.device =
-                            device;
-                        events.offer(event);
+                        invoke(
+                            callbackClassicClientConnected,
+                            (double) connection,
+                            (double) device);
 
                         startReadLoop(
                             connection,

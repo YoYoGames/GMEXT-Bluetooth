@@ -8,7 +8,6 @@ import ${YYAndroidPackageName}.enums.*;
 public interface GMBluetoothInterface {
     public boolean bluetooth_initialize();
     public void bluetooth_shutdown();
-    public int bluetooth_update();
     public boolean bluetooth_is_initialized();
     public int bluetooth_last_error_code();
     public String bluetooth_last_error_message();

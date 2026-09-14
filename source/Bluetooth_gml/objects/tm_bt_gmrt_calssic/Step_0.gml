@@ -1,10 +1,8 @@
 if (!bt_ready) exit;
 
-// Dispatch Bluetooth events to GML
-var _events_processed = bluetooth_update();
 var _is_scanning = bluetooth_classic_scan_is_running();
-if (_events_processed > 0 || _is_scanning) {
-    show_debug_message($"[GML] bluetooth_update() events={_events_processed} scanning={_is_scanning}");
+if (_is_scanning) {
+    show_debug_message($"[GML] scanning={_is_scanning}");
 }
 
 // Permission state monitoring

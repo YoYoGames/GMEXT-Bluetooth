@@ -128,13 +128,6 @@ static void GMInjectSelectorsIntoSubclass(Class subclass, Class base)
     return 0;
 }
 
-- (double)__EXT_NATIVE__bluetooth_update
-{
-    std::int32_t __result = [__impl bluetooth_update];
-
-    return static_cast<double>(__result);
-}
-
 - (double)__EXT_NATIVE__bluetooth_is_initialized
 {
     bool __result = [__impl bluetooth_is_initialized];

@@ -58,9 +58,6 @@ enum BluetoothPermissionStatus
 // Skipping function bluetooth_shutdown (no wrapper is required)
 
 
-// Skipping function bluetooth_update (no wrapper is required)
-
-
 // Skipping function bluetooth_is_initialized (no wrapper is required)
 
 

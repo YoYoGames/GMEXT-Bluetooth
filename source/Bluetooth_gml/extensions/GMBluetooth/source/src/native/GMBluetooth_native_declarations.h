@@ -9,7 +9,6 @@
 // Function declarations only - no enums to avoid redefinition conflicts
 bool bluetooth_initialize();
 void bluetooth_shutdown();
-std::int32_t bluetooth_update();
 bool bluetooth_is_initialized();
 std::int32_t bluetooth_last_error_code();
 std::string bluetooth_last_error_message();
