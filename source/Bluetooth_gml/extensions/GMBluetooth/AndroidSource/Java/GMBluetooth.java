@@ -1706,7 +1706,7 @@ public class GMBluetooth extends GMBluetoothInternal
                     {
                         enqueueDisconnected(
                             connection,
-                            OK,
+                            manual ? OK : DISCONNECTED,
                             manual
                                 ? "Disconnected"
                                 : "Remote device disconnected");
@@ -1843,6 +1843,21 @@ public class GMBluetooth extends GMBluetoothInternal
     }
 
 
+    // data/out_data span the caller's ENTIRE GameMaker buffer (mirroring the
+    // native GMBuffer convention in GMBluetooth_native.cpp, where offset is
+    // applied as data.data() + offset) - not a pre-sliced window. A duplicate()
+    // is used so we never disturb the position/limit of the buffer the runner
+    // owns.
+    private static boolean bufferRangeInvalid(ByteBuffer buffer, int offset, int length)
+    {
+        return
+            buffer == null ||
+            offset < 0 ||
+            length < 0 ||
+            (long) offset + (long) length > buffer.capacity();
+    }
+
+
     @Override
     public int bluetooth_classic_send(
         long connection,
@@ -1850,17 +1865,47 @@ public class GMBluetooth extends GMBluetoothInternal
         int offset,
         int size)
     {
-        // TODO: Implement GameMaker ByteBuffer -> RFCOMM byte transfer.
-        //
-        // Intentionally left unimplemented until the project's preferred
-        // GameMaker buffer convention is supplied.
-        //
-        // The BluetoothSocket transport itself is implemented and ready.
-        setLastError(
-            NOT_SUPPORTED,
-            "TODO: GameMaker buffer send bridge not implemented yet");
+        if (!initialized)
+            return result(NOT_INITIALIZED, "Bluetooth is not initialized");
 
-        return NOT_SUPPORTED;
+        ConnectionEntry entry = getConnection(connection);
+
+        if (entry == null)
+            return result(
+                INVALID_HANDLE,
+                "Invalid Bluetooth Classic connection handle");
+
+        BluetoothSocket socket = entry.socket;
+
+        if (socket == null || !entry.connected)
+            return result(
+                DISCONNECTED,
+                "Classic connection is not connected");
+
+        if (bufferRangeInvalid(data, offset, size))
+            return result(
+                INVALID_ARGUMENT,
+                "Invalid buffer offset/size for bluetooth_classic_send");
+
+        byte[] chunk = new byte[size];
+
+        if (size > 0)
+        {
+            ByteBuffer view = data.duplicate();
+            view.position(offset);
+            view.get(chunk, 0, size);
+        }
+
+        try
+        {
+            OutputStream output = socket.getOutputStream();
+            output.write(chunk);
+            return result(OK, "");
+        }
+        catch (IOException exception)
+        {
+            return result(DISCONNECTED, throwableMessage(exception));
+        }
     }
 
 
@@ -1871,16 +1916,61 @@ public class GMBluetooth extends GMBluetoothInternal
         int offset,
         int max_size)
     {
-        // TODO: Implement RFCOMM receive queue -> GameMaker ByteBuffer transfer.
-        //
-        // Incoming RFCOMM bytes are already queued by startReadLoop() and
-        // bluetooth_classic_receive_available() reports their byte count.
-        // Only the final GameMaker buffer-copy convention is deferred.
-        setLastError(
-            NOT_SUPPORTED,
-            "TODO: GameMaker buffer receive bridge not implemented yet");
+        ConnectionEntry entry = getConnection(connection);
 
-        return 0;
+        if (entry == null)
+            return 0;
+
+        if (bufferRangeInvalid(out_data, offset, max_size))
+        {
+            setLastError(
+                INVALID_ARGUMENT,
+                "Invalid buffer offset/size for bluetooth_classic_receive");
+            return 0;
+        }
+
+        if (max_size == 0)
+            return 0;
+
+        byte[] copiedBytes;
+
+        synchronized (entry.receiveLock)
+        {
+            int copied = Math.min(max_size, entry.receiveAvailable);
+
+            if (copied == 0)
+                return 0;
+
+            copiedBytes = new byte[copied];
+            int filled = 0;
+
+            while (filled < copied)
+            {
+                byte[] head = entry.receiveChunks.peekFirst();
+                int take = Math.min(head.length, copied - filled);
+
+                System.arraycopy(head, 0, copiedBytes, filled, take);
+                entry.receiveChunks.pollFirst();
+
+                if (take < head.length)
+                {
+                    // Only part of this chunk was consumed - push the
+                    // remainder back as the new head of the queue.
+                    entry.receiveChunks.addFirst(
+                        Arrays.copyOfRange(head, take, head.length));
+                }
+
+                filled += take;
+            }
+
+            entry.receiveAvailable -= copied;
+        }
+
+        ByteBuffer view = out_data.duplicate();
+        view.position(offset);
+        view.put(copiedBytes);
+
+        return copiedBytes.length;
     }
 
 
