@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cstdio>
 #include <deque>
 #include <memory>
@@ -216,6 +217,7 @@ namespace gmbluetooth
 
             std::uint64_t handle = 0;
             std::uint64_t device = 0;
+            std::mutex socket_mutex;
             SOCKET socket = INVALID_SOCKET;
             std::atomic_bool connected{false};
             std::atomic_bool closing{false};
@@ -223,6 +225,38 @@ namespace gmbluetooth
             std::deque<std::uint8_t> received;
             std::mutex send_mutex;
         };
+
+        // The receive loop thread is the sole owner of closesocket() for a
+        // connection: it only closes after its own blocking recv() has
+        // returned, so the handle can never be reused while still in flight.
+        // Every other caller (classic_disconnect, WindowsBackend::shutdown)
+        // must only ever request a shutdown() to unblock that recv() -
+        // never close the socket directly - or the handle can be double
+        // closed / reused out from under a concurrent send().
+        SOCKET connection_socket(const std::shared_ptr<ClassicConnectionState>& state)
+        {
+            std::scoped_lock lock(state->socket_mutex);
+            return state->socket;
+        }
+
+        void connection_request_shutdown(const std::shared_ptr<ClassicConnectionState>& state)
+        {
+            std::scoped_lock lock(state->socket_mutex);
+            if (state->socket != INVALID_SOCKET)
+                ::shutdown(state->socket, SD_BOTH);
+        }
+
+        void connection_close(const std::shared_ptr<ClassicConnectionState>& state)
+        {
+            SOCKET s = INVALID_SOCKET;
+            {
+                std::scoped_lock lock(state->socket_mutex);
+                s = state->socket;
+                state->socket = INVALID_SOCKET;
+            }
+            if (s != INVALID_SOCKET)
+                closesocket(s);
+        }
 
         struct SharedClassicState
         {
@@ -243,12 +277,29 @@ namespace gmbluetooth
             return it != shared->connections.end() ? it->second : nullptr;
         }
 
-        void register_connection(
+        // Returns false (and inserts nothing) once the backend has started
+        // shutting down. Sharing connections_mutex with the alive flip in
+        // WindowsBackend::shutdown() closes the race where a connect() that
+        // is completing concurrently with shutdown() could register a
+        // socket/receive-loop thread that nothing will ever ask to
+        // shutdown() again, leaking a blocked-forever thread.
+        bool register_connection_if_alive(
             const std::shared_ptr<SharedClassicState>& shared,
             const std::shared_ptr<ClassicConnectionState>& state)
         {
             std::scoped_lock lock(shared->connections_mutex);
+            if (!shared->alive->load())
+                return false;
             shared->connections[state->handle] = state;
+            return true;
+        }
+
+        void unregister_connection(
+            const std::shared_ptr<SharedClassicState>& shared,
+            std::uint64_t handle)
+        {
+            std::scoped_lock lock(shared->connections_mutex);
+            shared->connections.erase(handle);
         }
 
         void start_receive_loop(
@@ -262,7 +313,7 @@ namespace gmbluetooth
                 while (state->connected.load() && shared->alive->load())
                 {
                     const int received = recv(
-                        state->socket,
+                        connection_socket(state),
                         reinterpret_cast<char*>(buffer.data()),
                         static_cast<int>(buffer.size()),
                         0);
@@ -321,11 +372,8 @@ namespace gmbluetooth
                     break;
                 }
 
-                if (state->socket != INVALID_SOCKET)
-                {
-                    closesocket(state->socket);
-                    state->socket = INVALID_SOCKET;
-                }
+                connection_close(state);
+                unregister_connection(shared, state->handle);
             }).detach();
         }
     }
@@ -378,30 +426,51 @@ namespace gmbluetooth
             if (!initialized_)
                 return;
 
-            classic_->alive->store(false);
+            std::vector<std::shared_ptr<ClassicConnectionState>> connections;
+            {
+                std::scoped_lock lock(classic_->connections_mutex);
+                classic_->alive->store(false);
+                for (const auto& pair : classic_->connections)
+                    connections.push_back(pair.second);
+            }
 
             std::string ignored;
             le_scan_stop(ignored);
             classic_scan_stop(ignored);
             classic_server_stop(ignored);
 
-            std::vector<std::shared_ptr<ClassicConnectionState>> connections;
-            {
-                std::scoped_lock lock(classic_->connections_mutex);
-                for (const auto& pair : classic_->connections)
-                    connections.push_back(pair.second);
-                classic_->connections.clear();
-            }
-
+            // Only request a shutdown() here - never close the socket
+            // directly. Each connection's own receive-loop thread is the
+            // sole owner of closesocket() (and of erasing itself from the
+            // map); it is kept alive by the shared_ptr it captured even
+            // after this WindowsBackend is destroyed, so it is safe to let
+            // it finish asynchronously instead of racing it here.
             for (const auto& state : connections)
             {
                 state->closing.store(true);
                 state->connected.store(false);
-                if (state->socket != INVALID_SOCKET)
+                connection_request_shutdown(state);
+            }
+
+            // Each receive-loop thread closes its own socket asynchronously
+            // once its recv() unblocks. Give them a bounded window to do
+            // that (and unregister themselves) before WSACleanup() runs -
+            // tearing down Winsock while another thread still has a socket
+            // call in flight is undefined behavior.
+            if (!connections.empty())
+            {
+                const auto deadline =
+                    std::chrono::steady_clock::now() + std::chrono::seconds(2);
+                for (;;)
                 {
-                    ::shutdown(state->socket, SD_BOTH);
-                    closesocket(state->socket);
-                    state->socket = INVALID_SOCKET;
+                    bool empty = false;
+                    {
+                        std::scoped_lock lock(classic_->connections_mutex);
+                        empty = classic_->connections.empty();
+                    }
+                    if (empty || std::chrono::steady_clock::now() >= deadline)
+                        break;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 }
             }
 
@@ -883,7 +952,12 @@ namespace gmbluetooth
                     connection, device_handle);
                 state->socket = socket_handle;
                 state->connected.store(true);
-                register_connection(shared, state);
+
+                if (!register_connection_if_alive(shared, state))
+                {
+                    closesocket(socket_handle);
+                    return;
+                }
 
                 if (alive->load() && shared->hooks.push_event)
                 {
@@ -916,9 +990,7 @@ namespace gmbluetooth
 
             state->closing.store(true);
             state->connected.store(false);
-
-            if (state->socket != INVALID_SOCKET)
-                ::shutdown(state->socket, SD_BOTH);
+            connection_request_shutdown(state);
 
             message.clear();
             return Error::Ok;
@@ -959,8 +1031,15 @@ namespace gmbluetooth
             std::size_t sent_total = 0;
             while (sent_total < size)
             {
+                const SOCKET socket_handle = connection_socket(state);
+                if (socket_handle == INVALID_SOCKET)
+                {
+                    message = "Classic connection is not connected";
+                    return Error::Disconnected;
+                }
+
                 const int sent = send(
-                    state->socket,
+                    socket_handle,
                     reinterpret_cast<const char*>(data + sent_total),
                     static_cast<int>(size - sent_total),
                     0);
@@ -1141,7 +1220,12 @@ namespace gmbluetooth
                         connection, device_handle);
                     state->socket = client;
                     state->connected.store(true);
-                    register_connection(classic_, state);
+
+                    if (!register_connection_if_alive(classic_, state))
+                    {
+                        closesocket(client);
+                        continue;
+                    }
 
                     if (hooks_.push_event)
                     {
