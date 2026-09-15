@@ -57,6 +57,7 @@ elseif(CMAKE_OSX_SYSROOT MATCHES "iphone")
     target_sources(${EXT_MAIN_TARGET}
         PRIVATE
             "${_GMBLUETOOTH_COMMON_CPP}"
+            "${_GMBLUETOOTH_NATIVE_DIR}/GMBluetooth_json.cpp"
             "${_GMBLUETOOTH_APPLE_MM}")
 
     # Link required iOS frameworks
