@@ -387,6 +387,24 @@ GMEXPORT double __EXT_NATIVE__bluetooth_classic_server_is_running()
     return static_cast<double>(__result);
 }
 
+GMEXPORT double __EXT_NATIVE__bluetooth_classic_discoverable_start(double duration_seconds)
+{
+    auto&& __result = bluetooth_classic_discoverable_start(static_cast<std::int32_t>(duration_seconds));
+    return static_cast<double>(__result);
+}
+
+GMEXPORT double __EXT_NATIVE__bluetooth_classic_discoverable_stop()
+{
+    auto&& __result = bluetooth_classic_discoverable_stop();
+    return static_cast<double>(__result);
+}
+
+GMEXPORT double __EXT_NATIVE__bluetooth_classic_discoverable_is_running()
+{
+    auto&& __result = bluetooth_classic_discoverable_is_running();
+    return static_cast<double>(__result);
+}
+
 GMEXPORT double __EXT_NATIVE__bluetooth_le_connect(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length)
 {
     gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};

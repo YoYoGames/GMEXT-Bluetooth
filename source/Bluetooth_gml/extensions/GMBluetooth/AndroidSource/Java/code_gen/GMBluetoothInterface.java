@@ -45,6 +45,9 @@ public interface GMBluetoothInterface {
     public int bluetooth_classic_server_start(String name, String service_uuid);
     public int bluetooth_classic_server_stop();
     public boolean bluetooth_classic_server_is_running();
+    public int bluetooth_classic_discoverable_start(int duration_seconds);
+    public int bluetooth_classic_discoverable_stop();
+    public boolean bluetooth_classic_discoverable_is_running();
     public long bluetooth_le_connect(long device, GMFunction callback);
     public int bluetooth_le_disconnect(long connection);
     public boolean bluetooth_le_connection_is_valid(long connection);

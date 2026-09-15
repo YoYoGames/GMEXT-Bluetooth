@@ -112,6 +112,9 @@ namespace gm::wire::details
 - (std::int32_t)bluetooth_classic_server_start:(std::string_view)name service_uuid:(std::string_view)service_uuid;
 - (std::int32_t)bluetooth_classic_server_stop;
 - (bool)bluetooth_classic_server_is_running;
+- (std::int32_t)bluetooth_classic_discoverable_start:(std::int32_t)duration_seconds;
+- (std::int32_t)bluetooth_classic_discoverable_stop;
+- (bool)bluetooth_classic_discoverable_is_running;
 - (std::uint64_t)bluetooth_le_connect:(std::uint64_t)device callback:(gm::wire::GMFunction)callback;
 - (std::int32_t)bluetooth_le_disconnect:(std::uint64_t)connection;
 - (bool)bluetooth_le_connection_is_valid:(std::uint64_t)connection;
@@ -212,6 +215,9 @@ namespace gm::wire::details
 - (double)__EXT_NATIVE__bluetooth_classic_server_start:(char*)name arg1:(char*)service_uuid;
 - (double)__EXT_NATIVE__bluetooth_classic_server_stop;
 - (double)__EXT_NATIVE__bluetooth_classic_server_is_running;
+- (double)__EXT_NATIVE__bluetooth_classic_discoverable_start:(double)duration_seconds;
+- (double)__EXT_NATIVE__bluetooth_classic_discoverable_stop;
+- (double)__EXT_NATIVE__bluetooth_classic_discoverable_is_running;
 - (double)__EXT_NATIVE__bluetooth_le_connect:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_le_disconnect:(char*)__arg_buffer arg1:(double)__arg_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_le_connection_is_valid:(char*)__arg_buffer arg1:(double)__arg_buffer_length;

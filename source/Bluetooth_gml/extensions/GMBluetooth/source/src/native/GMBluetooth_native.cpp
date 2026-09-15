@@ -1754,6 +1754,43 @@ bool bluetooth_classic_server_is_running()
     return g_backend && g_backend->classic_server_is_running();
 }
 
+std::int32_t bluetooth_classic_discoverable_start(std::int32_t duration_seconds)
+{
+    if (!g_backend)
+    {
+        g_last_error = Error::NotInitialized;
+        g_last_error_message = "Bluetooth backend is not initialized";
+        return static_cast<std::int32_t>(Error::NotInitialized);
+    }
+
+    std::string message;
+    const Error error = g_backend->classic_discoverable_start(duration_seconds, message);
+    g_last_error = error;
+    g_last_error_message = message;
+    return static_cast<std::int32_t>(error);
+}
+
+std::int32_t bluetooth_classic_discoverable_stop()
+{
+    if (!g_backend)
+    {
+        g_last_error = Error::NotInitialized;
+        g_last_error_message = "Bluetooth backend is not initialized";
+        return static_cast<std::int32_t>(Error::NotInitialized);
+    }
+
+    std::string message;
+    const Error error = g_backend->classic_discoverable_stop(message);
+    g_last_error = error;
+    g_last_error_message = message;
+    return static_cast<std::int32_t>(error);
+}
+
+bool bluetooth_classic_discoverable_is_running()
+{
+    return g_backend && g_backend->classic_discoverable_is_running();
+}
+
 // Callback registration functions
 bool bluetooth_set_callback_device_found(const gm::wire::GMFunction& callback)
 {

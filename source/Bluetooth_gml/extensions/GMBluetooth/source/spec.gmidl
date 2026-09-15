@@ -237,6 +237,30 @@ function bluetooth_classic_server_stop(): int32;
 function bluetooth_classic_server_is_running(): bool;
 
 // =============================================================================
+// Bluetooth Classic discoverability
+// =============================================================================
+
+/// Makes the local radio discoverable to other devices' Classic inquiry scans, so
+/// bluetooth_classic_server_start's service can actually be found by an unpaired peer.
+/// duration_seconds: how long to stay discoverable. 0 = indefinite where the platform allows it.
+/// Windows: fully supported, start/stop both work, duration enforced by this extension via a timer.
+/// Android: requests discoverability from the OS for duration_seconds (0 is treated as the
+///   Android default of 120s, since Android does not support a real "indefinite" here); there is
+///   no OS API to cancel discoverability early, so bluetooth_classic_discoverable_stop returns
+///   NotSupported on this platform and it simply expires on its own.
+/// macOS/iOS: no public API exists; returns NotSupported.
+[global, bind = typed_gml]
+function bluetooth_classic_discoverable_start(duration_seconds: int32): int32;
+
+/// Stops discoverability early. See bluetooth_classic_discoverable_start for per-platform support
+/// (NotSupported on Android and Apple).
+[global, bind = typed_gml]
+function bluetooth_classic_discoverable_stop(): int32;
+
+[global, bind = typed_gml]
+function bluetooth_classic_discoverable_is_running(): bool;
+
+// =============================================================================
 // BLE GATT client: connect / disconnect
 // =============================================================================
 

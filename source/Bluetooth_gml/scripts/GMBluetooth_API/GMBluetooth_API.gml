@@ -532,6 +532,15 @@ function bluetooth_classic_receive(_connection, _out_data, _offset, _max_size)
 // Skipping function bluetooth_classic_server_is_running (no wrapper is required)
 
 
+// Skipping function bluetooth_classic_discoverable_start (no wrapper is required)
+
+
+// Skipping function bluetooth_classic_discoverable_stop (no wrapper is required)
+
+
+// Skipping function bluetooth_classic_discoverable_is_running (no wrapper is required)
+
+
 /**
  * @param {Real} _device
  * @param {Function} _callback

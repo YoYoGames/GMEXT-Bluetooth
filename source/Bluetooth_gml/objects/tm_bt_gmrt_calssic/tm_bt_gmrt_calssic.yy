@@ -11,8 +11,8 @@
   "name":"tm_bt_gmrt_calssic",
   "overriddenProperties":[],
   "parent":{
-    "name":"Bluetooth",
-    "path":"Bluetooth.yyp",
+    "name":"PRE TEST",
+    "path":"folders/GMBluetooth DEMO/PRE TEST.yy",
   },
   "parentObjectId":null,
   "persistent":false,

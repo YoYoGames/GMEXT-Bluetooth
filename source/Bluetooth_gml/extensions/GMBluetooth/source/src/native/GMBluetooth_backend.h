@@ -226,6 +226,25 @@ namespace gmbluetooth
             return false;
         }
 
+        virtual Error classic_discoverable_start(std::int32_t duration_seconds, std::string& message)
+        {
+            (void)duration_seconds;
+
+            message = "Bluetooth Classic discoverability is not supported by this backend";
+            return Error::NotSupported;
+        }
+
+        virtual Error classic_discoverable_stop(std::string& message)
+        {
+            message = "Bluetooth Classic discoverability is not supported by this backend";
+            return Error::NotSupported;
+        }
+
+        virtual bool classic_discoverable_is_running() const
+        {
+            return false;
+        }
+
         virtual Error le_connect(
             std::uint64_t connection,
             const DiscoveredDevice& device,

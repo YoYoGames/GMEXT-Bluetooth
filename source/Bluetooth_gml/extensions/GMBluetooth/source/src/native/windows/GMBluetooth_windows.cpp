@@ -438,6 +438,7 @@ namespace gmbluetooth
             le_scan_stop(ignored);
             classic_scan_stop(ignored);
             classic_server_stop(ignored);
+            classic_discoverable_stop(ignored);
 
             // Only request a shutdown() here - never close the socket
             // directly. Each connection's own receive-loop thread is the
@@ -1274,6 +1275,94 @@ namespace gmbluetooth
             return classic_server_running_.load();
         }
 
+        Error classic_discoverable_start(std::int32_t duration_seconds, std::string& message) override
+        {
+            // Idempotent: tear down any previous session/timer before starting a new one.
+            std::string ignored;
+            classic_discoverable_stop(ignored);
+
+            BLUETOOTH_FIND_RADIO_PARAMS params{};
+            params.dwSize = sizeof(params);
+            HANDLE radio_handle = nullptr;
+            HBLUETOOTH_RADIO_FIND find = BluetoothFindFirstRadio(&params, &radio_handle);
+            if (!find)
+            {
+                message = "No Bluetooth radio found on this system";
+                return Error::NotSupported;
+            }
+            BluetoothFindRadioClose(find);
+
+            if (!BluetoothEnableIncomingConnections(radio_handle, TRUE))
+            {
+                CloseHandle(radio_handle);
+                message = "BluetoothEnableIncomingConnections failed";
+                return Error::OperationFailed;
+            }
+
+            if (!BluetoothEnableDiscovery(radio_handle, TRUE))
+            {
+                CloseHandle(radio_handle);
+                message = "BluetoothEnableDiscovery failed";
+                return Error::OperationFailed;
+            }
+
+            discoverable_radio_ = radio_handle;
+            classic_discoverable_active_.store(true);
+            classic_discoverable_stop_requested_.store(false);
+
+            if (duration_seconds > 0)
+            {
+                discoverable_timer_thread_ = std::thread([this, duration_seconds]()
+                {
+                    const auto deadline =
+                        std::chrono::steady_clock::now() + std::chrono::seconds(duration_seconds);
+                    while (!classic_discoverable_stop_requested_.load() &&
+                           std::chrono::steady_clock::now() < deadline)
+                    {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                    }
+
+                    // Only auto-disable on natural expiry - if a stop was requested,
+                    // classic_discoverable_stop() owns disabling/closing the radio.
+                    if (!classic_discoverable_stop_requested_.load())
+                    {
+                        if (discoverable_radio_)
+                            BluetoothEnableDiscovery(discoverable_radio_, FALSE);
+                        classic_discoverable_active_.store(false);
+                    }
+                });
+            }
+
+            message.clear();
+            return Error::Ok;
+        }
+
+        Error classic_discoverable_stop(std::string& message) override
+        {
+            classic_discoverable_stop_requested_.store(true);
+
+            if (discoverable_timer_thread_.joinable())
+                discoverable_timer_thread_.join();
+
+            if (discoverable_radio_)
+            {
+                BluetoothEnableDiscovery(discoverable_radio_, FALSE);
+                CloseHandle(discoverable_radio_);
+                discoverable_radio_ = nullptr;
+            }
+
+            classic_discoverable_active_.store(false);
+            message.clear();
+            return Error::Ok;
+        }
+
+        bool classic_discoverable_is_running() const override
+        {
+            if (!discoverable_radio_)
+                return classic_discoverable_active_.load();
+            return BluetoothIsDiscoverable(discoverable_radio_) != FALSE;
+        }
+
         ~WindowsBackend() override
         {
             if (initialized_)
@@ -1339,6 +1428,11 @@ namespace gmbluetooth
         WSAQUERYSETW server_query_{};
         std::wstring server_name_;
         std::wstring server_comment_;
+
+        std::atomic_bool classic_discoverable_active_{false};
+        std::atomic_bool classic_discoverable_stop_requested_{false};
+        std::thread discoverable_timer_thread_;
+        HANDLE discoverable_radio_ = nullptr;
     };
 
     std::unique_ptr<Backend> create_platform_backend(CoreHooks hooks)

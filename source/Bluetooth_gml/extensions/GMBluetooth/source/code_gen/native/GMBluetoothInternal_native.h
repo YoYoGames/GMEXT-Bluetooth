@@ -109,6 +109,9 @@ std::int32_t bluetooth_classic_receive(std::uint64_t connection, gm::wire::GMBuf
 std::int32_t bluetooth_classic_server_start(std::string_view name, std::string_view service_uuid);
 std::int32_t bluetooth_classic_server_stop();
 bool bluetooth_classic_server_is_running();
+std::int32_t bluetooth_classic_discoverable_start(std::int32_t duration_seconds);
+std::int32_t bluetooth_classic_discoverable_stop();
+bool bluetooth_classic_discoverable_is_running();
 std::uint64_t bluetooth_le_connect(std::uint64_t device, const gm::wire::GMFunction& callback);
 std::int32_t bluetooth_le_disconnect(std::uint64_t connection);
 bool bluetooth_le_connection_is_valid(std::uint64_t connection);

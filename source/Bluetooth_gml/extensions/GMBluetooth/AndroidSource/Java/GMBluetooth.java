@@ -4977,6 +4977,73 @@ public class GMBluetooth extends GMBluetoothInternal
     }
 
 
+    @Override
+    public int bluetooth_classic_discoverable_start(int duration_seconds)
+    {
+        if (!initialized)
+            return result(
+                NOT_INITIALIZED,
+                "Bluetooth is not initialized");
+
+        if (!hasAdvertisePermission())
+            return result(
+                PERMISSION_DENIED,
+                "Bluetooth advertise permission is not granted");
+
+        if (!adapterEnabled())
+            return result(
+                BLUETOOTH_DISABLED,
+                "Bluetooth is disabled");
+
+        // Android has no real "indefinite" discoverable mode; fall back to its own default.
+        int requestedDuration = duration_seconds > 0 ? duration_seconds : 120;
+
+        Activity current = activity();
+
+        if (current == null)
+            return result(
+                OPERATION_FAILED,
+                "No foreground activity available to request discoverability");
+
+        try
+        {
+            Intent discoverableIntent =
+                new Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE);
+            discoverableIntent.putExtra(
+                BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION,
+                requestedDuration);
+            discoverableIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            current.startActivity(discoverableIntent);
+        }
+        catch (Throwable throwable)
+        {
+            return result(
+                OPERATION_FAILED,
+                throwableMessage(throwable));
+        }
+
+        return result(OK, "");
+    }
+
+
+    @Override
+    public int bluetooth_classic_discoverable_stop()
+    {
+        return result(
+            NOT_SUPPORTED,
+            "Android does not provide an API to cancel discoverability early; it expires on its own");
+    }
+
+
+    @Override
+    public boolean bluetooth_classic_discoverable_is_running()
+    {
+        return initialized &&
+            adapter != null &&
+            adapter.getScanMode() == BluetoothAdapter.SCAN_MODE_CONNECTABLE_DISCOVERABLE;
+    }
+
+
     // =========================================================================
     // Callback registration
     // =========================================================================

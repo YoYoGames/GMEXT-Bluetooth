@@ -4,7 +4,7 @@
   "name":"Note2",
   "parent":{
     "name":"Bluetooth",
-    "path":"Bluetooth.yyp",
+    "path":"folders/Bluetooth.yy",
   },
   "resourceType":"GMNotes",
   "resourceVersion":"2.0",

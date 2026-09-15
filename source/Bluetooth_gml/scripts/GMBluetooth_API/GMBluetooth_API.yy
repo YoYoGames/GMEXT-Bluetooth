@@ -6,7 +6,7 @@
   "name":"GMBluetooth_API",
   "parent":{
     "name":"Bluetooth",
-    "path":"Bluetooth.yyp",
+    "path":"folders/Bluetooth.yy",
   },
   "resourceType":"GMScript",
   "resourceVersion":"2.0",

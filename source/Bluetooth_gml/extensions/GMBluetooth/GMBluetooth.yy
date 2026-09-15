@@ -65,6 +65,9 @@
         {"$GMExtensionFunction":"","%Name":"bluetooth_classic_server_start","argCount":2,"args":[1,1,],"documentation":"@param {String} name\r\n@param {String} service_uuid\r\n@returns {Real}","externalName":"__EXT_NATIVE__bluetooth_classic_server_start","help":"","hidden":false,"kind":4,"name":"bluetooth_classic_server_start","resourceType":"GMExtensionFunction","resourceVersion":"2.0","returnType":2,},
         {"$GMExtensionFunction":"","%Name":"bluetooth_classic_server_stop","argCount":0,"args":[],"documentation":"@returns {Real}","externalName":"__EXT_NATIVE__bluetooth_classic_server_stop","help":"","hidden":false,"kind":4,"name":"bluetooth_classic_server_stop","resourceType":"GMExtensionFunction","resourceVersion":"2.0","returnType":2,},
         {"$GMExtensionFunction":"","%Name":"bluetooth_classic_server_is_running","argCount":0,"args":[],"documentation":"@returns {Real}","externalName":"__EXT_NATIVE__bluetooth_classic_server_is_running","help":"","hidden":false,"kind":4,"name":"bluetooth_classic_server_is_running","resourceType":"GMExtensionFunction","resourceVersion":"2.0","returnType":2,},
+        {"$GMExtensionFunction":"","%Name":"bluetooth_classic_discoverable_start","argCount":1,"args":[2,],"documentation":"@param {Real} duration_seconds\r\n@returns {Real}","externalName":"__EXT_NATIVE__bluetooth_classic_discoverable_start","help":"","hidden":false,"kind":4,"name":"bluetooth_classic_discoverable_start","resourceType":"GMExtensionFunction","resourceVersion":"2.0","returnType":2,},
+        {"$GMExtensionFunction":"","%Name":"bluetooth_classic_discoverable_stop","argCount":0,"args":[],"documentation":"@returns {Real}","externalName":"__EXT_NATIVE__bluetooth_classic_discoverable_stop","help":"","hidden":false,"kind":4,"name":"bluetooth_classic_discoverable_stop","resourceType":"GMExtensionFunction","resourceVersion":"2.0","returnType":2,},
+        {"$GMExtensionFunction":"","%Name":"bluetooth_classic_discoverable_is_running","argCount":0,"args":[],"documentation":"@returns {Real}","externalName":"__EXT_NATIVE__bluetooth_classic_discoverable_is_running","help":"","hidden":false,"kind":4,"name":"bluetooth_classic_discoverable_is_running","resourceType":"GMExtensionFunction","resourceVersion":"2.0","returnType":2,},
         {"$GMExtensionFunction":"","%Name":"__bluetooth_le_connect","argCount":4,"args":[1,2,1,2,],"documentation":"@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}","externalName":"__EXT_NATIVE__bluetooth_le_connect","help":"","hidden":true,"kind":4,"name":"__bluetooth_le_connect","resourceType":"GMExtensionFunction","resourceVersion":"2.0","returnType":2,},
         {"$GMExtensionFunction":"","%Name":"__bluetooth_le_disconnect","argCount":2,"args":[1,2,],"documentation":"@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@returns {Real}","externalName":"__EXT_NATIVE__bluetooth_le_disconnect","help":"","hidden":true,"kind":4,"name":"__bluetooth_le_disconnect","resourceType":"GMExtensionFunction","resourceVersion":"2.0","returnType":2,},
         {"$GMExtensionFunction":"","%Name":"__bluetooth_le_connection_is_valid","argCount":2,"args":[1,2,],"documentation":"@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@returns {Real}","externalName":"__EXT_NATIVE__bluetooth_le_connection_is_valid","help":"","hidden":true,"kind":4,"name":"__bluetooth_le_connection_is_valid","resourceType":"GMExtensionFunction","resourceVersion":"2.0","returnType":2,},
@@ -159,7 +162,7 @@
   "packageId":"",
   "parent":{
     "name":"Bluetooth",
-    "path":"Bluetooth.yyp",
+    "path":"folders/Bluetooth.yy",
   },
   "productId":"",
   "resourceType":"GMExtension",

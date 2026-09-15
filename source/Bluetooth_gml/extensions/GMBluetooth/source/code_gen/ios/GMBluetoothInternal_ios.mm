@@ -514,6 +514,27 @@ static void GMInjectSelectorsIntoSubclass(Class subclass, Class base)
     return static_cast<double>(__result);
 }
 
+- (double)__EXT_NATIVE__bluetooth_classic_discoverable_start:(double)duration_seconds
+{
+    std::int32_t __result = [__impl bluetooth_classic_discoverable_start:duration_seconds];
+
+    return static_cast<double>(__result);
+}
+
+- (double)__EXT_NATIVE__bluetooth_classic_discoverable_stop
+{
+    std::int32_t __result = [__impl bluetooth_classic_discoverable_stop];
+
+    return static_cast<double>(__result);
+}
+
+- (double)__EXT_NATIVE__bluetooth_classic_discoverable_is_running
+{
+    bool __result = [__impl bluetooth_classic_discoverable_is_running];
+
+    return static_cast<double>(__result);
+}
+
 - (double)__EXT_NATIVE__bluetooth_le_connect:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length
 {
     gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};

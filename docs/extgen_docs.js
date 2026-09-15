@@ -260,6 +260,25 @@
  */
 
 /**
+ * @function_partial bluetooth_classic_discoverable_start
+ * @param {Real} duration_seconds
+ * @returns {Real}
+ * @function_end
+ */
+
+/**
+ * @function_partial bluetooth_classic_discoverable_stop
+ * @returns {Real}
+ * @function_end
+ */
+
+/**
+ * @function_partial bluetooth_classic_discoverable_is_running
+ * @returns {Bool}
+ * @function_end
+ */
+
+/**
  * @function_partial bluetooth_le_connect
  * @param {Real} device
  * @param {Function} callback

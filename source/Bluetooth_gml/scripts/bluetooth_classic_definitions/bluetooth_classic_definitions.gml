@@ -1,0 +1,4 @@
+
+#macro DEMO_CLASSIC_SERVICE_UUID "6e400010-b5a3-f393-e0a9-e50e24dcca9e"
+#macro DEMO_CLASSIC_SERVICE_NAME "GMBluetoothDemo"
+
