@@ -524,3 +524,193 @@ if (global.ble_conn != -1) {
 from the menu). Create them the same way as the Classic rooms: a back
 button (`obj_button_goto`, default goto is the menu) plus one instance of
 the corresponding controller object.
+
+## 7. Classic connection lifecycle — findings & the missing `obj_bt_classic_connection`
+
+You've since restructured the Classic screens yourself: `obj_bt_classic_discoverable`
+(toggle button), `obj_bt_classic_device` (one clickable button instance per
+scanned device, spawned by `obj_bt_classic_client`), and `obj_bt_classic_connection`
+(meant to hold the live connection and stream mouse position both ways) now
+exist alongside `obj_bt_classic_server`/`obj_bt_classic_client`. Checked every
+`obj_bt_classic_*` file on disk — here's what's actually there vs. what's
+needed.
+
+### 7.1 Confirmed bugs
+
+1. **`obj_bt_classic_discoverable/Mouse_4.gml` calls `bluetooth_classic_discoverable_start()`
+   with zero arguments.** The function takes one required `duration_seconds: int32`
+   (`GMBluetooth.yy` compiles it with `argCount:1`) — this throws a wrong-number-of-arguments
+   error the moment the button is clicked. Fix:
+   ```gml
+   if (bluetooth_classic_discoverable_is_running())
+       bluetooth_classic_discoverable_stop()
+   else
+       bluetooth_classic_discoverable_start(120)  // seconds; 0 = indefinite on platforms that allow it
+   ```
+
+2. **`obj_bt_classic_server/Create_0.gml` never initializes `global.classic_conn`.**
+   It's only ever set inside the `classic_client_connected` callback, so anything
+   that reads it before a client connects (e.g. `KeyPress_32.gml`'s `global.classic_conn`
+   check) touches an undefined global. Client's Create already does this correctly
+   (`global.classic_conn = -1;`) — Server's needs the same line added.
+
+### 7.2 The real gap: nothing ever spawns `obj_bt_classic_connection`
+
+Both connect paths currently just stash the raw handle:
+- `obj_bt_classic_server/Create_0.gml`'s `classic_client_connected` callback → `global.classic_conn = _connection;`
+- `obj_bt_classic_device/Mouse_4.gml`'s connect callback → `global.classic_conn = _connection;`
+
+`obj_bt_classic_connection` itself has **zero `.gml` files on disk** — its `.yy`
+declares one Step event with no code behind it at all. It needs Create, Step,
+Draw and CleanUp events added via the IDE (**Add Event**, same as the
+Async - Dialog note in section 1.3 — don't hand-edit the `.yy` event list).
+
+**Callback routing note**: `bluetooth_set_callback_classic_data` /
+`_classic_disconnected` are process-wide single-slot callbacks (registered once
+in Server/Client's Create), not per-connection. Since this demo only ever has
+one live Classic connection at a time, the simplest correct fix is to keep
+those registrations where they are and have them *forward* into whichever
+`obj_bt_classic_connection` instance is currently alive, tracked via a new
+`global.classic_conn_inst`. No per-instance callback re-registration needed.
+
+**`obj_bt_classic_server/Create_0.gml`** — replace with:
+```gml
+show_debug_message("Bluetooth Classic Server")
+
+global.classic_conn = -1;
+global.classic_conn_inst = noone;
+
+bluetooth_classic_server_start(DEMO_CLASSIC_SERVICE_NAME, DEMO_CLASSIC_SERVICE_UUID);
+
+bluetooth_set_callback_classic_client_connected(function(_connection, _device) {
+    global.classic_conn = _connection;
+    global.classic_conn_inst = instance_create_depth(0, 0, 0, obj_bt_classic_connection, {connection: _connection});
+    show_debug_message("[GML] classic client connected conn=" + string(_connection));
+});
+
+bluetooth_set_callback_classic_data(function(_connection, _available_bytes) {
+    var _buf = buffer_create(_available_bytes, buffer_grow, 1);
+    var _n = bluetooth_classic_receive(_connection, _buf, 0, _available_bytes);
+    if (instance_exists(global.classic_conn_inst)) global.classic_conn_inst.on_receive(_buf, _n);
+    buffer_delete(_buf);
+});
+
+bluetooth_set_callback_classic_disconnected(function(_connection, _error_code, _message) {
+    show_debug_message("[GML] classic client disconnected: " + _message);
+    if (instance_exists(global.classic_conn_inst)) instance_destroy(global.classic_conn_inst);
+});
+```
+(`KeyPress_32.gml`'s hardcoded `"Helloo"` test send is unrelated leftover from
+before the dialog-based send flow — harmless to keep, safe to delete once
+you're relying on the connection object instead.)
+
+**`obj_bt_classic_client/Create_0.gml`** — same forwarding pattern, two callbacks change:
+```gml
+global.classic_conn = -1;
+global.classic_conn_inst = noone;   // add next to the existing global.classic_conn = -1;
+```
+```gml
+bluetooth_set_callback_classic_data(function(_connection, _available_bytes) {
+    var _buf = buffer_create(_available_bytes, buffer_grow, 1);
+    var _n = bluetooth_classic_receive(_connection, _buf, 0, _available_bytes);
+    if (instance_exists(global.classic_conn_inst)) global.classic_conn_inst.on_receive(_buf, _n);
+    buffer_delete(_buf);
+});
+
+bluetooth_set_callback_classic_disconnected(function(_connection, _error_code, _message) {
+    show_debug_message("[GML] classic disconnected: " + _message);
+    if (instance_exists(global.classic_conn_inst)) instance_destroy(global.classic_conn_inst);
+});
+```
+
+**`obj_bt_classic_device/Mouse_4.gml`** — spawn the connection object on success:
+```gml
+bluetooth_classic_scan_stop();
+bluetooth_classic_connect(device, DEMO_CLASSIC_SERVICE_UUID,
+    function(_error_code, _message, _connection, _device) {
+        show_debug_message("[GML] classic connect " + string(_error_code) + " " + _message);
+        if (_error_code == BluetoothError.Ok) {
+            global.classic_conn = _connection;
+            global.classic_conn_inst = instance_create_depth(0, 0, 0, obj_bt_classic_connection, {connection: _connection});
+        }
+    });
+```
+
+### 7.3 `obj_bt_classic_connection` — full implementation
+
+`connection` arrives via the `instance_create_depth(..., {connection: _connection})`
+struct argument, same mechanism `obj_bt_classic_device` already uses for `device`
+— no assignment code needed for it in Create.
+
+`Create_0.gml` (new — Add Event → Create):
+```gml
+// connection is injected by whichever caller spawned this instance
+// (obj_bt_classic_server's client_connected callback, or
+// obj_bt_classic_device's connect-success callback).
+remote_x = -1;
+remote_y = -1;
+has_remote = false;
+
+on_receive = function(_buf, _n) {
+    if (_n < 8) return; // wait for a full x/y packet (2 x int32)
+    remote_x = buffer_peek(_buf, 0, buffer_s32);
+    remote_y = buffer_peek(_buf, 4, buffer_s32);
+    has_remote = true;
+};
+```
+
+`Step_0.gml` (replaces the current empty Step):
+```gml
+if (!bluetooth_classic_connection_is_connected(connection)) exit;
+
+var _buf = buffer_create(8, buffer_fixed, 1);
+buffer_write(_buf, buffer_s32, mouse_x);
+buffer_write(_buf, buffer_s32, mouse_y);
+bluetooth_classic_send(connection, _buf, 0, buffer_get_size(_buf));
+buffer_delete(_buf);
+```
+
+`Draw_0.gml` (new — Add Event → Draw → Draw; room-space, so `mouse_x`/`mouse_y`
+line up directly with the drawn marker):
+```gml
+draw_set_color(c_white);
+draw_text(16, 16, "You: " + string(mouse_x) + ", " + string(mouse_y));
+
+if (has_remote) {
+    draw_set_color(c_red);
+    draw_circle(remote_x, remote_y, 12, false);
+    draw_text(remote_x + 16, remote_y - 8, "Peer");
+    draw_set_color(c_white);
+}
+```
+
+`CleanUp_0.gml` (new — Add Event → Cleanup; fires both on explicit
+`instance_destroy()` and on room/game end, so this is the one place that
+needs to disconnect):
+```gml
+if (bluetooth_classic_connection_is_connected(connection)) {
+    bluetooth_classic_disconnect(connection);
+}
+
+if (global.classic_conn_inst == id) {
+    global.classic_conn_inst = noone;
+    global.classic_conn = -1;
+}
+```
+
+Sending every Step (8 bytes/frame) is trivial for RFCOMM — no throttling needed
+for a demo. This treats each `classic_data` event as exactly one 8-byte position
+packet, which holds as long as sends aren't bursty; fine for this use case since
+there's exactly one packet in flight per frame.
+
+### 7.4 Leftover redundant code (not breaking anything, safe to remove)
+
+- **`obj_bt_classic_client/Step_0.gml`** — the whole "Click-to-connect device
+  list" block (the `device_mouse_check_button_pressed`/`point_in_rectangle`
+  loop over `devices[]`) duplicates what `obj_bt_classic_device/Mouse_4.gml`
+  now does per-instance. `Draw_0.gml`'s matching row-drawing block is already
+  commented out — this is the one live remnant. Safe to delete once you
+  confirm clicking the button instances works end to end.
+- **`obj_bt_classic_client/KeyPress_32.gml`** — empty file, dead code from
+  before the vk_space handling moved into `Step_0.gml`. Harmless either way;
+  remove the event via the IDE if you want to tidy it up.

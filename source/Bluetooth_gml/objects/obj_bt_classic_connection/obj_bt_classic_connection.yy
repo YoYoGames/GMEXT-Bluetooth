@@ -1,19 +1,18 @@
 {
   "$GMObject":"",
-  "%Name":"obj_bt_classic_client",
+  "%Name":"obj_bt_classic_connection",
   "eventList":[
     {"$GMEvent":"v1","%Name":"","collisionObjectId":null,"eventNum":0,"eventType":0,"isDnD":false,"name":"","resourceType":"GMEvent","resourceVersion":"2.0",},
     {"$GMEvent":"v1","%Name":"","collisionObjectId":null,"eventNum":0,"eventType":3,"isDnD":false,"name":"","resourceType":"GMEvent","resourceVersion":"2.0",},
     {"$GMEvent":"v1","%Name":"","collisionObjectId":null,"eventNum":0,"eventType":8,"isDnD":false,"name":"","resourceType":"GMEvent","resourceVersion":"2.0",},
     {"$GMEvent":"v1","%Name":"","collisionObjectId":null,"eventNum":0,"eventType":12,"isDnD":false,"name":"","resourceType":"GMEvent","resourceVersion":"2.0",},
-    {"$GMEvent":"v1","%Name":"","collisionObjectId":null,"eventNum":63,"eventType":7,"isDnD":false,"name":"","resourceType":"GMEvent","resourceVersion":"2.0",},
   ],
   "managed":true,
-  "name":"obj_bt_classic_client",
+  "name":"obj_bt_classic_connection",
   "overriddenProperties":[],
   "parent":{
-    "name":"Client",
-    "path":"folders/GMBluetooth DEMO/Classic/Client.yy",
+    "name":"Classic",
+    "path":"folders/GMBluetooth DEMO/Classic.yy",
   },
   "parentObjectId":null,
   "persistent":false,

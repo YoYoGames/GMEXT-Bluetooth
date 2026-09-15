@@ -94,11 +94,21 @@ namespace gmbluetooth
 
         bool parse_guid(const std::string& text, GUID& out)
         {
-            std::wstring wide = utf8_to_wide(text);
+            if (text.empty())
+                return false;
+
+            // CLSIDFromString requires braces (verified on Windows 11 10.0.26200:
+            // an unbraced "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" string returns
+            // CO_E_CLASSSTRING). Normalize to the braced form before parsing so
+            // callers can pass either format.
+            const std::string braced = (text.front() == '{')
+                ? text
+                : "{" + text + "}";
+
+            std::wstring wide = utf8_to_wide(braced);
             if (wide.empty())
                 return false;
 
-            // CLSIDFromString accepts both braced and non-braced UUID strings.
             return SUCCEEDED(CLSIDFromString(wide.c_str(), &out));
         }
 

@@ -1,3 +1,4 @@
+
 if (async_load[? "id"] == send_dialog_id) {
     if (async_load[? "status"]) {
         var _text = async_load[? "result"];
@@ -11,3 +12,4 @@ if (async_load[? "id"] == send_dialog_id) {
     }
     send_dialog_id = -1;
 }
+
