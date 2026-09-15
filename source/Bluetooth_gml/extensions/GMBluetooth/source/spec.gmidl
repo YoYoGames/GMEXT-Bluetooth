@@ -37,6 +37,13 @@ enum BluetoothPermissionStatus : int32 {
     Denied  = 2
 }
 
+[global, bind = typed_gml]
+enum BluetoothLeSubscribeMode : int32 {
+    Unsubscribe = 0,
+    Notify      = 1,
+    Indicate    = 2
+}
+
 // =============================================================================
 // Lifecycle / event pump
 // =============================================================================
@@ -230,6 +237,270 @@ function bluetooth_classic_server_stop(): int32;
 function bluetooth_classic_server_is_running(): bool;
 
 // =============================================================================
+// BLE GATT client: connect / disconnect
+// =============================================================================
+
+/// Starts an asynchronous GATT connection to a previously discovered LE device.
+/// Returns a connection handle immediately, or 0 if the request cannot start.
+/// callback(error_code, message, connection, device)
+[global, bind = typed_gml, type_hint=`uint64`]
+function bluetooth_le_connect(
+    [type_hint=`uint64`] device: gmval,
+    callback: func
+): gmval;
+
+[global, bind = typed_gml]
+function bluetooth_le_disconnect(
+    [type_hint=`uint64`] connection: gmval
+): int32;
+
+[global, bind = typed_gml]
+function bluetooth_le_connection_is_valid(
+    [type_hint=`uint64`] connection: gmval
+): bool;
+
+[global, bind = typed_gml]
+function bluetooth_le_connection_is_connected(
+    [type_hint=`uint64`] connection: gmval
+): bool;
+
+[global, bind = typed_gml, type_hint=`uint64`]
+function bluetooth_le_connection_get_device(
+    [type_hint=`uint64`] connection: gmval
+): gmval;
+
+// =============================================================================
+// BLE GATT client: service / characteristic / descriptor discovery
+// =============================================================================
+
+/// Starts asynchronous service discovery for a connected LE device.
+/// callback(error_code, message, connection)
+[global, bind = typed_gml]
+function bluetooth_le_services_discover(
+    [type_hint=`uint64`] connection: gmval,
+    callback: func
+): int32;
+
+[global, bind = typed_gml]
+function bluetooth_le_service_get_count(
+    [type_hint=`uint64`] connection: gmval
+): int32;
+
+[global, bind = typed_gml, type_hint=`uint64`]
+function bluetooth_le_service_get_at(
+    [type_hint=`uint64`] connection: gmval,
+    index: int32
+): gmval;
+
+[global, bind = typed_gml]
+function bluetooth_le_service_get_uuid(
+    [type_hint=`uint64`] service: gmval
+): string;
+
+/// Starts asynchronous characteristic discovery for a discovered service.
+/// callback(error_code, message, service)
+[global, bind = typed_gml]
+function bluetooth_le_characteristics_discover(
+    [type_hint=`uint64`] service: gmval,
+    callback: func
+): int32;
+
+[global, bind = typed_gml]
+function bluetooth_le_characteristic_get_count(
+    [type_hint=`uint64`] service: gmval
+): int32;
+
+[global, bind = typed_gml, type_hint=`uint64`]
+function bluetooth_le_characteristic_get_at(
+    [type_hint=`uint64`] service: gmval,
+    index: int32
+): gmval;
+
+[global, bind = typed_gml]
+function bluetooth_le_characteristic_get_uuid(
+    [type_hint=`uint64`] characteristic: gmval
+): string;
+
+/// Bitmask matching CBCharacteristicProperties / BluetoothGattCharacteristic PROPERTY_*.
+[global, bind = typed_gml]
+function bluetooth_le_characteristic_get_properties(
+    [type_hint=`uint64`] characteristic: gmval
+): int32;
+
+/// Starts asynchronous descriptor discovery for a discovered characteristic.
+/// callback(error_code, message, characteristic)
+[global, bind = typed_gml]
+function bluetooth_le_descriptors_discover(
+    [type_hint=`uint64`] characteristic: gmval,
+    callback: func
+): int32;
+
+[global, bind = typed_gml]
+function bluetooth_le_descriptor_get_count(
+    [type_hint=`uint64`] characteristic: gmval
+): int32;
+
+[global, bind = typed_gml, type_hint=`uint64`]
+function bluetooth_le_descriptor_get_at(
+    [type_hint=`uint64`] characteristic: gmval,
+    index: int32
+): gmval;
+
+[global, bind = typed_gml]
+function bluetooth_le_descriptor_get_uuid(
+    [type_hint=`uint64`] descriptor: gmval
+): string;
+
+// =============================================================================
+// BLE GATT client: characteristic / descriptor read, write, subscribe
+// =============================================================================
+
+/// Starts an asynchronous characteristic read.
+/// callback(error_code, message, characteristic)
+[global, bind = typed_gml]
+function bluetooth_le_characteristic_read(
+    [type_hint=`uint64`] characteristic: gmval,
+    callback: func
+): int32;
+
+/// Copies the last-read/last-notified value into out_data. Returns bytes copied, or -1 if none available.
+[global, bind = typed_gml]
+function bluetooth_le_characteristic_get_value(
+    [type_hint=`uint64`] characteristic: gmval,
+    [type_hint=buffer] out_data: gmval,
+    offset: uint32,
+    max_size: uint32
+): int32;
+
+/// write_type: 0 = with response, 1 = without response.
+/// callback(error_code, message, characteristic)
+[global, bind = typed_gml]
+function bluetooth_le_characteristic_write(
+    [type_hint=`uint64`] characteristic: gmval,
+    [type_hint=buffer] data: gmval,
+    offset: uint32,
+    size: uint32,
+    write_type: int32,
+    callback: func
+): int32;
+
+/// mode: see BluetoothLeSubscribeMode. callback(error_code, message, characteristic)
+[global, bind = typed_gml]
+function bluetooth_le_characteristic_subscribe(
+    [type_hint=`uint64`] characteristic: gmval,
+    mode: int32,
+    callback: func
+): int32;
+
+[global, bind = typed_gml]
+function bluetooth_le_descriptor_read(
+    [type_hint=`uint64`] descriptor: gmval,
+    callback: func
+): int32;
+
+[global, bind = typed_gml]
+function bluetooth_le_descriptor_get_value(
+    [type_hint=`uint64`] descriptor: gmval,
+    [type_hint=buffer] out_data: gmval,
+    offset: uint32,
+    max_size: uint32
+): int32;
+
+[global, bind = typed_gml]
+function bluetooth_le_descriptor_write(
+    [type_hint=`uint64`] descriptor: gmval,
+    [type_hint=buffer] data: gmval,
+    offset: uint32,
+    size: uint32,
+    callback: func
+): int32;
+
+// =============================================================================
+// BLE advertise
+// =============================================================================
+
+/// settings_json: {"txPowerLevel": int, ...}.
+/// data_json: {"includeName":bool,"includePowerLevel":bool,"services":[{"uuid":string,"data":base64}],"manufacturer":{"id":int,"data":base64}}
+/// callback(error_code, message)
+[global, bind = typed_gml]
+function bluetooth_le_advertise_start(
+    settings_json: string,
+    data_json: string,
+    callback: func
+): int32;
+
+[global, bind = typed_gml]
+function bluetooth_le_advertise_stop(): int32;
+
+[global, bind = typed_gml]
+function bluetooth_le_advertise_is_running(): bool;
+
+// =============================================================================
+// BLE GATT server (peripheral)
+// =============================================================================
+
+[global, bind = typed_gml]
+function bluetooth_le_server_start(): int32;
+
+[global, bind = typed_gml]
+function bluetooth_le_server_stop(): int32;
+
+[global, bind = typed_gml]
+function bluetooth_le_server_is_running(): bool;
+
+/// service_json schema:
+/// { "uuid": string,
+///   "characteristics": [ { "uuid": string, "properties": int, "permissions": int,
+///                          "value": base64?,
+///                          "descriptors": [ { "uuid": string } ] } ] }
+/// callback(error_code, message)
+[global, bind = typed_gml]
+function bluetooth_le_server_add_service(
+    service_json: string,
+    callback: func
+): int32;
+
+[global, bind = typed_gml]
+function bluetooth_le_server_clear_services(): int32;
+
+/// Call from inside the characteristic/descriptor read-request callback.
+[global, bind = typed_gml]
+function bluetooth_le_server_respond_read(
+    request_id: int32,
+    error_code: int32,
+    [type_hint=buffer] data: gmval,
+    offset: uint32,
+    size: uint32
+): int32;
+
+/// Call from inside the characteristic/descriptor write-request callback.
+[global, bind = typed_gml]
+function bluetooth_le_server_respond_write(
+    request_id: int32,
+    error_code: int32
+): int32;
+
+/// Copies the bytes a remote central wrote in a pending write request into out_data.
+[global, bind = typed_gml]
+function bluetooth_le_server_write_request_get_value(
+    request_id: int32,
+    [type_hint=buffer] out_data: gmval,
+    offset: uint32,
+    max_size: uint32
+): int32;
+
+/// Pushes an updated value to a subscribed central. connection=0 broadcasts to all subscribers.
+[global, bind = typed_gml]
+function bluetooth_le_server_notify_value(
+    service_uuid: string,
+    characteristic_uuid: string,
+    [type_hint=`uint64`] connection: gmval,
+    [type_hint=buffer] data: gmval,
+    offset: uint32,
+    size: uint32
+): int32;
+
+// =============================================================================
 // Callbacks
 // =============================================================================
 
@@ -271,3 +542,47 @@ function bluetooth_set_callback_classic_disconnected(callback: func): bool;
 
 [global, bind = typed_gml]
 function bluetooth_remove_callback_classic_disconnected(): bool;
+
+/// callback(connection, error_code, message)
+/// Fired when an established LE GATT connection drops asynchronously.
+[global, bind = typed_gml]
+function bluetooth_set_callback_le_disconnected(callback: func): bool;
+
+[global, bind = typed_gml]
+function bluetooth_remove_callback_le_disconnected(): bool;
+
+/// callback(characteristic, connection)
+/// Fired for unsolicited notify/indicate value updates. Read the new value via
+/// bluetooth_le_characteristic_get_value().
+[global, bind = typed_gml]
+function bluetooth_set_callback_le_characteristic_value_changed(callback: func): bool;
+
+[global, bind = typed_gml]
+function bluetooth_remove_callback_le_characteristic_value_changed(): bool;
+
+/// callback(connection, connected, device)
+/// Fired when a remote central connects to or disconnects from our GATT server.
+[global, bind = typed_gml]
+function bluetooth_set_callback_le_server_connection_state_changed(callback: func): bool;
+
+[global, bind = typed_gml]
+function bluetooth_remove_callback_le_server_connection_state_changed(): bool;
+
+/// callback(request_id, connection, service_uuid, characteristic_uuid, descriptor_uuid, offset)
+/// descriptor_uuid is an empty string for a characteristic-level read request.
+/// Respond with bluetooth_le_server_respond_read().
+[global, bind = typed_gml]
+function bluetooth_set_callback_le_server_read_request(callback: func): bool;
+
+[global, bind = typed_gml]
+function bluetooth_remove_callback_le_server_read_request(): bool;
+
+/// callback(request_id, connection, service_uuid, characteristic_uuid, descriptor_uuid)
+/// descriptor_uuid is an empty string for a characteristic-level write request.
+/// Use bluetooth_le_server_write_request_get_value() to read the written bytes,
+/// then respond with bluetooth_le_server_respond_write().
+[global, bind = typed_gml]
+function bluetooth_set_callback_le_server_write_request(callback: func): bool;
+
+[global, bind = typed_gml]
+function bluetooth_remove_callback_le_server_write_request(): bool;

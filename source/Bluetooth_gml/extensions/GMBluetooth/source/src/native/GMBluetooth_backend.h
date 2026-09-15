@@ -88,6 +88,7 @@ namespace gmbluetooth
     {
         std::function<std::uint64_t(const DiscoveredDevice&)> upsert_device;
         std::function<std::uint64_t(std::uint64_t)> create_classic_connection;
+        std::function<std::uint64_t(std::uint64_t)> create_le_connection;
         std::function<void(BackendEvent)> push_event;
     };
 

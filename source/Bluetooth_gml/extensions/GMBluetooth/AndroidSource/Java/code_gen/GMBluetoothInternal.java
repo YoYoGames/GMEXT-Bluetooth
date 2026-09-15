@@ -385,6 +385,531 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         return __result ? 1.0 : 0.0;
     }
 
+    public double __EXT_NATIVE__bluetooth_le_connect(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: device, type: UInt64
+        long device = GMExtWire.readI64(__arg_buffer);
+
+        // field: callback, type: Function
+        GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
+
+        long __result = bluetooth_le_connect(device, callback);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: UInt64
+        GMExtWire.writeI64(__ret_buffer_writer, __result);
+
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_disconnect(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: connection, type: UInt64
+        long connection = GMExtWire.readI64(__arg_buffer);
+
+        int __result = bluetooth_le_disconnect(connection);
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_connection_is_valid(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: connection, type: UInt64
+        long connection = GMExtWire.readI64(__arg_buffer);
+
+        boolean __result = bluetooth_le_connection_is_valid(connection);
+        return __result ? 1.0 : 0.0;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_connection_is_connected(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: connection, type: UInt64
+        long connection = GMExtWire.readI64(__arg_buffer);
+
+        boolean __result = bluetooth_le_connection_is_connected(connection);
+        return __result ? 1.0 : 0.0;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_connection_get_device(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: connection, type: UInt64
+        long connection = GMExtWire.readI64(__arg_buffer);
+
+        long __result = bluetooth_le_connection_get_device(connection);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: UInt64
+        GMExtWire.writeI64(__ret_buffer_writer, __result);
+
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_services_discover(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: connection, type: UInt64
+        long connection = GMExtWire.readI64(__arg_buffer);
+
+        // field: callback, type: Function
+        GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
+
+        int __result = bluetooth_le_services_discover(connection, callback);
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_service_get_count(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: connection, type: UInt64
+        long connection = GMExtWire.readI64(__arg_buffer);
+
+        int __result = bluetooth_le_service_get_count(connection);
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_service_get_at(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: connection, type: UInt64
+        long connection = GMExtWire.readI64(__arg_buffer);
+
+        // field: index, type: Int32
+        int index = GMExtWire.readI32(__arg_buffer);
+
+        long __result = bluetooth_le_service_get_at(connection, index);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: UInt64
+        GMExtWire.writeI64(__ret_buffer_writer, __result);
+
+        return (double)__result;
+    }
+
+    public String __EXT_NATIVE__bluetooth_le_service_get_uuid(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: service, type: UInt64
+        long service = GMExtWire.readI64(__arg_buffer);
+
+        String __result = bluetooth_le_service_get_uuid(service);
+        return __result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_characteristics_discover(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: service, type: UInt64
+        long service = GMExtWire.readI64(__arg_buffer);
+
+        // field: callback, type: Function
+        GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
+
+        int __result = bluetooth_le_characteristics_discover(service, callback);
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_characteristic_get_count(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: service, type: UInt64
+        long service = GMExtWire.readI64(__arg_buffer);
+
+        int __result = bluetooth_le_characteristic_get_count(service);
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_characteristic_get_at(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: service, type: UInt64
+        long service = GMExtWire.readI64(__arg_buffer);
+
+        // field: index, type: Int32
+        int index = GMExtWire.readI32(__arg_buffer);
+
+        long __result = bluetooth_le_characteristic_get_at(service, index);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: UInt64
+        GMExtWire.writeI64(__ret_buffer_writer, __result);
+
+        return (double)__result;
+    }
+
+    public String __EXT_NATIVE__bluetooth_le_characteristic_get_uuid(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: characteristic, type: UInt64
+        long characteristic = GMExtWire.readI64(__arg_buffer);
+
+        String __result = bluetooth_le_characteristic_get_uuid(characteristic);
+        return __result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_characteristic_get_properties(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: characteristic, type: UInt64
+        long characteristic = GMExtWire.readI64(__arg_buffer);
+
+        int __result = bluetooth_le_characteristic_get_properties(characteristic);
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_descriptors_discover(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: characteristic, type: UInt64
+        long characteristic = GMExtWire.readI64(__arg_buffer);
+
+        // field: callback, type: Function
+        GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
+
+        int __result = bluetooth_le_descriptors_discover(characteristic, callback);
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_descriptor_get_count(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: characteristic, type: UInt64
+        long characteristic = GMExtWire.readI64(__arg_buffer);
+
+        int __result = bluetooth_le_descriptor_get_count(characteristic);
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_descriptor_get_at(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: characteristic, type: UInt64
+        long characteristic = GMExtWire.readI64(__arg_buffer);
+
+        // field: index, type: Int32
+        int index = GMExtWire.readI32(__arg_buffer);
+
+        long __result = bluetooth_le_descriptor_get_at(characteristic, index);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: UInt64
+        GMExtWire.writeI64(__ret_buffer_writer, __result);
+
+        return (double)__result;
+    }
+
+    public String __EXT_NATIVE__bluetooth_le_descriptor_get_uuid(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: descriptor, type: UInt64
+        long descriptor = GMExtWire.readI64(__arg_buffer);
+
+        String __result = bluetooth_le_descriptor_get_uuid(descriptor);
+        return __result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_characteristic_read(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: characteristic, type: UInt64
+        long characteristic = GMExtWire.readI64(__arg_buffer);
+
+        // field: callback, type: Function
+        GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
+
+        int __result = bluetooth_le_characteristic_read(characteristic, callback);
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_characteristic_get_value(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: characteristic, type: UInt64
+        long characteristic = GMExtWire.readI64(__arg_buffer);
+
+        // field: out_data, type: Buffer
+        java.nio.ByteBuffer out_data = __buffer_queue.poll();
+
+        // field: offset, type: UInt32
+        int offset = GMExtWire.readI32(__arg_buffer);
+
+        // field: max_size, type: UInt32
+        int max_size = GMExtWire.readI32(__arg_buffer);
+
+        int __result = bluetooth_le_characteristic_get_value(characteristic, out_data, offset, max_size);
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_characteristic_write(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: characteristic, type: UInt64
+        long characteristic = GMExtWire.readI64(__arg_buffer);
+
+        // field: data, type: Buffer
+        java.nio.ByteBuffer data = __buffer_queue.poll();
+
+        // field: offset, type: UInt32
+        int offset = GMExtWire.readI32(__arg_buffer);
+
+        // field: size, type: UInt32
+        int size = GMExtWire.readI32(__arg_buffer);
+
+        // field: write_type, type: Int32
+        int write_type = GMExtWire.readI32(__arg_buffer);
+
+        // field: callback, type: Function
+        GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
+
+        int __result = bluetooth_le_characteristic_write(characteristic, data, offset, size, write_type, callback);
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_characteristic_subscribe(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: characteristic, type: UInt64
+        long characteristic = GMExtWire.readI64(__arg_buffer);
+
+        // field: mode, type: Int32
+        int mode = GMExtWire.readI32(__arg_buffer);
+
+        // field: callback, type: Function
+        GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
+
+        int __result = bluetooth_le_characteristic_subscribe(characteristic, mode, callback);
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_descriptor_read(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: descriptor, type: UInt64
+        long descriptor = GMExtWire.readI64(__arg_buffer);
+
+        // field: callback, type: Function
+        GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
+
+        int __result = bluetooth_le_descriptor_read(descriptor, callback);
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_descriptor_get_value(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: descriptor, type: UInt64
+        long descriptor = GMExtWire.readI64(__arg_buffer);
+
+        // field: out_data, type: Buffer
+        java.nio.ByteBuffer out_data = __buffer_queue.poll();
+
+        // field: offset, type: UInt32
+        int offset = GMExtWire.readI32(__arg_buffer);
+
+        // field: max_size, type: UInt32
+        int max_size = GMExtWire.readI32(__arg_buffer);
+
+        int __result = bluetooth_le_descriptor_get_value(descriptor, out_data, offset, max_size);
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_descriptor_write(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: descriptor, type: UInt64
+        long descriptor = GMExtWire.readI64(__arg_buffer);
+
+        // field: data, type: Buffer
+        java.nio.ByteBuffer data = __buffer_queue.poll();
+
+        // field: offset, type: UInt32
+        int offset = GMExtWire.readI32(__arg_buffer);
+
+        // field: size, type: UInt32
+        int size = GMExtWire.readI32(__arg_buffer);
+
+        // field: callback, type: Function
+        GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
+
+        int __result = bluetooth_le_descriptor_write(descriptor, data, offset, size, callback);
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_advertise_start(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: settings_json, type: String
+        String settings_json = GMExtWire.readString(__arg_buffer);
+
+        // field: data_json, type: String
+        String data_json = GMExtWire.readString(__arg_buffer);
+
+        // field: callback, type: Function
+        GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
+
+        int __result = bluetooth_le_advertise_start(settings_json, data_json, callback);
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_advertise_stop()
+    {
+        int __result = bluetooth_le_advertise_stop();
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_advertise_is_running()
+    {
+        boolean __result = bluetooth_le_advertise_is_running();
+        return __result ? 1.0 : 0.0;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_server_start()
+    {
+        int __result = bluetooth_le_server_start();
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_server_stop()
+    {
+        int __result = bluetooth_le_server_stop();
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_server_is_running()
+    {
+        boolean __result = bluetooth_le_server_is_running();
+        return __result ? 1.0 : 0.0;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_server_add_service(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: service_json, type: String
+        String service_json = GMExtWire.readString(__arg_buffer);
+
+        // field: callback, type: Function
+        GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
+
+        int __result = bluetooth_le_server_add_service(service_json, callback);
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_server_clear_services()
+    {
+        int __result = bluetooth_le_server_clear_services();
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_server_respond_read(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: request_id, type: Int32
+        int request_id = GMExtWire.readI32(__arg_buffer);
+
+        // field: error_code, type: Int32
+        int error_code = GMExtWire.readI32(__arg_buffer);
+
+        // field: data, type: Buffer
+        java.nio.ByteBuffer data = __buffer_queue.poll();
+
+        // field: offset, type: UInt32
+        int offset = GMExtWire.readI32(__arg_buffer);
+
+        // field: size, type: UInt32
+        int size = GMExtWire.readI32(__arg_buffer);
+
+        int __result = bluetooth_le_server_respond_read(request_id, error_code, data, offset, size);
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_server_respond_write(double request_id, double error_code)
+    {
+        int __result = bluetooth_le_server_respond_write((int)request_id, (int)error_code);
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_server_write_request_get_value(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: request_id, type: Int32
+        int request_id = GMExtWire.readI32(__arg_buffer);
+
+        // field: out_data, type: Buffer
+        java.nio.ByteBuffer out_data = __buffer_queue.poll();
+
+        // field: offset, type: UInt32
+        int offset = GMExtWire.readI32(__arg_buffer);
+
+        // field: max_size, type: UInt32
+        int max_size = GMExtWire.readI32(__arg_buffer);
+
+        int __result = bluetooth_le_server_write_request_get_value(request_id, out_data, offset, max_size);
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_server_notify_value(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: service_uuid, type: String
+        String service_uuid = GMExtWire.readString(__arg_buffer);
+
+        // field: characteristic_uuid, type: String
+        String characteristic_uuid = GMExtWire.readString(__arg_buffer);
+
+        // field: connection, type: UInt64
+        long connection = GMExtWire.readI64(__arg_buffer);
+
+        // field: data, type: Buffer
+        java.nio.ByteBuffer data = __buffer_queue.poll();
+
+        // field: offset, type: UInt32
+        int offset = GMExtWire.readI32(__arg_buffer);
+
+        // field: size, type: UInt32
+        int size = GMExtWire.readI32(__arg_buffer);
+
+        int __result = bluetooth_le_server_notify_value(service_uuid, characteristic_uuid, connection, data, offset, size);
+        return (double)__result;
+    }
+
     public double __EXT_NATIVE__bluetooth_set_callback_device_found(ByteBuffer __arg_buffer, double __arg_buffer_length)
     {
         GMExtWire.order(__arg_buffer);
@@ -467,6 +992,91 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
     public double __EXT_NATIVE__bluetooth_remove_callback_classic_disconnected()
     {
         boolean __result = bluetooth_remove_callback_classic_disconnected();
+        return __result ? 1.0 : 0.0;
+    }
+
+    public double __EXT_NATIVE__bluetooth_set_callback_le_disconnected(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: callback, type: Function
+        GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
+
+        boolean __result = bluetooth_set_callback_le_disconnected(callback);
+        return __result ? 1.0 : 0.0;
+    }
+
+    public double __EXT_NATIVE__bluetooth_remove_callback_le_disconnected()
+    {
+        boolean __result = bluetooth_remove_callback_le_disconnected();
+        return __result ? 1.0 : 0.0;
+    }
+
+    public double __EXT_NATIVE__bluetooth_set_callback_le_characteristic_value_changed(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: callback, type: Function
+        GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
+
+        boolean __result = bluetooth_set_callback_le_characteristic_value_changed(callback);
+        return __result ? 1.0 : 0.0;
+    }
+
+    public double __EXT_NATIVE__bluetooth_remove_callback_le_characteristic_value_changed()
+    {
+        boolean __result = bluetooth_remove_callback_le_characteristic_value_changed();
+        return __result ? 1.0 : 0.0;
+    }
+
+    public double __EXT_NATIVE__bluetooth_set_callback_le_server_connection_state_changed(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: callback, type: Function
+        GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
+
+        boolean __result = bluetooth_set_callback_le_server_connection_state_changed(callback);
+        return __result ? 1.0 : 0.0;
+    }
+
+    public double __EXT_NATIVE__bluetooth_remove_callback_le_server_connection_state_changed()
+    {
+        boolean __result = bluetooth_remove_callback_le_server_connection_state_changed();
+        return __result ? 1.0 : 0.0;
+    }
+
+    public double __EXT_NATIVE__bluetooth_set_callback_le_server_read_request(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: callback, type: Function
+        GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
+
+        boolean __result = bluetooth_set_callback_le_server_read_request(callback);
+        return __result ? 1.0 : 0.0;
+    }
+
+    public double __EXT_NATIVE__bluetooth_remove_callback_le_server_read_request()
+    {
+        boolean __result = bluetooth_remove_callback_le_server_read_request();
+        return __result ? 1.0 : 0.0;
+    }
+
+    public double __EXT_NATIVE__bluetooth_set_callback_le_server_write_request(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: callback, type: Function
+        GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
+
+        boolean __result = bluetooth_set_callback_le_server_write_request(callback);
+        return __result ? 1.0 : 0.0;
+    }
+
+    public double __EXT_NATIVE__bluetooth_remove_callback_le_server_write_request()
+    {
+        boolean __result = bluetooth_remove_callback_le_server_write_request();
         return __result ? 1.0 : 0.0;
     }
 
