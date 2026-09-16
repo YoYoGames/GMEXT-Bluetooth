@@ -6,9 +6,11 @@
 // Android BluetoothGattCharacteristic bitmasks (no GML enum exists for these —
 // spec.gmidl deliberately kept le_server_add_service as a single JSON string,
 // see "API Design Decision" above, so the demo defines its own constants)
+#macro GATT_PROPERTY_READ             0x02
 #macro GATT_PROPERTY_WRITE            0x08
 #macro GATT_PROPERTY_WRITE_NO_RESPONSE 0x04
 #macro GATT_PROPERTY_NOTIFY           0x10
+#macro GATT_PROPERTY_INDICATE         0x20
 #macro GATT_PERMISSION_WRITE          0x10
 #macro GATT_PERMISSION_READ           0x01
 
