@@ -405,6 +405,31 @@ GMEXPORT double __EXT_NATIVE__bluetooth_classic_discoverable_is_running()
     return static_cast<double>(__result);
 }
 
+GMEXPORT double __EXT_NATIVE__bluetooth_pair(char* __arg_buffer, double __arg_buffer_length)
+{
+    gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};
+
+    // field: device, type: UInt64
+    std::uint64_t device = gm::wire::codec::readValue<std::uint64_t>(__br);
+
+    // field: callback, type: Function
+    gm::wire::GMFunction callback = gm::wire::codec::readFunction(__br, &__dispatch_queue);
+
+    auto&& __result = bluetooth_pair(device, callback);
+    return static_cast<double>(__result);
+}
+
+GMEXPORT double __EXT_NATIVE__bluetooth_device_is_paired(char* __arg_buffer, double __arg_buffer_length)
+{
+    gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};
+
+    // field: device, type: UInt64
+    std::uint64_t device = gm::wire::codec::readValue<std::uint64_t>(__br);
+
+    auto&& __result = bluetooth_device_is_paired(device);
+    return static_cast<double>(__result);
+}
+
 GMEXPORT double __EXT_NATIVE__bluetooth_le_connect(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length)
 {
     gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};

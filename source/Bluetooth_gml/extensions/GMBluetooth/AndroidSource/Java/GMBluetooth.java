@@ -176,6 +176,18 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     // =========================================================================
+    // Pairing (bonding)
+    // =========================================================================
+
+    // Keyed by Android device address rather than our device handle, since the
+    // ACTION_BOND_STATE_CHANGED broadcast only identifies the BluetoothDevice.
+    private final Object pairLock = new Object();
+    private final HashMap<String, Long> pairDeviceHandles = new HashMap<>();
+    private final HashMap<String, GMFunction> pairCallbacks = new HashMap<>();
+    private volatile boolean bondReceiverRegistered = false;
+
+
+    // =========================================================================
     // Classic connection handles / receive queues
     // =========================================================================
 
@@ -1163,6 +1175,13 @@ public class GMBluetooth extends GMBluetoothInternal
 
         classicScanning.set(false);
         unregisterClassicReceiver();
+        unregisterBondReceiver();
+
+        synchronized (pairLock)
+        {
+            pairDeviceHandles.clear();
+            pairCallbacks.clear();
+        }
 
         stopServerInternal();
         stopLeAdvertiseInternal();
@@ -3977,6 +3996,234 @@ public class GMBluetooth extends GMBluetoothInternal
         }
 
         receiverRegistered = false;
+    }
+
+
+    // =========================================================================
+    // Pairing (bonding)
+    // =========================================================================
+
+    private final BroadcastReceiver bondReceiver = new BroadcastReceiver()
+    {
+        @Override
+        public void onReceive(Context receiverContext, Intent intent)
+        {
+            if (!initialized || intent == null)
+                return;
+
+            if (!BluetoothDevice.ACTION_BOND_STATE_CHANGED.equals(intent.getAction()))
+                return;
+
+            BluetoothDevice device;
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+            {
+                device = intent.getParcelableExtra(
+                    BluetoothDevice.EXTRA_DEVICE,
+                    BluetoothDevice.class);
+            }
+            else
+            {
+                //noinspection deprecation
+                device = intent.getParcelableExtra(
+                    BluetoothDevice.EXTRA_DEVICE);
+            }
+
+            if (device == null)
+                return;
+
+            int bondState = intent.getIntExtra(
+                BluetoothDevice.EXTRA_BOND_STATE,
+                BluetoothDevice.BOND_NONE);
+
+            // Still in progress - wait for the terminal BOND_BONDED/BOND_NONE state.
+            if (bondState == BluetoothDevice.BOND_BONDING)
+                return;
+
+            String address = device.getAddress();
+            long deviceHandle;
+            GMFunction callback;
+
+            synchronized (pairLock)
+            {
+                Long handle = pairDeviceHandles.remove(address);
+
+                if (handle == null)
+                    return;
+
+                deviceHandle = handle;
+                callback = pairCallbacks.remove(address);
+            }
+
+            if (bondState == BluetoothDevice.BOND_BONDED)
+            {
+                invoke(callback, OK, "", (double) deviceHandle);
+            }
+            else
+            {
+                invoke(
+                    callback,
+                    OPERATION_FAILED,
+                    "Pairing failed or was rejected",
+                    (double) deviceHandle);
+            }
+        }
+    };
+
+
+    private void ensureBondReceiver()
+    {
+        if (bondReceiverRegistered)
+            return;
+
+        Activity current = activity();
+
+        if (current == null)
+            return;
+
+        IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
+
+        //noinspection deprecation
+        current.registerReceiver(bondReceiver, filter);
+        bondReceiverRegistered = true;
+    }
+
+
+    private void unregisterBondReceiver()
+    {
+        if (!bondReceiverRegistered)
+            return;
+
+        Activity current = activity();
+
+        if (current != null)
+        {
+            try
+            {
+                current.unregisterReceiver(bondReceiver);
+            }
+            catch (Throwable ignored)
+            {
+            }
+        }
+
+        bondReceiverRegistered = false;
+    }
+
+
+    @Override
+    public int bluetooth_pair(long device, GMFunction callback)
+    {
+        if (!initialized || adapter == null)
+            return result(
+                NOT_INITIALIZED,
+                "Bluetooth is not initialized");
+
+        DeviceEntry deviceEntry = copyDevice(device);
+
+        if (deviceEntry == null)
+            return result(
+                INVALID_HANDLE,
+                "Invalid device handle");
+
+        if (!hasConnectPermission())
+            return result(
+                PERMISSION_DENIED,
+                "Bluetooth connect permission is not granted");
+
+        if (!adapterEnabled())
+            return result(
+                BLUETOOTH_DISABLED,
+                "Bluetooth is disabled");
+
+        BluetoothDevice androidDevice = deviceEntry.androidDevice;
+
+        if (androidDevice == null)
+        {
+            if (deviceEntry.address == null || deviceEntry.address.isEmpty())
+                return result(
+                    INVALID_ARGUMENT,
+                    "Bluetooth device has no usable address");
+
+            androidDevice = adapter.getRemoteDevice(deviceEntry.address);
+        }
+
+        if (androidDevice.getBondState() == BluetoothDevice.BOND_BONDED)
+        {
+            invoke(callback, OK, "", (double) device);
+            return result(OK, "");
+        }
+
+        ensureBondReceiver();
+
+        String address = androidDevice.getAddress();
+
+        synchronized (pairLock)
+        {
+            pairDeviceHandles.put(address, device);
+
+            if (callback != null)
+                pairCallbacks.put(address, callback);
+        }
+
+        boolean started;
+
+        try
+        {
+            started = androidDevice.createBond();
+        }
+        catch (Throwable throwable)
+        {
+            synchronized (pairLock)
+            {
+                pairDeviceHandles.remove(address);
+                pairCallbacks.remove(address);
+            }
+
+            return result(
+                OPERATION_FAILED,
+                "createBond() threw: " + throwableMessage(throwable));
+        }
+
+        if (!started)
+        {
+            synchronized (pairLock)
+            {
+                pairDeviceHandles.remove(address);
+                pairCallbacks.remove(address);
+            }
+
+            return result(
+                OPERATION_FAILED,
+                "createBond() returned false");
+        }
+
+        return result(OK, "");
+    }
+
+
+    @Override
+    public boolean bluetooth_device_is_paired(long device)
+    {
+        if (!initialized || adapter == null)
+            return false;
+
+        DeviceEntry deviceEntry = copyDevice(device);
+
+        if (deviceEntry == null)
+            return false;
+
+        BluetoothDevice androidDevice = deviceEntry.androidDevice;
+
+        if (androidDevice == null)
+        {
+            if (deviceEntry.address == null || deviceEntry.address.isEmpty())
+                return false;
+
+            androidDevice = adapter.getRemoteDevice(deviceEntry.address);
+        }
+
+        return androidDevice.getBondState() == BluetoothDevice.BOND_BONDED;
     }
 
 

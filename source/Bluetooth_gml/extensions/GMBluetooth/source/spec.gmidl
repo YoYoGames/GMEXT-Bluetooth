@@ -260,6 +260,35 @@ function bluetooth_classic_discoverable_stop(): int32;
 [global, bind = typed_gml]
 function bluetooth_classic_discoverable_is_running(): bool;
 
+// =====================================================================
+// Bluetooth pairing (bonding)
+// =====================================================================
+
+/// Attempts to pair (bond) with the given device at the OS level. This is separate from
+/// bluetooth_classic_connect/bluetooth_le_connect: some connections only succeed once the
+/// two devices are paired, and once paired the OS remembers the relationship across app runs.
+/// Returns immediately with an error code indicating whether the pairing request was
+/// accepted; callback is invoked once, later, when pairing actually completes or fails:
+/// callback(error_code, message, device).
+/// Android: works uniformly for Classic and LE devices, via BluetoothDevice.createBond().
+/// Windows: Classic only, via BluetoothAuthenticateDeviceEx. Returns NotSupported for LE
+///   devices (this extension has no Windows BLE connect support at all yet).
+/// macOS: Classic only, via IOBluetoothDevicePair. Returns NotSupported for LE devices -
+///   BLE bonding on Apple platforms happens implicitly when a protected characteristic is
+///   accessed and cannot be triggered explicitly.
+/// iOS: always NotSupported (Classic isn't supported on iOS; BLE bonding is implicit, as above).
+[global, bind = typed_gml]
+function bluetooth_pair([type_hint=`uint64`] device: gmval, callback: func): int32;
+
+/// Whether the given device is currently paired/bonded at the OS level.
+/// Android: BluetoothDevice.getBondState() == BOND_BONDED. Works for Classic and LE.
+/// Windows: BluetoothGetDeviceInfo's fAuthenticated flag. Classic only; always false for LE.
+/// macOS: IOBluetoothDevice.isPaired. Classic only; always false for LE, since Apple exposes
+///   no public bond-state query for CoreBluetooth peripherals.
+/// iOS: always false.
+[global, bind = typed_gml]
+function bluetooth_device_is_paired([type_hint=`uint64`] device: gmval): bool;
+
 // =============================================================================
 // BLE GATT client: connect / disconnect
 // =============================================================================

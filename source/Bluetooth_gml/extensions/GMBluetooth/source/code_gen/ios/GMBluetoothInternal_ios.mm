@@ -535,6 +535,33 @@ static void GMInjectSelectorsIntoSubclass(Class subclass, Class base)
     return static_cast<double>(__result);
 }
 
+- (double)__EXT_NATIVE__bluetooth_pair:(char*)__arg_buffer arg1:(double)__arg_buffer_length
+{
+    gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};
+
+    // field: device, type: UInt64
+    std::uint64_t device = gm::wire::codec::readValue<std::uint64_t>(__br);
+
+    // field: callback, type: Function
+    gm::wire::GMFunction callback = gm::wire::codec::readFunction(__br, &__dispatch_queue);
+
+    std::int32_t __result = [__impl bluetooth_pair:device callback:callback];
+
+    return static_cast<double>(__result);
+}
+
+- (double)__EXT_NATIVE__bluetooth_device_is_paired:(char*)__arg_buffer arg1:(double)__arg_buffer_length
+{
+    gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};
+
+    // field: device, type: UInt64
+    std::uint64_t device = gm::wire::codec::readValue<std::uint64_t>(__br);
+
+    bool __result = [__impl bluetooth_device_is_paired:device];
+
+    return static_cast<double>(__result);
+}
+
 - (double)__EXT_NATIVE__bluetooth_le_connect:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length
 {
     gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};

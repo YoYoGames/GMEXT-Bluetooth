@@ -63,6 +63,7 @@ namespace gmbluetooth
         ClassicDataAvailable,
         ClassicDisconnected,
         LeEvent,
+        DevicePaired,
     };
 
     struct BackendEvent
@@ -255,6 +256,24 @@ namespace gmbluetooth
 
             message = "BLE GATT connections are not supported by this backend";
             return Error::NotSupported;
+        }
+
+        virtual Error pair(
+            std::uint64_t device_handle,
+            const DiscoveredDevice& device,
+            std::string& message)
+        {
+            (void)device_handle;
+            (void)device;
+
+            message = "Bluetooth pairing is not supported by this backend";
+            return Error::NotSupported;
+        }
+
+        virtual bool is_paired(const DiscoveredDevice& device) const
+        {
+            (void)device;
+            return false;
         }
 
         virtual Error le_disconnect(

@@ -988,6 +988,89 @@ namespace gmbluetooth
             return Error::Ok;
         }
 
+        Error pair(
+            std::uint64_t device_handle,
+            const DiscoveredDevice& device,
+            std::string& message) override
+        {
+            if (device.transport != Transport::Classic)
+            {
+                message = "Bluetooth pairing is only supported for Classic devices on Windows";
+                return Error::NotSupported;
+            }
+
+            if (!device.address_available)
+            {
+                message = "Bluetooth Classic device has no usable address";
+                return Error::InvalidArgument;
+            }
+
+            BTH_ADDR address = 0;
+            if (!parse_bluetooth_address(device.address, address))
+            {
+                message = "Invalid Bluetooth address";
+                return Error::InvalidArgument;
+            }
+
+            const auto shared = classic_;
+            const auto alive = classic_->alive;
+
+            std::thread([shared, alive, device_handle, address]()
+            {
+                if (!alive->load())
+                    return;
+
+                BLUETOOTH_DEVICE_INFO device_info{};
+                device_info.dwSize = sizeof(device_info);
+                device_info.Address.ullLong = address;
+
+                const DWORD result = BluetoothAuthenticateDeviceEx(
+                    nullptr, nullptr, &device_info, nullptr, MITMProtectionNotRequired);
+
+                if (!alive->load() || !shared->hooks.push_event)
+                    return;
+
+                BackendEvent event;
+                event.type = BackendEventType::DevicePaired;
+                event.transport = Transport::Classic;
+                event.device = device_handle;
+
+                if (result == ERROR_SUCCESS)
+                {
+                    event.error = Error::Ok;
+                }
+                else
+                {
+                    event.error = Error::OperationFailed;
+                    event.message = "BluetoothAuthenticateDeviceEx failed: " + std::to_string(result);
+                }
+
+                shared->hooks.push_event(std::move(event));
+            }).detach();
+
+            message.clear();
+            return Error::Ok;
+        }
+
+        bool is_paired(const DiscoveredDevice& device) const override
+        {
+            if (device.transport != Transport::Classic || !device.address_available)
+                return false;
+
+            BTH_ADDR address = 0;
+            if (!parse_bluetooth_address(device.address, address))
+                return false;
+
+            BLUETOOTH_DEVICE_INFO device_info{};
+            device_info.dwSize = sizeof(device_info);
+            device_info.Address.ullLong = address;
+
+            if (BluetoothGetDeviceInfo(nullptr, &device_info) != ERROR_SUCCESS)
+                return false;
+
+            return device_info.fAuthenticated != FALSE;
+        }
+
         Error classic_disconnect(
             std::uint64_t connection,
             std::string& message) override

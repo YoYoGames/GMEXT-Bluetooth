@@ -43,6 +43,11 @@ namespace
     std::mutex g_pending_le_connect_mutex;
     std::unordered_map<std::uint64_t, GMFunction> g_pending_le_connect_callbacks;
 
+    // Pairing never creates a connection handle, so this is keyed directly by
+    // the device handle instead.
+    std::mutex g_pending_pair_mutex;
+    std::unordered_map<std::uint64_t, GMFunction> g_pending_pair_callbacks;
+
     class DeviceManager
     {
     public:
@@ -1258,6 +1263,40 @@ namespace
                 return;
             }
 
+            // Same one-shot idea as ClassicConnected above, but keyed by device
+            // handle since pairing never creates a connection.
+            if (event.type == BackendEventType::DevicePaired)
+            {
+                GMFunction callback;
+                {
+                    std::scoped_lock lock(g_pending_pair_mutex);
+                    const auto it = g_pending_pair_callbacks.find(event.device);
+                    if (it != g_pending_pair_callbacks.end())
+                    {
+                        callback = it->second;
+                        g_pending_pair_callbacks.erase(it);
+                    }
+                }
+
+                if (callback)
+                {
+                    try
+                    {
+                        // callback(error_code, message, device)
+                        callback.call(
+                            static_cast<double>(event.error),
+                            event.message,
+                            static_cast<double>(event.device)
+                        );
+                    }
+                    catch (const std::exception& e)
+                    {
+                        GMBT_LOG("Error dispatching pair callback: %s", e.what());
+                    }
+                }
+                return;
+            }
+
             if (event.type == BackendEventType::LeEvent)
             {
                 dispatch_le_event(event);
@@ -1652,6 +1691,51 @@ std::uint64_t bluetooth_classic_connect(std::uint64_t device, std::string_view s
     }
 
     return connection;
+}
+
+std::int32_t bluetooth_pair(std::uint64_t device, const gm::wire::GMFunction& callback)
+{
+    if (!g_backend)
+    {
+        g_last_error = Error::NotInitialized;
+        g_last_error_message = "Bluetooth backend is not initialized";
+        return static_cast<std::int32_t>(Error::NotInitialized);
+    }
+
+    const auto* dev = g_device_manager.get_device(device);
+    if (!dev)
+    {
+        g_last_error = Error::InvalidArgument;
+        g_last_error_message = "Invalid device handle";
+        return static_cast<std::int32_t>(Error::InvalidArgument);
+    }
+
+    // Registered before calling the backend: pairing runs asynchronously and may
+    // push its DevicePaired completion event before this call even returns.
+    if (callback)
+    {
+        std::scoped_lock lock(g_pending_pair_mutex);
+        g_pending_pair_callbacks[device] = callback;
+    }
+
+    std::string message;
+    const Error error = g_backend->pair(device, *dev, message);
+    g_last_error = error;
+    g_last_error_message = message;
+
+    if (error != Error::Ok)
+    {
+        std::scoped_lock lock(g_pending_pair_mutex);
+        g_pending_pair_callbacks.erase(device);
+    }
+
+    return static_cast<std::int32_t>(error);
+}
+
+bool bluetooth_device_is_paired(std::uint64_t device)
+{
+    const auto* dev = g_device_manager.get_device(device);
+    return dev && g_backend && g_backend->is_paired(*dev);
 }
 
 std::int32_t bluetooth_classic_disconnect(std::uint64_t connection)

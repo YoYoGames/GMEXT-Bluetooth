@@ -403,6 +403,31 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         return __result ? 1.0 : 0.0;
     }
 
+    public double __EXT_NATIVE__bluetooth_pair(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: device, type: UInt64
+        long device = GMExtWire.readI64(__arg_buffer);
+
+        // field: callback, type: Function
+        GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
+
+        int __result = bluetooth_pair(device, callback);
+        return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_device_is_paired(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: device, type: UInt64
+        long device = GMExtWire.readI64(__arg_buffer);
+
+        boolean __result = bluetooth_device_is_paired(device);
+        return __result ? 1.0 : 0.0;
+    }
+
     public double __EXT_NATIVE__bluetooth_le_connect(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
         GMExtWire.order(__arg_buffer);

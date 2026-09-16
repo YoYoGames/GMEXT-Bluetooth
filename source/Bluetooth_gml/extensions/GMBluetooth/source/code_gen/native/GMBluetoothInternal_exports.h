@@ -51,6 +51,8 @@ GMEXPORT double __EXT_NATIVE__bluetooth_classic_server_is_running();
 GMEXPORT double __EXT_NATIVE__bluetooth_classic_discoverable_start(double duration_seconds);
 GMEXPORT double __EXT_NATIVE__bluetooth_classic_discoverable_stop();
 GMEXPORT double __EXT_NATIVE__bluetooth_classic_discoverable_is_running();
+GMEXPORT double __EXT_NATIVE__bluetooth_pair(char* __arg_buffer, double __arg_buffer_length);
+GMEXPORT double __EXT_NATIVE__bluetooth_device_is_paired(char* __arg_buffer, double __arg_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_le_connect(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_le_disconnect(char* __arg_buffer, double __arg_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_le_connection_is_valid(char* __arg_buffer, double __arg_buffer_length);

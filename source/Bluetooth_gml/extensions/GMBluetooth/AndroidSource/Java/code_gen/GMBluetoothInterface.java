@@ -48,6 +48,8 @@ public interface GMBluetoothInterface {
     public int bluetooth_classic_discoverable_start(int duration_seconds);
     public int bluetooth_classic_discoverable_stop();
     public boolean bluetooth_classic_discoverable_is_running();
+    public int bluetooth_pair(long device, GMFunction callback);
+    public boolean bluetooth_device_is_paired(long device);
     public long bluetooth_le_connect(long device, GMFunction callback);
     public int bluetooth_le_disconnect(long connection);
     public boolean bluetooth_le_connection_is_valid(long connection);

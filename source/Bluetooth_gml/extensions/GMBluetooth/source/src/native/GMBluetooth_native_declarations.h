@@ -49,6 +49,8 @@ bool bluetooth_classic_server_is_running();
 std::int32_t bluetooth_classic_discoverable_start(std::int32_t duration_seconds);
 std::int32_t bluetooth_classic_discoverable_stop();
 bool bluetooth_classic_discoverable_is_running();
+std::int32_t bluetooth_pair(std::uint64_t device, const gm::wire::GMFunction& callback);
+bool bluetooth_device_is_paired(std::uint64_t device);
 bool bluetooth_set_callback_device_found(const gm::wire::GMFunction& callback);
 bool bluetooth_remove_callback_device_found();
 bool bluetooth_set_callback_scan_stopped(const gm::wire::GMFunction& callback);

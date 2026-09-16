@@ -1956,6 +1956,19 @@ static NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length
 }
 @end
 
+// IOBluetoothDevicePair's PIN/passkey/numeric-confirmation delegate methods are
+// all optional; leaving them unimplemented makes it fall back to the system's
+// own pairing UI for those steps, so only the terminal callback is needed here.
+@interface GMBTDevicePairDelegate : NSObject <IOBluetoothDevicePairDelegate>
+@property (nonatomic, copy) void (^onFinished)(IOReturn error);
+@end
+
+@implementation GMBTDevicePairDelegate
+- (void)devicePairingFinished:(id)sender error:(IOReturn)error {
+    if (self.onFinished) self.onFinished(error);
+}
+@end
+
 #endif // TARGET_OS_OSX
 
 
@@ -2361,6 +2374,67 @@ namespace
 
         bool classic_server_is_running() const override { return classic_server_running_; }
 
+        Error pair(std::uint64_t device_handle, const DiscoveredDevice& device, std::string& message) override
+        {
+            if (device.transport != Transport::Classic)
+            {
+                message = "Bluetooth pairing is only supported for Classic devices on macOS";
+                return Error::NotSupported;
+            }
+            if (!device.address_available || device.address.empty())
+            {
+                message = "Classic device address is unavailable";
+                return Error::InvalidArgument;
+            }
+
+            IOBluetoothDevice* btDevice = classic_device_for_address(device.address);
+            if (!btDevice)
+            {
+                message = "Classic device could not be resolved";
+                return Error::NotFound;
+            }
+
+            IOBluetoothDevicePair* pair = [IOBluetoothDevicePair pairWithDevice:btDevice];
+            if (!pair)
+            {
+                message = "Bluetooth pairing could not be created";
+                return Error::OperationFailed;
+            }
+
+            GMBTDevicePairDelegate* delegate = [GMBTDevicePairDelegate new];
+            AppleBackend* self = this;
+            delegate.onFinished = ^(IOReturn error) { self->handle_pair_finished(device_handle, error); };
+            pair.delegate = delegate;
+
+            {
+                std::scoped_lock lock(pair_mutex_);
+                pending_pairs_[device_handle] = pair;
+                pending_pair_delegates_[device_handle] = delegate;
+            }
+
+            const IOReturn status = [pair start];
+            if (status != kIOReturnSuccess)
+            {
+                std::scoped_lock lock(pair_mutex_);
+                pending_pairs_.erase(device_handle);
+                pending_pair_delegates_.erase(device_handle);
+                message = "Bluetooth pairing could not start";
+                return Error::OperationFailed;
+            }
+
+            message.clear();
+            return Error::Ok;
+        }
+
+        bool is_paired(const DiscoveredDevice& device) const override
+        {
+            if (device.transport != Transport::Classic || !device.address_available || device.address.empty())
+                return false;
+
+            IOBluetoothDevice* btDevice = const_cast<AppleBackend*>(this)->classic_device_for_address(device.address);
+            return btDevice != nil && [btDevice isPaired];
+        }
+
 #else
 
         Error classic_scan_start(std::string&m) override {m="Bluetooth Classic is not supported on this platform";return Error::NotSupported;}
@@ -2595,6 +2669,34 @@ namespace
             ev.connection = connection;
             ev.error = error;
             ev.message = message ? message : "";
+            hooks_.push_event(std::move(ev));
+        }
+
+        mutable std::mutex pair_mutex_;
+        std::unordered_map<std::uint64_t, IOBluetoothDevicePair*> pending_pairs_;
+        std::unordered_map<std::uint64_t, GMBTDevicePairDelegate*> pending_pair_delegates_;
+
+        void handle_pair_finished(std::uint64_t device_handle, IOReturn error)
+        {
+            {
+                std::scoped_lock lock(pair_mutex_);
+                pending_pairs_.erase(device_handle);
+                pending_pair_delegates_.erase(device_handle);
+            }
+
+            BackendEvent ev;
+            ev.type = BackendEventType::DevicePaired;
+            ev.transport = Transport::Classic;
+            ev.device = device_handle;
+            if (error == kIOReturnSuccess)
+            {
+                ev.error = Error::Ok;
+            }
+            else
+            {
+                ev.error = Error::OperationFailed;
+                ev.message = "Bluetooth pairing failed";
+            }
             hooks_.push_event(std::move(ev));
         }
 

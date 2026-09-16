@@ -279,6 +279,21 @@
  */
 
 /**
+ * @function_partial bluetooth_pair
+ * @param {Real} device
+ * @param {Function} callback
+ * @returns {Real}
+ * @function_end
+ */
+
+/**
+ * @function_partial bluetooth_device_is_paired
+ * @param {Real} device
+ * @returns {Bool}
+ * @function_end
+ */
+
+/**
  * @function_partial bluetooth_le_connect
  * @param {Real} device
  * @param {Function} callback
