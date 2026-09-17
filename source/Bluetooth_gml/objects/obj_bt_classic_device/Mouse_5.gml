@@ -1,10 +1,25 @@
+if (!bluetooth_pairing_is_supported(device))
+{
+    show_debug_message("[GML] Explicit pairing is not supported for this device/platform");
+    exit;
+}
 
-show_debug_message("Pairing")
+show_debug_message("Pairing");
 
-bluetooth_pair(device,
-    function(_error_code, _message, _device) {
-        show_debug_message("[GML] pair " + string(_error_code) + " " + _message);
+bluetooth_pair(
+    device,
+    function(_error_code, _message, _device)
+    {
+        show_debug_message(
+            "[GML] pair "
+            + string(_error_code)
+            + " "
+            + _message
+        );
+
         if (!instance_exists(id)) return;
+
         paired = bluetooth_device_is_paired(_device);
         update_text();
-    });
+    }
+);
