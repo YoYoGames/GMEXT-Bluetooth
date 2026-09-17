@@ -339,6 +339,8 @@
 // Scan state. Declared here rather than in the SCANNER section below because
 // bt_end has to reset them.
 static bool _isScanning = false;
+static bool _isAdvertising = false;
+static bool _isServerOpen = false;
 
 // A scan asked for before the central reached PoweredOn. CoreBluetooth reaches
 // that state asynchronously, several runloop turns after bt_init, and discards
@@ -409,6 +411,8 @@ static int _pendingScanAsyncId = 0;
     // otherwise leave the next bt_init believing a scan is already under way.
     _isScanning = false;
     _scanPendingPowerOn = false;
+    _isAdvertising = false;
+    _isServerOpen = false;
 
     _centralManager = nil;
     _peripheralManager = nil;
@@ -560,94 +564,76 @@ static int _pendingScanAsyncId = 0;
 // # ADVERTISER
 // ####################################################################################
 
-static bool _isAdvertising = false;
-
 - (void) handleStartAdvertisementQueue {
+    if (!_peripheralManager || _peripheralManager.state != CBManagerStatePoweredOn)
+        return;
+
     [self handleQueue:_startAdvertisementQueue withBlock:^(GMBTQueuedMutableDictionary *queuedMutableDictionary) {
         [self->_peripheralManager startAdvertising:queuedMutableDictionary.dictionary];
     }];
 }
 
 - (double) bt_le_advertise_start:(NSString*)settings data:(NSString*)data {
-    
-    // Check if is already advertising
-    if (_isAdvertising) return -1;
-    
-    // Parse the JSON strings
-    NSError *error = nil;
-    NSDictionary *settingsDict = [NSJSONSerialization JSONObjectWithData:[settings dataUsingEncoding:NSUTF8StringEncoding] options:0 error:&error];
-    NSDictionary *dataDict = [NSJSONSerialization JSONObjectWithData:[data dataUsingEncoding:NSUTF8StringEncoding] options:0 error:&error];
+    if (_isAdvertising || (_peripheralManager && _peripheralManager.isAdvertising)) return -1;
 
-    // Handle JSON parsing error
-    if (error) {
-        NSLog(@"JSON Parsing Error: %@", error.localizedDescription);
+    NSError *settingsError = nil;
+    NSError *dataError = nil;
+    NSDictionary *settingsDict = [NSJSONSerialization JSONObjectWithData:[settings dataUsingEncoding:NSUTF8StringEncoding]
+                                                                  options:0
+                                                                    error:&settingsError];
+    NSDictionary *dataDict = [NSJSONSerialization JSONObjectWithData:[data dataUsingEncoding:NSUTF8StringEncoding]
+                                                              options:0
+                                                                error:&dataError];
+
+    if (settingsError || dataError || ![settingsDict isKindOfClass:[NSDictionary class]] || ![dataDict isKindOfClass:[NSDictionary class]]) {
+        NSLog(@"[GMBluetooth] invalid BLE advertising JSON (settings=%@, data=%@)", settingsError, dataError);
         return -1;
     }
-    
-    // Process the settings data
-    
-    // The property 'connectable' is set to on if services array is not empty
-    // BOOL connectable = [settingsDict[@"connectable"] boolValue];
-    // Currently, CBPeripheralManager doesn't provide a direct way to set discoverability or timeout, so they might be ignored or handled differently.
-    // NSInteger timeout = [settingsDict[@"timeout"] integerValue];
-    NSInteger txPowerLevel = [settingsDict[@"txPowerLevel"] integerValue];
-    
-    // Process the data to be advertised
-    NSMutableDictionary* advertisementData = [NSMutableDictionary dictionary];
 
-    // Use preprocessor directive (compatible with iOS|macOS)
-    #if TARGET_OS_IOS
-    NSString *deviceName = [[UIDevice currentDevice] name];
-    #elif TARGET_OS_MAC
-    NSString *deviceName = [[NSHost currentHost] localizedName];
-    #endif
+    NSMutableDictionary *advertisementData = [NSMutableDictionary dictionary];
 
-    if (![dataDict[@"includeName"] boolValue]) {
-        advertisementData[CBAdvertisementDataLocalNameKey] = deviceName;
+    // CBPeripheralManager.startAdvertising supports only LocalName and ServiceUUIDs.
+    // Other advertising fields used by Android/Windows are intentionally ignored here.
+    if ([dataDict[@"includeName"] boolValue]) {
+#if TARGET_OS_IOS
+        NSString *deviceName = [[UIDevice currentDevice] name];
+#else
+        NSString *deviceName = [[NSHost currentHost] localizedName];
+#endif
+        if (deviceName.length > 0)
+            advertisementData[CBAdvertisementDataLocalNameKey] = deviceName;
     }
-    if ([dataDict[@"includePowerLevel"] boolValue]) {
-        advertisementData[CBAdvertisementDataTxPowerLevelKey] = @(txPowerLevel);
-    }
-    
-    // Convert Base64 encoded service data to NSData and add to the dictionary
-    NSMutableArray *serviceUUIDs = [NSMutableArray array];
-    for (NSDictionary *service in dataDict[@"services"]) {
-        CBUUID *serviceUUID = [CBUUID UUIDWithString:service[@"uuid"]];
-        [serviceUUIDs addObject:serviceUUID];
-        
-        NSData *serviceData = [[NSData alloc] initWithBase64EncodedString:service[@"data"] options:0];
-        advertisementData[CBAdvertisementDataServiceDataKey] = @{serviceUUID: serviceData};
-    }
-    advertisementData[CBAdvertisementDataServiceUUIDsKey] = serviceUUIDs;
 
-    // Add manufacturer data if it exists
-    NSDictionary *manufacturer = dataDict[@"manufacturer"];
-    if (manufacturer) {
-        int manufacturerId = [manufacturer[@"id"] intValue];
-        NSData *manufacturerData = [[NSData alloc] initWithBase64EncodedString:manufacturer[@"data"] options:0];
-        advertisementData[CBAdvertisementDataManufacturerDataKey] = [NSData dataWithBytes:&manufacturerId length:sizeof(manufacturerId)];
-        [advertisementData[CBAdvertisementDataManufacturerDataKey] appendData:manufacturerData];
+    NSMutableArray<CBUUID *> *serviceUUIDs = [NSMutableArray array];
+    id servicesValue = dataDict[@"services"];
+    if ([servicesValue isKindOfClass:[NSArray class]]) {
+        for (id serviceValue in (NSArray *)servicesValue) {
+            if (![serviceValue isKindOfClass:[NSDictionary class]]) continue;
+            NSString *uuidString = ((NSDictionary *)serviceValue)[@"uuid"];
+            if (![uuidString isKindOfClass:[NSString class]] || uuidString.length == 0) continue;
+            [serviceUUIDs addObject:[CBUUID UUIDWithString:uuidString]];
+        }
     }
-    
-    // Generate new asyncId for this task
+    if (serviceUUIDs.count > 0)
+        advertisementData[CBAdvertisementDataServiceUUIDsKey] = serviceUUIDs;
+
+    (void)settingsDict;
+
     int asyncId = [self generateAsyncId];
-    
-    GMBTQueuedMutableDictionary* queuedMutableDictionary = [[GMBTQueuedMutableDictionary alloc] initWithAsyncId:@(asyncId) dictionary:advertisementData];
-    [self queueEnqueue:_startAdvertisementQueue value:queuedMutableDictionary withHandler:^(){ [self handleStartAdvertisementQueue]; }];
-    
-    // Return asyncId
+    GMBTQueuedMutableDictionary *queued = [[GMBTQueuedMutableDictionary alloc] initWithAsyncId:@(asyncId)
+                                                                                    dictionary:advertisementData];
+    [self queueEnqueue:_startAdvertisementQueue value:queued withHandler:^(){ [self handleStartAdvertisementQueue]; }];
     return asyncId;
 }
 
 - (double) bt_le_advertise_stop {
-    
-    if (!_isAdvertising) return -1;
-    
+    if (!_isAdvertising && !(_peripheralManager && _peripheralManager.isAdvertising)) return -1;
+
     [_peripheralManager stopAdvertising];
-    
+    _isAdvertising = false;
+
     int asyncId = [self generateAsyncId];
     [self notifyAsyncOperationSuccess:@"bt_le_advertise_stop" asyncId:asyncId extraParams:nil];
-    
     return asyncId;
 }
 
@@ -656,15 +642,18 @@ static bool _isAdvertising = false;
 }
 
 - (void) peripheralManagerDidStartAdvertising:(CBPeripheralManager *)peripheral error:(NSError *)error {
-    
-    GMBTQueuedMutableDictionary* queuedAdvertisementData = [self queueDequeue:_startAdvertisementQueue];
-    
+    GMBTQueuedMutableDictionary *queuedAdvertisementData = [self queueDequeue:_startAdvertisementQueue];
+    if (!queuedAdvertisementData) return;
+
     int asyncId = [queuedAdvertisementData.asyncId intValue];
-    NSString* functionName = @"bt_le_advertise_start";
-    
-    if (error) [self notifyAsyncOperationError:functionName asyncId:asyncId errorCode:(int)error.code extraParams:nil];
-    else [self notifyAsyncOperationSuccess:functionName asyncId:asyncId extraParams:nil];
-    
+    NSString *functionName = @"bt_le_advertise_start";
+
+    _isAdvertising = (error == nil && peripheral.isAdvertising);
+    if (error)
+        [self notifyAsyncOperationError:functionName asyncId:asyncId errorCode:(int)error.code extraParams:nil];
+    else
+        [self notifyAsyncOperationSuccess:functionName asyncId:asyncId extraParams:nil];
+
     [self handleStartAdvertisementQueue];
 }
 
@@ -672,9 +661,10 @@ static bool _isAdvertising = false;
 // # SERVER
 // ####################################################################################
 
-static bool _isServerOpen = false;
-
 - (void) handleAddServiceQueue {
+    if (!_peripheralManager || _peripheralManager.state != CBManagerStatePoweredOn)
+        return;
+
     [self handleQueue:_addServiceQueue withBlock:^(GMBTQueuedMutableService *queuedMutableService) {
         [self->_peripheralManager addService:queuedMutableService.service];
     }];
@@ -693,67 +683,100 @@ static bool _isServerOpen = false;
 }
 
 - (double) bt_le_server_add_service:(NSString*) serviceDataString {
-    
     if (!_isServerOpen) return -1;
-    
+
     NSData *data = [serviceDataString dataUsingEncoding:NSUTF8StringEncoding];
     NSError *error = nil;
-    NSDictionary *serviceData = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
-    
-    if (error) {
-        // Handle error, perhaps with a callback or NSLog
-        NSLog(@"JSON Parsing Error: %@", error.localizedDescription);
+    id parsed = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+    if (error || ![parsed isKindOfClass:[NSDictionary class]]) {
+        NSLog(@"[GMBluetooth] invalid GATT service definition: %@", error);
         return -1;
     }
-    
-    // Create the service
-    CBUUID *serviceUUID = [CBUUID UUIDWithString:serviceData[@"uuid"]];
+
+    NSDictionary *serviceData = (NSDictionary *)parsed;
+    NSString *serviceUuidString = serviceData[@"uuid"];
+    if (![serviceUuidString isKindOfClass:[NSString class]] || serviceUuidString.length == 0)
+        return -1;
+
+    CBUUID *serviceUUID = [CBUUID UUIDWithString:serviceUuidString];
     CBMutableService *service = [[CBMutableService alloc] initWithType:serviceUUID primary:YES];
-    
-    NSData *emptyValue = [NSData data];
-    
-    // Extract characteristics
-    NSMutableArray *characteristicsArray = [NSMutableArray new];
-    for (NSDictionary *charDict in serviceData[@"characteristics"]) {
-        CBUUID *charUUID = [CBUUID UUIDWithString:charDict[@"uuid"]];
-        CBCharacteristicProperties charProperties = [charDict[@"properties"] unsignedIntValue];
-        CBAttributePermissions permissions = [charDict[@"permissions"] unsignedIntValue];
-        
-        // Map permissions from Android to Apple
-        CBAttributePermissions charPermissions = 1 | 2;
-        if (permissions & 1) charPermissions |= 1;
-        if (permissions & (2 | 4)) charPermissions |= 4;
-        if (permissions & 16) charPermissions |= 2;
-        if (permissions & (32 | 64)) charPermissions |= 8;
-                
-        CBMutableCharacteristic *characteristic = [[CBMutableCharacteristic alloc] initWithType:charUUID properties:charProperties value:nil permissions:charPermissions];
-        
-        // Extract descriptors for each characteristic
-        NSMutableArray *descriptorsArray = [NSMutableArray new];
-        for (NSDictionary *descDict in charDict[@"descriptors"]) {
-            CBUUID *descUUID = [CBUUID UUIDWithString:descDict[@"uuid"]];
-            // CBAttributePermissions descPermissions = [descDict[@"permissions"] unsignedIntValue];
-            
-            CBMutableDescriptor *descriptor = [[CBMutableDescriptor alloc] initWithType:descUUID value:emptyValue];
-            [descriptorsArray addObject:descriptor];
+
+    NSMutableArray<CBMutableCharacteristic *> *characteristicsArray = [NSMutableArray array];
+    id characteristicsValue = serviceData[@"characteristics"];
+    if ([characteristicsValue isKindOfClass:[NSArray class]]) {
+        for (id charValue in (NSArray *)characteristicsValue) {
+            if (![charValue isKindOfClass:[NSDictionary class]]) continue;
+            NSDictionary *charDict = (NSDictionary *)charValue;
+
+            NSString *charUuidString = charDict[@"uuid"];
+            if (![charUuidString isKindOfClass:[NSString class]] || charUuidString.length == 0)
+                continue;
+
+            CBUUID *charUUID = [CBUUID UUIDWithString:charUuidString];
+            NSUInteger rawProperties = [charDict[@"properties"] unsignedIntegerValue];
+
+            // The public bit values intentionally match CoreBluetooth for the common
+            // characteristic properties. Apple forbids Broadcast and ExtendedProperties
+            // when constructing a local CBMutableCharacteristic, so mask those two bits.
+            rawProperties &= ~(static_cast<NSUInteger>(CBCharacteristicPropertyBroadcast) |
+                               static_cast<NSUInteger>(CBCharacteristicPropertyExtendedProperties));
+            CBCharacteristicProperties charProperties = (CBCharacteristicProperties)rawProperties;
+
+            // permissions is still the legacy cross-platform/Android-style bitmask:
+            // 1=read, 2/4=read encrypted, 16=write, 32/64=write encrypted.
+            const NSUInteger permissions = [charDict[@"permissions"] unsignedIntegerValue];
+            CBAttributePermissions charPermissions = 0;
+            if (permissions & 1)       charPermissions |= CBAttributePermissionsReadable;
+            if (permissions & (2|4))   charPermissions |= CBAttributePermissionsReadEncryptionRequired;
+            if (permissions & 16)      charPermissions |= CBAttributePermissionsWriteable;
+            if (permissions & (32|64)) charPermissions |= CBAttributePermissionsWriteEncryptionRequired;
+
+            NSData *initialValue = nil;
+            id initialValueField = charDict[@"value"];
+            if ([initialValueField isKindOfClass:[NSString class]] && [(NSString *)initialValueField length] > 0) {
+                initialValue = [[NSData alloc] initWithBase64EncodedString:(NSString *)initialValueField options:0];
+                if (!initialValue) {
+                    NSLog(@"[GMBluetooth] characteristic %@ has invalid base64 initial value", charUuidString);
+                    return -1;
+                }
+            }
+
+            CBMutableCharacteristic *characteristic =
+                [[CBMutableCharacteristic alloc] initWithType:charUUID
+                                                   properties:charProperties
+                                                        value:initialValue
+                                                  permissions:charPermissions];
+
+            NSMutableArray<CBMutableDescriptor *> *descriptorsArray = [NSMutableArray array];
+            id descriptorsValue = charDict[@"descriptors"];
+            if ([descriptorsValue isKindOfClass:[NSArray class]]) {
+                for (id descValue in (NSArray *)descriptorsValue) {
+                    if (![descValue isKindOfClass:[NSDictionary class]]) continue;
+                    NSString *descUuidString = ((NSDictionary *)descValue)[@"uuid"];
+                    if (![descUuidString isKindOfClass:[NSString class]] || descUuidString.length == 0)
+                        continue;
+
+                    CBUUID *descUUID = [CBUUID UUIDWithString:descUuidString];
+                    // CoreBluetooth owns the CCCD for Notify/Indicate characteristics.
+                    if ([descUUID isEqual:[CBUUID UUIDWithString:CBUUIDClientCharacteristicConfigurationString]])
+                        continue;
+
+                    CBMutableDescriptor *descriptor = [[CBMutableDescriptor alloc] initWithType:descUUID value:[NSData data]];
+                    [descriptorsArray addObject:descriptor];
+                }
+            }
+
+            if (descriptorsArray.count > 0)
+                characteristic.descriptors = descriptorsArray;
+            [characteristicsArray addObject:characteristic];
         }
-        
-        NSString *description = charDict[@"description"];
-        if (description) {
-            CBUUID *uuid = [CBUUID UUIDWithString:CBUUIDCharacteristicUserDescriptionString];
-            [descriptorsArray addObject:[[CBMutableDescriptor alloc] initWithType:uuid value:description]];
-        }
-        
-        characteristic.descriptors = descriptorsArray;
-        [characteristicsArray addObject:characteristic];
     }
+
     service.characteristics = characteristicsArray;
-    
+
     int asyncId = [self generateAsyncId];
     GMBTQueuedMutableService *queueService = [[GMBTQueuedMutableService alloc] initWithAsyncId:@(asyncId) service:service];
-    
     [self queueEnqueue:_addServiceQueue value:queueService withHandler:^(){ [self handleAddServiceQueue]; }];
-        
     return asyncId;
 }
 
@@ -850,8 +873,10 @@ static bool _isServerOpen = false;
         return -1;
     }
 
-    // Retrieve the service from the addedServices dictionary (thread safe)
-    CBMutableService *service = _addedServices[serviceUuid];
+    NSString *canonicalServiceUuid = [CBUUID UUIDWithString:serviceUuid].UUIDString;
+    NSString *canonicalCharacteristicUuid = [CBUUID UUIDWithString:characteristicUuid].UUIDString;
+
+    CBMutableService *service = _addedServices[canonicalServiceUuid];
     if (!service) {
         NSLog(@"Service not found");
         return -1;
@@ -860,7 +885,7 @@ static bool _isServerOpen = false;
     // Find the target characteristic
     CBMutableCharacteristic *characteristic = nil;
     for (CBMutableCharacteristic *charac in service.characteristics) {
-        if ([charac.UUID.UUIDString isEqualToString:characteristicUuid]) {
+        if ([charac.UUID.UUIDString isEqualToString:canonicalCharacteristicUuid]) {
             characteristic = charac;
             break;
         }
@@ -882,8 +907,8 @@ static bool _isServerOpen = false;
 }
 
 - (void) peripheralManager:(CBPeripheralManager *)peripheral didAddService:(CBService *)service error:(NSError *)error {
-    GMBTQueuedMutableService *queuedService = _addServiceQueue.firstObject;
-    [_addServiceQueue removeObjectAtIndex:0];
+    GMBTQueuedMutableService *queuedService = [self queueDequeue:_addServiceQueue];
+    if (!queuedService) return;
     
     NSString *functionName = @"bt_le_server_add_service";
     int asyncId = [queuedService.asyncId intValue];
@@ -907,6 +932,32 @@ static bool _isServerOpen = false;
 - (void) peripheralManagerDidUpdateState:(CBPeripheralManager *)peripheral {
     [self notifyOperation:@"bt_le_peripheral_manager_update_state"
               extraParams:@{ @"success": @((int)peripheral.state) }];
+
+    if (peripheral.state == CBManagerStatePoweredOn) {
+        [self handleAddServiceQueue];
+        [self handleStartAdvertisementQueue];
+        return;
+    }
+
+    if (peripheral.state == CBManagerStateUnknown || peripheral.state == CBManagerStateResetting)
+        return;
+
+    _isAdvertising = false;
+
+    while (_startAdvertisementQueue.count > 0) {
+        GMBTQueuedMutableDictionary *queued = [self queueDequeue:_startAdvertisementQueue];
+        [self notifyAsyncOperationError:@"bt_le_advertise_start"
+                                asyncId:queued.asyncId.intValue
+                              errorCode:(int)peripheral.state
+                            extraParams:nil];
+    }
+    while (_addServiceQueue.count > 0) {
+        GMBTQueuedMutableService *queued = [self queueDequeue:_addServiceQueue];
+        [self notifyAsyncOperationError:@"bt_le_server_add_service"
+                                asyncId:queued.asyncId.intValue
+                              errorCode:(int)peripheral.state
+                            extraParams:nil];
+    }
 }
 
 - (void) peripheralManager:(CBPeripheralManager *)peripheral willRestoreState:(NSDictionary<NSString *,id> *)dict {
@@ -1833,6 +1884,10 @@ static NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length
                             extraParams:@{ @"state": stateString }];
     }
 
+    [self notifyOperation:@"bt_state_changed"
+              extraParams:@{ @"state": @((int)central.state), @"state_name": stateString }];
+
+    // Keep the legacy transport event for compatibility with existing diagnostics.
     [self notifyOperation:@"bt_le_state_update"
               extraParams:@{ @"success": @((int)central.state), @"state": stateString }];
 }
@@ -2071,16 +2126,37 @@ namespace
             le_id_to_connection_.clear();
         }
 
-        bool supports_ble() const override { return true; }
-        bool supports_le_advertise() const override { return true; }
-        bool supports_le_server() const override { return true; }
+        bool supports_ble() const override
+        {
+            return !transport_ || !transport_.centralManager || transport_.centralManager.state != CBManagerStateUnsupported;
+        }
+
+        bool supports_le_advertise() const override
+        {
+            return !transport_ || !transport_.peripheralManager || transport_.peripheralManager.state != CBManagerStateUnsupported;
+        }
+
+        bool supports_le_server() const override { return supports_le_advertise(); }
+
 #if TARGET_OS_OSX
         bool supports_classic() const override { return true; }
         bool supports_classic_server() const override { return true; }
+        bool pairing_is_supported(const DiscoveredDevice& device) const override
+        {
+            return device.transport == Transport::Classic && device.address_available && !device.address.empty();
+        }
 #else
         bool supports_classic() const override { return false; }
         bool supports_classic_server() const override { return false; }
+        bool pairing_is_supported(const DiscoveredDevice&) const override { return false; }
 #endif
+
+        std::int32_t current_bluetooth_state() const override
+        {
+            if (!transport_ || !transport_.centralManager)
+                return 0; // BluetoothState.Unknown
+            return static_cast<std::int32_t>(transport_.centralManager.state);
+        }
 
         PermissionStatus permission_status() const override
         {
@@ -2160,7 +2236,7 @@ namespace
 
         Error le_advertise_start(const std::string&s,const std::string&d,std::string&m) override { return async_result([transport_ bt_le_advertise_start:to_ns(s) data:to_ns(d)],"BLE advertising could not start",m); }
         Error le_advertise_stop(std::string&m) override { return async_result([transport_ bt_le_advertise_stop],"BLE advertising could not stop",m); }
-        bool le_advertise_is_running() const override { return _isAdvertising; }
+        bool le_advertise_is_running() const override { return transport_ && [transport_ bt_le_advertise_is_active] > 0.5; }
         Error le_server_start(std::string&m) override { return async_result([transport_ bt_le_server_open],"GATT server could not start",m); }
         Error le_server_stop(std::string&m) override { return async_result([transport_ bt_le_server_close],"GATT server could not stop",m); }
         bool le_server_is_running() const override { return _isServerOpen; }
