@@ -157,6 +157,20 @@ static void GMInjectSelectorsIntoSubclass(Class subclass, Class base)
     return static_cast<double>(__result);
 }
 
+- (double)__EXT_NATIVE__bluetooth_le_advertise_is_supported
+{
+    bool __result = [__impl bluetooth_le_advertise_is_supported];
+
+    return static_cast<double>(__result);
+}
+
+- (double)__EXT_NATIVE__bluetooth_le_server_is_supported
+{
+    bool __result = [__impl bluetooth_le_server_is_supported];
+
+    return static_cast<double>(__result);
+}
+
 - (double)__EXT_NATIVE__bluetooth_classic_is_supported
 {
     bool __result = [__impl bluetooth_classic_is_supported];
@@ -531,6 +545,18 @@ static void GMInjectSelectorsIntoSubclass(Class subclass, Class base)
 - (double)__EXT_NATIVE__bluetooth_classic_discoverable_is_running
 {
     bool __result = [__impl bluetooth_classic_discoverable_is_running];
+
+    return static_cast<double>(__result);
+}
+
+- (double)__EXT_NATIVE__bluetooth_pairing_is_supported:(char*)__arg_buffer arg1:(double)__arg_buffer_length
+{
+    gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};
+
+    // field: device, type: UInt64
+    std::uint64_t device = gm::wire::codec::readValue<std::uint64_t>(__br);
+
+    bool __result = [__impl bluetooth_pairing_is_supported:device];
 
     return static_cast<double>(__result);
 }
@@ -1024,13 +1050,13 @@ static void GMInjectSelectorsIntoSubclass(Class subclass, Class base)
 {
     gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};
 
-    // field: service_json, type: String
-    std::string_view service_json = gm::wire::codec::readValue<std::string_view>(__br);
+    // field: service, type: struct BluetoothLeServiceDefinition
+    gm_structs::BluetoothLeServiceDefinition service = gm::wire::codec::readValue<gm_structs::BluetoothLeServiceDefinition>(__br);
 
     // field: callback, type: Function
     gm::wire::GMFunction callback = gm::wire::codec::readFunction(__br, &__dispatch_queue);
 
-    std::int32_t __result = [__impl bluetooth_le_server_add_service:service_json callback:callback];
+    std::int32_t __result = [__impl bluetooth_le_server_add_service:service callback:callback];
 
     return static_cast<double>(__result);
 }
@@ -1120,6 +1146,25 @@ static void GMInjectSelectorsIntoSubclass(Class subclass, Class base)
     std::uint32_t size = gm::wire::codec::readValue<std::uint32_t>(__br);
 
     std::int32_t __result = [__impl bluetooth_le_server_notify_value:service_uuid characteristic_uuid:characteristic_uuid connection:connection data:data offset:offset size:size];
+
+    return static_cast<double>(__result);
+}
+
+- (double)__EXT_NATIVE__bluetooth_set_callback_state_changed:(char*)__arg_buffer arg1:(double)__arg_buffer_length
+{
+    gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};
+
+    // field: callback, type: Function
+    gm::wire::GMFunction callback = gm::wire::codec::readFunction(__br, &__dispatch_queue);
+
+    bool __result = [__impl bluetooth_set_callback_state_changed:callback];
+
+    return static_cast<double>(__result);
+}
+
+- (double)__EXT_NATIVE__bluetooth_remove_callback_state_changed
+{
+    bool __result = [__impl bluetooth_remove_callback_state_changed];
 
     return static_cast<double>(__result);
 }

@@ -22,6 +22,7 @@ namespace
 
     // Callback storage
     std::mutex g_callback_mutex;
+    GMFunction g_callback_state_changed;
     GMFunction g_callback_device_found;
     GMFunction g_callback_scan_stopped;
     GMFunction g_callback_classic_client_connected;
@@ -622,6 +623,82 @@ namespace
         return json::parse(field->string_value);
     }
 
+    void append_json_string(std::string& out, std::string_view value)
+    {
+        out.push_back('"');
+        for (const char ch : value)
+        {
+            switch (ch)
+            {
+                case '"': out += "\\\""; break;
+                case '\\': out += "\\\\"; break;
+                case '\b': out += "\\b"; break;
+                case '\f': out += "\\f"; break;
+                case '\n': out += "\\n"; break;
+                case '\r': out += "\\r"; break;
+                case '\t': out += "\\t"; break;
+                default:
+                {
+                    const auto c = static_cast<unsigned char>(ch);
+                    if (c < 0x20)
+                    {
+                        static constexpr char hex[] = "0123456789abcdef";
+                        out += "\\u00";
+                        out.push_back(hex[(c >> 4) & 0x0f]);
+                        out.push_back(hex[c & 0x0f]);
+                    }
+                    else
+                    {
+                        out.push_back(ch);
+                    }
+                    break;
+                }
+            }
+        }
+        out.push_back('"');
+    }
+
+    std::string serialize_le_service_definition(const BluetoothLeServiceDefinition& service)
+    {
+        std::string out;
+        out.reserve(256);
+        out += "{\"uuid\":";
+        append_json_string(out, service.uuid);
+        out += ",\"characteristics\":[";
+
+        for (std::size_t i = 0; i < service.characteristics.size(); ++i)
+        {
+            if (i != 0)
+                out.push_back(',');
+
+            const auto& characteristic = service.characteristics[i];
+            out += "{\"uuid\":";
+            append_json_string(out, characteristic.uuid);
+            out += ",\"properties\":" + std::to_string(characteristic.properties);
+            out += ",\"permissions\":" + std::to_string(characteristic.permissions);
+
+            if (characteristic.value.has_value())
+            {
+                out += ",\"value\":";
+                append_json_string(out, *characteristic.value);
+            }
+
+            out += ",\"descriptors\":[";
+            for (std::size_t d = 0; d < characteristic.descriptors.size(); ++d)
+            {
+                if (d != 0)
+                    out.push_back(',');
+                out += "{\"uuid\":";
+                append_json_string(out, characteristic.descriptors[d].uuid);
+                out.push_back('}');
+            }
+            out += "]}";
+        }
+
+        out += "]}";
+        return out;
+    }
+
     void dispatch_le_event(const BackendEvent& event)
     {
         auto parsed = json::parse(event.json);
@@ -634,7 +711,30 @@ namespace
         const json::Value& root = *parsed;
         const std::string& type = event.event_type;
 
-        if (type == "bluetooth_le_peripheral_open")
+        if (type == "bluetooth_state_changed")
+        {
+            const auto* state_field = root.find("state");
+            const std::int32_t state = state_field ? state_field->as_int(0) : 0;
+
+            GMFunction callback;
+            { std::scoped_lock lock(g_callback_mutex); callback = g_callback_state_changed; }
+            if (callback)
+            {
+                try
+                {
+                    callback.call(static_cast<double>(state));
+                }
+                catch (const std::exception& e)
+                {
+                    GMBT_LOG("Error dispatching state_changed callback: %s", e.what());
+                }
+            }
+            else
+            {
+                g_dropped_events++;
+            }
+        }
+        else if (type == "bluetooth_le_peripheral_open")
         {
             const std::uint64_t connection = le_event_connection(root);
             GMFunction callback;
@@ -1388,10 +1488,12 @@ bool bluetooth_initialize()
     g_last_error = error;
     g_last_error_message = message;
 
-    GMBT_LOG("backend initialize() -> error=%d message='%s' | ble=%d classic=%d classic_server=%d",
+    GMBT_LOG("backend initialize() -> error=%d message='%s' | ble=%d le_advertise=%d le_server=%d classic=%d classic_server=%d",
         static_cast<int>(error),
         message.c_str(),
         g_backend->supports_ble() ? 1 : 0,
+        g_backend->supports_le_advertise() ? 1 : 0,
+        g_backend->supports_le_server() ? 1 : 0,
         g_backend->supports_classic() ? 1 : 0,
         g_backend->supports_classic_server() ? 1 : 0);
 
@@ -1431,6 +1533,16 @@ std::string bluetooth_last_error_message()
 bool bluetooth_le_is_supported()
 {
     return g_backend && g_backend->supports_ble();
+}
+
+bool bluetooth_le_advertise_is_supported()
+{
+    return g_backend && g_backend->supports_le_advertise();
+}
+
+bool bluetooth_le_server_is_supported()
+{
+    return g_backend && g_backend->supports_le_server();
 }
 
 bool bluetooth_classic_is_supported()
@@ -1693,6 +1805,15 @@ std::uint64_t bluetooth_classic_connect(std::uint64_t device, std::string_view s
     return connection;
 }
 
+bool bluetooth_pairing_is_supported(std::uint64_t device)
+{
+    if (!g_backend)
+        return false;
+
+    const auto* dev = g_device_manager.get_device(device);
+    return dev && g_backend->pairing_is_supported(*dev);
+}
+
 std::int32_t bluetooth_pair(std::uint64_t device, const gm::wire::GMFunction& callback)
 {
     if (!g_backend)
@@ -1876,6 +1997,43 @@ bool bluetooth_classic_discoverable_is_running()
 }
 
 // Callback registration functions
+bool bluetooth_set_callback_state_changed(const gm::wire::GMFunction& callback)
+{
+    {
+        std::scoped_lock lock(g_callback_mutex);
+        g_callback_state_changed = callback;
+    }
+
+    GMBT_LOG("Bluetooth state changed callback registered");
+
+    // The public contract promises the current known state immediately after
+    // registration. GMFunction::call queues safely into GameMaker's dispatcher.
+    if (callback)
+    {
+        const std::int32_t state = g_backend
+            ? g_backend->current_bluetooth_state()
+            : 0; // BluetoothState.Unknown
+        try
+        {
+            callback.call(static_cast<double>(state));
+        }
+        catch (const std::exception& e)
+        {
+            GMBT_LOG("Error dispatching initial state_changed callback: %s", e.what());
+        }
+    }
+
+    return true;
+}
+
+bool bluetooth_remove_callback_state_changed()
+{
+    std::scoped_lock lock(g_callback_mutex);
+    g_callback_state_changed = GMFunction();
+    GMBT_LOG("Bluetooth state changed callback removed");
+    return true;
+}
+
 bool bluetooth_set_callback_device_found(const gm::wire::GMFunction& callback)
 {
     std::scoped_lock lock(g_callback_mutex);
@@ -2460,7 +2618,7 @@ bool bluetooth_le_server_is_running()
     return g_backend && g_backend->le_server_is_running();
 }
 
-std::int32_t bluetooth_le_server_add_service(std::string_view service_json, const gm::wire::GMFunction& callback)
+std::int32_t bluetooth_le_server_add_service(const BluetoothLeServiceDefinition& service, const gm::wire::GMFunction& callback)
 {
     if (!g_backend)
     {
@@ -2469,10 +2627,18 @@ std::int32_t bluetooth_le_server_add_service(std::string_view service_json, cons
         return static_cast<std::int32_t>(Error::NotInitialized);
     }
 
+    if (service.uuid.empty())
+    {
+        g_last_error = Error::InvalidArgument;
+        g_last_error_message = "BLE service UUID is required";
+        return static_cast<std::int32_t>(Error::InvalidArgument);
+    }
+
     g_server_add_service_queue.push(callback, NoContext{});
 
+    const std::string service_json = serialize_le_service_definition(service);
     std::string message;
-    const Error error = g_backend->le_server_add_service(std::string(service_json), message);
+    const Error error = g_backend->le_server_add_service(service_json, message);
     g_last_error = error;
     g_last_error_message = message;
 

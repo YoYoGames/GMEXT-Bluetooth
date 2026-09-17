@@ -1,6 +1,7 @@
 package ${YYAndroidPackageName};
 
 import ${YYAndroidPackageName}.GMExtWire.GMFunction;
+import ${YYAndroidPackageName}.records.BluetoothLeServiceDefinition;
 
 import android.Manifest;
 import android.app.Activity;
@@ -117,6 +118,14 @@ public class GMBluetooth extends GMBluetoothInternal
     private static final int SUBSCRIBE_MODE_NOTIFY = 1;
     private static final int SUBSCRIBE_MODE_INDICATE = 2;
 
+    // BluetoothState (spec.gmidl)
+    private static final int STATE_UNKNOWN      = 0;
+    private static final int STATE_RESETTING    = 1;
+    private static final int STATE_UNSUPPORTED  = 2;
+    private static final int STATE_UNAUTHORIZED = 3;
+    private static final int STATE_POWERED_OFF  = 4;
+    private static final int STATE_POWERED_ON   = 5;
+
     private static final UUID CCCD_UUID =
         UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
 
@@ -134,6 +143,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
     private volatile BluetoothServerSocket serverSocket = null;
     private volatile boolean receiverRegistered = false;
+    private volatile boolean stateReceiverRegistered = false;
 
     private volatile boolean initialized = false;
 
@@ -173,6 +183,95 @@ public class GMBluetooth extends GMBluetoothInternal
     private final LinkedHashMap<Long, DeviceEntry> devices = new LinkedHashMap<>();
     private final ArrayList<Long> deviceOrder = new ArrayList<>();
     private long nextDeviceId = 1;
+
+
+    // =========================================================================
+    // Local Bluetooth adapter state
+    // =========================================================================
+
+    private int currentBluetoothState()
+    {
+        BluetoothAdapter current = adapter;
+        if (current == null)
+            return STATE_UNSUPPORTED;
+
+        try
+        {
+            switch (current.getState())
+            {
+                case BluetoothAdapter.STATE_ON:
+                    return STATE_POWERED_ON;
+                case BluetoothAdapter.STATE_OFF:
+                    return STATE_POWERED_OFF;
+                case BluetoothAdapter.STATE_TURNING_ON:
+                case BluetoothAdapter.STATE_TURNING_OFF:
+                    return STATE_RESETTING;
+                default:
+                    return STATE_UNKNOWN;
+            }
+        }
+        catch (SecurityException ignored)
+        {
+            return STATE_UNAUTHORIZED;
+        }
+        catch (Throwable ignored)
+        {
+            return STATE_UNKNOWN;
+        }
+    }
+
+    private final BroadcastReceiver stateReceiver = new BroadcastReceiver()
+    {
+        @Override
+        public void onReceive(Context receiverContext, Intent intent)
+        {
+            if (!initialized || intent == null ||
+                !BluetoothAdapter.ACTION_STATE_CHANGED.equals(intent.getAction()))
+                return;
+
+            invoke(callbackStateChanged, currentBluetoothState());
+        }
+    };
+
+    private void ensureStateReceiver()
+    {
+        if (stateReceiverRegistered)
+            return;
+
+        Context current = context();
+        if (current == null)
+            return;
+
+        try
+        {
+            IntentFilter filter = new IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED);
+            current.registerReceiver(stateReceiver, filter);
+            stateReceiverRegistered = true;
+        }
+        catch (Throwable ignored)
+        {
+        }
+    }
+
+    private void unregisterStateReceiver()
+    {
+        if (!stateReceiverRegistered)
+            return;
+
+        Context current = context();
+        if (current != null)
+        {
+            try
+            {
+                current.unregisterReceiver(stateReceiver);
+            }
+            catch (Throwable ignored)
+            {
+            }
+        }
+
+        stateReceiverRegistered = false;
+    }
 
 
     // =========================================================================
@@ -339,6 +438,7 @@ public class GMBluetooth extends GMBluetoothInternal
     // GML callbacks
     // =========================================================================
 
+    private volatile GMFunction callbackStateChanged = null;
     private volatile GMFunction callbackDeviceFound = null;
     private volatile GMFunction callbackScanStopped = null;
     private volatile GMFunction callbackClassicClientConnected = null;
@@ -1084,6 +1184,57 @@ public class GMBluetooth extends GMBluetoothInternal
     }
 
 
+    private static Object objectField(Object object, String name) throws Exception
+    {
+        try
+        {
+            return object.getClass().getField(name).get(object);
+        }
+        catch (NoSuchFieldException ignored)
+        {
+            String suffix = Character.toUpperCase(name.charAt(0)) + name.substring(1);
+            try
+            {
+                return object.getClass().getMethod("get" + suffix).invoke(object);
+            }
+            catch (NoSuchMethodException ignoredGetter)
+            {
+                return object.getClass().getMethod(name).invoke(object);
+            }
+        }
+    }
+
+    private static String objectString(Object object, String name) throws Exception
+    {
+        Object value = objectField(object, name);
+        return value != null ? String.valueOf(value) : "";
+    }
+
+    private static String objectNullableString(Object object, String name) throws Exception
+    {
+        Object value = objectField(object, name);
+        return value != null ? String.valueOf(value) : null;
+    }
+
+    private static int objectInt(Object object, String name, int fallback) throws Exception
+    {
+        Object value = objectField(object, name);
+        return value instanceof Number ? ((Number) value).intValue() : fallback;
+    }
+
+    private static Object[] objectArray(Object object, String name) throws Exception
+    {
+        Object value = objectField(object, name);
+        if (value == null)
+            return new Object[0];
+        if (value instanceof Object[])
+            return (Object[]) value;
+        if (value instanceof java.util.List)
+            return ((java.util.List<?>) value).toArray();
+        return new Object[0];
+    }
+
+
     // =========================================================================
     // Lifecycle
     // =========================================================================
@@ -1127,6 +1278,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
             generation.incrementAndGet();
             initialized = true;
+            ensureStateReceiver();
             setLastError(OK, "");
             return true;
         }
@@ -1176,6 +1328,7 @@ public class GMBluetooth extends GMBluetoothInternal
         classicScanning.set(false);
         unregisterClassicReceiver();
         unregisterBondReceiver();
+        unregisterStateReceiver();
 
         synchronized (pairLock)
         {
@@ -1265,6 +1418,7 @@ public class GMBluetooth extends GMBluetoothInternal
             deviceOrder.clear();
         }
 
+        callbackStateChanged = null;
         callbackDeviceFound = null;
         callbackScanStopped = null;
         callbackClassicClientConnected = null;
@@ -1321,6 +1475,47 @@ public class GMBluetooth extends GMBluetoothInternal
         return current != null &&
             current.getPackageManager().hasSystemFeature(
                 PackageManager.FEATURE_BLUETOOTH_LE);
+    }
+
+
+    @Override
+    public boolean bluetooth_le_advertise_is_supported()
+    {
+        if (!bluetooth_le_is_supported() || Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP)
+            return false;
+
+        try
+        {
+            return adapter.isMultipleAdvertisementSupported() &&
+                adapter.getBluetoothLeAdvertiser() != null;
+        }
+        catch (Throwable ignored)
+        {
+            return false;
+        }
+    }
+
+
+    @Override
+    public boolean bluetooth_le_server_is_supported()
+    {
+        if (!bluetooth_le_is_supported() || Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP)
+            return false;
+
+        Context current = context();
+        if (current == null)
+            return false;
+
+        try
+        {
+            BluetoothManager manager = (BluetoothManager)
+                current.getSystemService(Context.BLUETOOTH_SERVICE);
+            return manager != null;
+        }
+        catch (Throwable ignored)
+        {
+            return false;
+        }
     }
 
 
@@ -3492,7 +3687,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     @Override
-    public int bluetooth_le_server_add_service(String service_json, GMFunction callback)
+    public int bluetooth_le_server_add_service(BluetoothLeServiceDefinition service, GMFunction callback)
     {
         if (!initialized)
             return result(NOT_INITIALIZED, "Bluetooth is not initialized");
@@ -3500,82 +3695,79 @@ public class GMBluetooth extends GMBluetoothInternal
         if (!leServerRunning.get() || gattServer == null)
             return result(OPERATION_FAILED, "BLE server is not running");
 
-        if (service_json == null || service_json.isEmpty())
-            return result(INVALID_ARGUMENT, "service_json cannot be empty");
+        if (service == null)
+            return result(INVALID_ARGUMENT, "service cannot be null");
 
         final BluetoothGattService gattService;
         final String serviceUuid;
 
         try
         {
-            JSONObject serviceObject = new JSONObject(service_json);
-            serviceUuid = serviceObject.getString("uuid");
+            serviceUuid = objectString(service, "uuid");
+            if (serviceUuid == null || serviceUuid.isEmpty())
+                return result(INVALID_ARGUMENT, "service.uuid cannot be empty");
 
             gattService = new BluetoothGattService(
                 UUID.fromString(serviceUuid),
                 BluetoothGattService.SERVICE_TYPE_PRIMARY);
 
-            JSONArray characteristics = serviceObject.optJSONArray("characteristics");
-
-            if (characteristics != null)
+            Object[] characteristics = objectArray(service, "characteristics");
+            for (Object characteristicObject : characteristics)
             {
-                for (int i = 0; i < characteristics.length(); i++)
+                if (characteristicObject == null)
+                    continue;
+
+                String characteristicUuid = objectString(characteristicObject, "uuid");
+                int properties = objectInt(characteristicObject, "properties", 0);
+                int permissions = objectInt(characteristicObject, "permissions", 0);
+
+                BluetoothGattCharacteristic characteristic =
+                    new BluetoothGattCharacteristic(
+                        UUID.fromString(characteristicUuid),
+                        properties,
+                        permissions);
+
+                String initialValue = objectNullableString(characteristicObject, "value");
+                if (initialValue != null && !initialValue.isEmpty())
+                    characteristic.setValue(decodeBase64(initialValue));
+
+                Object[] descriptors = objectArray(characteristicObject, "descriptors");
+                for (Object descriptorObject : descriptors)
                 {
-                    JSONObject characteristicObject = characteristics.getJSONObject(i);
+                    if (descriptorObject == null)
+                        continue;
 
-                    BluetoothGattCharacteristic characteristic =
-                        new BluetoothGattCharacteristic(
-                            UUID.fromString(characteristicObject.getString("uuid")),
-                            characteristicObject.getInt("properties"),
-                            characteristicObject.getInt("permissions"));
-
-                    if (characteristicObject.has("value"))
-                        characteristic.setValue(
-                            decodeBase64(characteristicObject.getString("value")));
-
-                    JSONArray descriptors = characteristicObject.optJSONArray("descriptors");
-
-                    if (descriptors != null)
-                    {
-                        for (int d = 0; d < descriptors.length(); d++)
-                        {
-                            JSONObject descriptorObject = descriptors.getJSONObject(d);
-
-                            characteristic.addDescriptor(
-                                new BluetoothGattDescriptor(
-                                    UUID.fromString(descriptorObject.getString("uuid")),
-                                    BluetoothGattDescriptor.PERMISSION_READ |
-                                        BluetoothGattDescriptor.PERMISSION_WRITE));
-                        }
-                    }
-
-                    boolean supportsNotifyOrIndicate =
-                        (characteristic.getProperties() &
-                            (BluetoothGattCharacteristic.PROPERTY_NOTIFY |
-                                BluetoothGattCharacteristic.PROPERTY_INDICATE)) != 0;
-
-                    if (supportsNotifyOrIndicate &&
-                        characteristic.getDescriptor(CCCD_UUID) == null)
-                    {
-                        // Android requires an explicit CCCD for
-                        // notify/indicate to function - add one
-                        // automatically if the caller's JSON omitted it.
-                        characteristic.addDescriptor(
-                            new BluetoothGattDescriptor(
-                                CCCD_UUID,
-                                BluetoothGattDescriptor.PERMISSION_READ |
-                                    BluetoothGattDescriptor.PERMISSION_WRITE));
-                    }
-
-                    gattService.addCharacteristic(characteristic);
+                    String descriptorUuid = objectString(descriptorObject, "uuid");
+                    characteristic.addDescriptor(
+                        new BluetoothGattDescriptor(
+                            UUID.fromString(descriptorUuid),
+                            BluetoothGattDescriptor.PERMISSION_READ |
+                                BluetoothGattDescriptor.PERMISSION_WRITE));
                 }
+
+                boolean supportsNotifyOrIndicate =
+                    (properties &
+                        (BluetoothGattCharacteristic.PROPERTY_NOTIFY |
+                            BluetoothGattCharacteristic.PROPERTY_INDICATE)) != 0;
+
+                if (supportsNotifyOrIndicate &&
+                    characteristic.getDescriptor(CCCD_UUID) == null)
+                {
+                    characteristic.addDescriptor(
+                        new BluetoothGattDescriptor(
+                            CCCD_UUID,
+                            BluetoothGattDescriptor.PERMISSION_READ |
+                                BluetoothGattDescriptor.PERMISSION_WRITE));
+                }
+
+                gattService.addCharacteristic(characteristic);
             }
         }
         catch (Throwable throwable)
         {
             return result(
                 INVALID_ARGUMENT,
-                "Invalid service_json: " + throwableMessage(throwable));
+                "Invalid service definition: " + throwableMessage(throwable));
         }
 
         synchronized (leServerAddServiceLock)
@@ -4108,6 +4300,23 @@ public class GMBluetooth extends GMBluetoothInternal
         }
 
         bondReceiverRegistered = false;
+    }
+
+
+    @Override
+    public boolean bluetooth_pairing_is_supported(long device)
+    {
+        if (!initialized || adapter == null)
+            return false;
+
+        DeviceEntry entry = copyDevice(device);
+        if (entry == null)
+            return false;
+
+        // Android exposes explicit bonding through BluetoothDevice.createBond()
+        // for both Classic and BLE devices.
+        return entry.androidDevice != null ||
+            (entry.address != null && !entry.address.isEmpty());
     }
 
 
@@ -5294,6 +5503,24 @@ public class GMBluetooth extends GMBluetoothInternal
     // =========================================================================
     // Callback registration
     // =========================================================================
+
+    @Override
+    public boolean bluetooth_set_callback_state_changed(GMFunction callback)
+    {
+        callbackStateChanged = callback;
+        ensureStateReceiver();
+        invoke(callbackStateChanged, currentBluetoothState());
+        return true;
+    }
+
+
+    @Override
+    public boolean bluetooth_remove_callback_state_changed()
+    {
+        callbackStateChanged = null;
+        return true;
+    }
+
 
     @Override
     public boolean bluetooth_set_callback_device_found(

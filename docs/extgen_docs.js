@@ -34,6 +34,18 @@
  */
 
 /**
+ * @function_partial bluetooth_le_advertise_is_supported
+ * @returns {Bool}
+ * @function_end
+ */
+
+/**
+ * @function_partial bluetooth_le_server_is_supported
+ * @returns {Bool}
+ * @function_end
+ */
+
+/**
  * @function_partial bluetooth_classic_is_supported
  * @returns {Bool}
  * @function_end
@@ -274,6 +286,13 @@
 
 /**
  * @function_partial bluetooth_classic_discoverable_is_running
+ * @returns {Bool}
+ * @function_end
+ */
+
+/**
+ * @function_partial bluetooth_pairing_is_supported
+ * @param {Real} device
  * @returns {Bool}
  * @function_end
  */
@@ -535,7 +554,7 @@
 
 /**
  * @function_partial bluetooth_le_server_add_service
- * @param {String} service_json
+ * @param {Struct.BluetoothLeServiceDefinition} service
  * @param {Function} callback
  * @returns {Real}
  * @function_end
@@ -585,6 +604,19 @@
  * @param {Real} offset
  * @param {Real} size
  * @returns {Real}
+ * @function_end
+ */
+
+/**
+ * @function_partial bluetooth_set_callback_state_changed
+ * @param {Function} callback
+ * @returns {Bool}
+ * @function_end
+ */
+
+/**
+ * @function_partial bluetooth_remove_callback_state_changed
+ * @returns {Bool}
  * @function_end
  */
 
@@ -719,6 +751,29 @@
  */
 
 /**
+ * @struct_partial BluetoothLeDescriptorDefinition
+ * @member {String} uuid
+ * @struct_end
+ */
+
+/**
+ * @struct_partial BluetoothLeCharacteristicDefinition
+ * @member {String} uuid
+ * @member {Real} properties
+ * @member {Real} permissions
+ * @member {String} [value]
+ * @member {Array[Struct.BluetoothLeDescriptorDefinition]} descriptors
+ * @struct_end
+ */
+
+/**
+ * @struct_partial BluetoothLeServiceDefinition
+ * @member {String} uuid
+ * @member {Array[Struct.BluetoothLeCharacteristicDefinition]} characteristics
+ * @struct_end
+ */
+
+/**
  * @enum_partial BluetoothError
  * @member Ok
  * @member Unknown
@@ -758,6 +813,31 @@
  * @member Unsubscribe
  * @member Notify
  * @member Indicate
+ * @enum_end
+ */
+
+/**
+ * @enum_partial BluetoothLeCharacteristicProperty
+ * @member None
+ * @member Broadcast
+ * @member Read
+ * @member WriteWithoutResponse
+ * @member Write
+ * @member Notify
+ * @member Indicate
+ * @member AuthenticatedSignedWrites
+ * @member ExtendedProperties
+ * @enum_end
+ */
+
+/**
+ * @enum_partial BluetoothState
+ * @member Unknown
+ * @member Resetting
+ * @member Unsupported
+ * @member Unauthorized
+ * @member PoweredOff
+ * @member PoweredOn
  * @enum_end
  */
 

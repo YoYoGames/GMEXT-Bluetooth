@@ -54,20 +54,139 @@ namespace gm_enums
         Indicate = 2
     };
 
+    enum class BluetoothLeCharacteristicProperty : std::int32_t
+    {
+        None = 0,
+        Broadcast = 1,
+        Read = 2,
+        WriteWithoutResponse = 4,
+        Write = 8,
+        Notify = 16,
+        Indicate = 32,
+        AuthenticatedSignedWrites = 64,
+        ExtendedProperties = 128
+    };
+
+    enum class BluetoothState : std::int32_t
+    {
+        Unknown = 0,
+        Resetting = 1,
+        Unsupported = 2,
+        Unauthorized = 3,
+        PoweredOff = 4,
+        PoweredOn = 5
+    };
+
 }
 
 
 namespace gm_structs
 {
+    struct BluetoothLeDescriptorDefinition;
+    struct BluetoothLeCharacteristicDefinition;
+    struct BluetoothLeServiceDefinition;
+
+    struct BluetoothLeDescriptorDefinition
+    {
+        std::string uuid;
+    };
+
+    struct BluetoothLeCharacteristicDefinition
+    {
+        std::string uuid;
+        std::int32_t properties;
+        std::int32_t permissions;
+        std::optional<std::string> value;
+        std::vector<gm_structs::BluetoothLeDescriptorDefinition> descriptors;
+    };
+
+    struct BluetoothLeServiceDefinition
+    {
+        std::string uuid;
+        std::vector<gm_structs::BluetoothLeCharacteristicDefinition> characteristics;
+    };
 
 }
 
 namespace gm::wire::codec
 {
+    template<>
+    inline void writeValue<gm_structs::BluetoothLeDescriptorDefinition>(gm::byteio::IByteWriter& _buf, const gm_structs::BluetoothLeDescriptorDefinition& obj)
+    {
+        gm::wire::codec::writeValue(_buf, obj.uuid);
+    }
+
+    template<>
+    inline gm_structs::BluetoothLeDescriptorDefinition readValue<gm_structs::BluetoothLeDescriptorDefinition>(gm::byteio::BufferReader& _buf)
+    {
+        gm_structs::BluetoothLeDescriptorDefinition obj;
+        obj.uuid = gm::wire::codec::readValue<std::string>(_buf);
+        return obj;
+    }
+
+    template<>
+    inline void writeValue<gm_structs::BluetoothLeCharacteristicDefinition>(gm::byteio::IByteWriter& _buf, const gm_structs::BluetoothLeCharacteristicDefinition& obj)
+    {
+        gm::wire::codec::writeValue(_buf, obj.uuid);
+        gm::wire::codec::writeValue(_buf, obj.properties);
+        gm::wire::codec::writeValue(_buf, obj.permissions);
+        gm::wire::codec::writeValue(_buf, obj.value);
+        gm::wire::codec::writeValue(_buf, obj.descriptors);
+    }
+
+    template<>
+    inline gm_structs::BluetoothLeCharacteristicDefinition readValue<gm_structs::BluetoothLeCharacteristicDefinition>(gm::byteio::BufferReader& _buf)
+    {
+        gm_structs::BluetoothLeCharacteristicDefinition obj;
+        obj.uuid = gm::wire::codec::readValue<std::string>(_buf);
+        obj.properties = gm::wire::codec::readValue<std::int32_t>(_buf);
+        obj.permissions = gm::wire::codec::readValue<std::int32_t>(_buf);
+        obj.value = gm::wire::codec::readOptional<std::string>(_buf);
+        obj.descriptors = gm::wire::codec::readVector<gm_structs::BluetoothLeDescriptorDefinition>(_buf);
+        return obj;
+    }
+
+    template<>
+    inline void writeValue<gm_structs::BluetoothLeServiceDefinition>(gm::byteio::IByteWriter& _buf, const gm_structs::BluetoothLeServiceDefinition& obj)
+    {
+        gm::wire::codec::writeValue(_buf, obj.uuid);
+        gm::wire::codec::writeValue(_buf, obj.characteristics);
+    }
+
+    template<>
+    inline gm_structs::BluetoothLeServiceDefinition readValue<gm_structs::BluetoothLeServiceDefinition>(gm::byteio::BufferReader& _buf)
+    {
+        gm_structs::BluetoothLeServiceDefinition obj;
+        obj.uuid = gm::wire::codec::readValue<std::string>(_buf);
+        obj.characteristics = gm::wire::codec::readVector<gm_structs::BluetoothLeCharacteristicDefinition>(_buf);
+        return obj;
+    }
+
 }
 
 namespace gm::wire::details
 {
+    template<>
+    struct gm_struct_traits<gm_structs::BluetoothLeDescriptorDefinition>
+    {
+        static constexpr bool is_gm_struct = true;
+        static constexpr std::uint32_t codec_id = 0;
+    };
+
+    template<>
+    struct gm_struct_traits<gm_structs::BluetoothLeCharacteristicDefinition>
+    {
+        static constexpr bool is_gm_struct = true;
+        static constexpr std::uint32_t codec_id = 1;
+    };
+
+    template<>
+    struct gm_struct_traits<gm_structs::BluetoothLeServiceDefinition>
+    {
+        static constexpr bool is_gm_struct = true;
+        static constexpr std::uint32_t codec_id = 2;
+    };
+
 }
 
 bool bluetooth_initialize();
@@ -76,6 +195,8 @@ bool bluetooth_is_initialized();
 std::int32_t bluetooth_last_error_code();
 std::string bluetooth_last_error_message();
 bool bluetooth_le_is_supported();
+bool bluetooth_le_advertise_is_supported();
+bool bluetooth_le_server_is_supported();
 bool bluetooth_classic_is_supported();
 bool bluetooth_classic_server_is_supported();
 std::int32_t bluetooth_permission_get_status();
@@ -112,6 +233,7 @@ bool bluetooth_classic_server_is_running();
 std::int32_t bluetooth_classic_discoverable_start(std::int32_t duration_seconds);
 std::int32_t bluetooth_classic_discoverable_stop();
 bool bluetooth_classic_discoverable_is_running();
+bool bluetooth_pairing_is_supported(std::uint64_t device);
 std::int32_t bluetooth_pair(std::uint64_t device, const gm::wire::GMFunction& callback);
 bool bluetooth_device_is_paired(std::uint64_t device);
 std::uint64_t bluetooth_le_connect(std::uint64_t device, const gm::wire::GMFunction& callback);
@@ -145,12 +267,14 @@ bool bluetooth_le_advertise_is_running();
 std::int32_t bluetooth_le_server_start();
 std::int32_t bluetooth_le_server_stop();
 bool bluetooth_le_server_is_running();
-std::int32_t bluetooth_le_server_add_service(std::string_view service_json, const gm::wire::GMFunction& callback);
+std::int32_t bluetooth_le_server_add_service(const gm_structs::BluetoothLeServiceDefinition& service, const gm::wire::GMFunction& callback);
 std::int32_t bluetooth_le_server_clear_services();
 std::int32_t bluetooth_le_server_respond_read(std::int32_t request_id, std::int32_t error_code, gm::wire::GMBuffer data, std::uint32_t offset, std::uint32_t size);
 std::int32_t bluetooth_le_server_respond_write(std::int32_t request_id, std::int32_t error_code);
 std::int32_t bluetooth_le_server_write_request_get_value(std::int32_t request_id, gm::wire::GMBuffer out_data, std::uint32_t offset, std::uint32_t max_size);
 std::int32_t bluetooth_le_server_notify_value(std::string_view service_uuid, std::string_view characteristic_uuid, std::uint64_t connection, gm::wire::GMBuffer data, std::uint32_t offset, std::uint32_t size);
+bool bluetooth_set_callback_state_changed(const gm::wire::GMFunction& callback);
+bool bluetooth_remove_callback_state_changed();
 bool bluetooth_set_callback_device_found(const gm::wire::GMFunction& callback);
 bool bluetooth_remove_callback_device_found();
 bool bluetooth_set_callback_scan_stopped(const gm::wire::GMFunction& callback);

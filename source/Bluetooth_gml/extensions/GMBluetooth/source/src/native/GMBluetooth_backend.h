@@ -108,6 +108,20 @@ namespace gmbluetooth
         virtual bool supports_classic() const = 0;
         virtual bool supports_classic_server() const { return false; }
 
+        virtual bool pairing_is_supported(const DiscoveredDevice& device) const
+        {
+            (void)device;
+            return false;
+        }
+
+        // BluetoothState raw values from spec.gmidl. Backends that can observe
+        // adapter/manager state should override this and emit
+        // bluetooth_state_changed LeEvent events on subsequent transitions.
+        virtual std::int32_t current_bluetooth_state() const
+        {
+            return 0; // BluetoothState.Unknown
+        }
+
         virtual PermissionStatus permission_status() const
         {
             return PermissionStatus::Granted;

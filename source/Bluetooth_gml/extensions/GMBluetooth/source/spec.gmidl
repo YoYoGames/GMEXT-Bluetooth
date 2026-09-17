@@ -44,6 +44,76 @@ enum BluetoothLeSubscribeMode : int32 {
     Indicate    = 2
 }
 
+/// Cross-platform GATT characteristic-property bitmask. Raw numeric values are
+/// used intentionally. Values through ExtendedProperties are shared by Android
+/// BluetoothGattCharacteristic, Apple CoreBluetooth, and Windows GATT.
+[global, bind = typed_gml]
+enum BluetoothLeCharacteristicProperty : int32 {
+    None                      = 0,
+    Broadcast                 = 1,
+    Read                      = 2,
+    WriteWithoutResponse      = 4,
+    Write                     = 8,
+    Notify                    = 16,
+    Indicate                  = 32,
+    AuthenticatedSignedWrites = 64,
+    ExtendedProperties        = 128
+}
+
+/// Normalized local Bluetooth adapter/manager state.
+[global, bind = typed_gml]
+enum BluetoothState : int32 {
+    Unknown      = 0,
+    Resetting    = 1,
+    Unsupported  = 2,
+    Unauthorized = 3,
+    PoweredOff   = 4,
+    PoweredOn    = 5
+}
+
+// =============================================================================
+// BLE GATT server definitions
+// =============================================================================
+
+/// Descriptor definition used by BluetoothLeCharacteristicDefinition.
+[global]
+class `[[BluetoothLeDescriptorDefinition]]` prototype Object {
+    [field]
+    property uuid : string { get; set; }
+}
+
+/// Characteristic definition used by BluetoothLeServiceDefinition.
+/// properties is a BluetoothLeCharacteristicProperty bitmask.
+/// permissions remains the existing integer permission bitmask for now.
+/// value is optional base64-encoded initial characteristic data.
+[global]
+class `[[BluetoothLeCharacteristicDefinition]]` prototype Object {
+    [field]
+    property uuid : string { get; set; }
+
+    [field]
+    property properties : int32 { get; set; }
+
+    [field]
+    property permissions : int32 { get; set; }
+
+    [field, type_hint=`string?`]
+    property value : gmval { get; set; }
+
+    [field, type_hint=`BluetoothLeDescriptorDefinition[]`]
+    property descriptors : gmval { get; set; }
+}
+
+/// Complete primary local GATT service definition.
+[global]
+class `[[BluetoothLeServiceDefinition]]` prototype Object {
+    [field]
+    property uuid : string { get; set; }
+
+    [field, type_hint=`BluetoothLeCharacteristicDefinition[]`]
+    property characteristics : gmval { get; set; }
+}
+
 // =============================================================================
 // Lifecycle / event pump
 // =============================================================================
@@ -74,6 +144,12 @@ function bluetooth_last_error_message(): string;
 
 [global, bind = typed_gml]
 function bluetooth_le_is_supported(): bool;
+
+[global, bind = typed_gml]
+function bluetooth_le_advertise_is_supported(): bool;
+
+[global, bind = typed_gml]
+function bluetooth_le_server_is_supported(): bool;
 
 [global, bind = typed_gml]
 function bluetooth_classic_is_supported(): bool;
@@ -264,6 +340,12 @@ function bluetooth_classic_discoverable_is_running(): bool;
 // Bluetooth pairing (bonding)
 // =====================================================================
 
+/// Whether this extension can explicitly initiate OS-level pairing for the
+/// supplied device. This is device/transport-specific rather than a single
+/// platform capability. Apple BLE pairing is implicit and therefore reports false.
+[global, bind = typed_gml]
+function bluetooth_pairing_is_supported([type_hint=`uint64`] device: gmval): bool;
+
 /// Attempts to pair (bond) with the given device at the OS level. This is separate from
 /// bluetooth_classic_connect/bluetooth_le_connect: some connections only succeed once the
 /// two devices are paired, and once paired the OS remembers the relationship across app runs.
@@ -272,7 +354,7 @@ function bluetooth_classic_discoverable_is_running(): bool;
 /// callback(error_code, message, device).
 /// Android: works uniformly for Classic and LE devices, via BluetoothDevice.createBond().
 /// Windows: Classic only, via BluetoothAuthenticateDeviceEx. Returns NotSupported for LE
-///   devices (this extension has no Windows BLE connect support at all yet).
+///   devices.
 /// macOS: Classic only, via IOBluetoothDevicePair. Returns NotSupported for LE devices -
 ///   BLE bonding on Apple platforms happens implicitly when a protected characteristic is
 ///   accessed and cannot be triggered explicitly.
@@ -374,7 +456,7 @@ function bluetooth_le_characteristic_get_uuid(
     [type_hint=`uint64`] characteristic: gmval
 ): string;
 
-/// Bitmask matching CBCharacteristicProperties / BluetoothGattCharacteristic PROPERTY_*.
+/// Returns a BluetoothLeCharacteristicProperty bitmask.
 [global, bind = typed_gml]
 function bluetooth_le_characteristic_get_properties(
     [type_hint=`uint64`] characteristic: gmval
@@ -501,15 +583,11 @@ function bluetooth_le_server_stop(): int32;
 [global, bind = typed_gml]
 function bluetooth_le_server_is_running(): bool;
 
-/// service_json schema:
-/// { "uuid": string,
-///   "characteristics": [ { "uuid": string, "properties": int, "permissions": int,
-///                          "value": base64?,
-///                          "descriptors": [ { "uuid": string } ] } ] }
+/// Adds a typed primary GATT service definition to the local peripheral/server.
 /// callback(error_code, message)
 [global, bind = typed_gml]
 function bluetooth_le_server_add_service(
-    service_json: string,
+    [type_hint=`BluetoothLeServiceDefinition`] service: gmval,
     callback: func
 ): int32;
 
@@ -556,6 +634,15 @@ function bluetooth_le_server_notify_value(
 // =============================================================================
 // Callbacks
 // =============================================================================
+
+/// callback(state) where state is BluetoothState. Fired whenever the local
+/// Bluetooth adapter/manager changes state. Implementations should also deliver
+/// the current known state after callback registration.
+[global, bind = typed_gml]
+function bluetooth_set_callback_state_changed(callback: func): bool;
+
+[global, bind = typed_gml]
+function bluetooth_remove_callback_state_changed(): bool;
 
 /// callback(device)
 /// Used by both BLE and Classic discovery. Inspect bluetooth_device_get_transport().

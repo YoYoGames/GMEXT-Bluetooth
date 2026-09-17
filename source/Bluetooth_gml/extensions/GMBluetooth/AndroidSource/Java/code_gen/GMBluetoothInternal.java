@@ -7,6 +7,8 @@ import java.util.*;
 import ${YYAndroidPackageName}.GMExtWire;
 import ${YYAndroidPackageName}.GMExtWire.GMFunction;
 import ${YYAndroidPackageName}.GMExtWire.GMValue;
+import ${YYAndroidPackageName}.records.*;
+import ${YYAndroidPackageName}.codecs.*;
 import ${YYAndroidPackageName}.enums.*;
 
 public abstract class GMBluetoothInternal extends RunnerSocial implements GMBluetoothInterface {
@@ -57,6 +59,18 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
     public double __EXT_NATIVE__bluetooth_le_is_supported()
     {
         boolean __result = bluetooth_le_is_supported();
+        return __result ? 1.0 : 0.0;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_advertise_is_supported()
+    {
+        boolean __result = bluetooth_le_advertise_is_supported();
+        return __result ? 1.0 : 0.0;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_server_is_supported()
+    {
+        boolean __result = bluetooth_le_server_is_supported();
         return __result ? 1.0 : 0.0;
     }
 
@@ -400,6 +414,17 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
     public double __EXT_NATIVE__bluetooth_classic_discoverable_is_running()
     {
         boolean __result = bluetooth_classic_discoverable_is_running();
+        return __result ? 1.0 : 0.0;
+    }
+
+    public double __EXT_NATIVE__bluetooth_pairing_is_supported(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: device, type: UInt64
+        long device = GMExtWire.readI64(__arg_buffer);
+
+        boolean __result = bluetooth_pairing_is_supported(device);
         return __result ? 1.0 : 0.0;
     }
 
@@ -862,13 +887,13 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
     {
         GMExtWire.order(__arg_buffer);
 
-        // field: service_json, type: String
-        String service_json = GMExtWire.readString(__arg_buffer);
+        // field: service, type: struct BluetoothLeServiceDefinition
+        BluetoothLeServiceDefinition service = BluetoothLeServiceDefinitionCodec.read(__arg_buffer);
 
         // field: callback, type: Function
         GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
 
-        int __result = bluetooth_le_server_add_service(service_json, callback);
+        int __result = bluetooth_le_server_add_service(service, callback);
         return (double)__result;
     }
 
@@ -951,6 +976,23 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
 
         int __result = bluetooth_le_server_notify_value(service_uuid, characteristic_uuid, connection, data, offset, size);
         return (double)__result;
+    }
+
+    public double __EXT_NATIVE__bluetooth_set_callback_state_changed(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: callback, type: Function
+        GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
+
+        boolean __result = bluetooth_set_callback_state_changed(callback);
+        return __result ? 1.0 : 0.0;
+    }
+
+    public double __EXT_NATIVE__bluetooth_remove_callback_state_changed()
+    {
+        boolean __result = bluetooth_remove_callback_state_changed();
+        return __result ? 1.0 : 0.0;
     }
 
     public double __EXT_NATIVE__bluetooth_set_callback_device_found(ByteBuffer __arg_buffer, double __arg_buffer_length)

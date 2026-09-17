@@ -63,6 +63,18 @@ GMEXPORT double __EXT_NATIVE__bluetooth_le_is_supported()
     return static_cast<double>(__result);
 }
 
+GMEXPORT double __EXT_NATIVE__bluetooth_le_advertise_is_supported()
+{
+    auto&& __result = bluetooth_le_advertise_is_supported();
+    return static_cast<double>(__result);
+}
+
+GMEXPORT double __EXT_NATIVE__bluetooth_le_server_is_supported()
+{
+    auto&& __result = bluetooth_le_server_is_supported();
+    return static_cast<double>(__result);
+}
+
 GMEXPORT double __EXT_NATIVE__bluetooth_classic_is_supported()
 {
     auto&& __result = bluetooth_classic_is_supported();
@@ -402,6 +414,17 @@ GMEXPORT double __EXT_NATIVE__bluetooth_classic_discoverable_stop()
 GMEXPORT double __EXT_NATIVE__bluetooth_classic_discoverable_is_running()
 {
     auto&& __result = bluetooth_classic_discoverable_is_running();
+    return static_cast<double>(__result);
+}
+
+GMEXPORT double __EXT_NATIVE__bluetooth_pairing_is_supported(char* __arg_buffer, double __arg_buffer_length)
+{
+    gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};
+
+    // field: device, type: UInt64
+    std::uint64_t device = gm::wire::codec::readValue<std::uint64_t>(__br);
+
+    auto&& __result = bluetooth_pairing_is_supported(device);
     return static_cast<double>(__result);
 }
 
@@ -861,13 +884,13 @@ GMEXPORT double __EXT_NATIVE__bluetooth_le_server_add_service(char* __arg_buffer
 {
     gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};
 
-    // field: service_json, type: String
-    std::string_view service_json = gm::wire::codec::readValue<std::string_view>(__br);
+    // field: service, type: struct BluetoothLeServiceDefinition
+    gm_structs::BluetoothLeServiceDefinition service = gm::wire::codec::readValue<gm_structs::BluetoothLeServiceDefinition>(__br);
 
     // field: callback, type: Function
     gm::wire::GMFunction callback = gm::wire::codec::readFunction(__br, &__dispatch_queue);
 
-    auto&& __result = bluetooth_le_server_add_service(service_json, callback);
+    auto&& __result = bluetooth_le_server_add_service(service, callback);
     return static_cast<double>(__result);
 }
 
@@ -952,6 +975,23 @@ GMEXPORT double __EXT_NATIVE__bluetooth_le_server_notify_value(char* __arg_buffe
     std::uint32_t size = gm::wire::codec::readValue<std::uint32_t>(__br);
 
     auto&& __result = bluetooth_le_server_notify_value(service_uuid, characteristic_uuid, connection, data, offset, size);
+    return static_cast<double>(__result);
+}
+
+GMEXPORT double __EXT_NATIVE__bluetooth_set_callback_state_changed(char* __arg_buffer, double __arg_buffer_length)
+{
+    gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};
+
+    // field: callback, type: Function
+    gm::wire::GMFunction callback = gm::wire::codec::readFunction(__br, &__dispatch_queue);
+
+    auto&& __result = bluetooth_set_callback_state_changed(callback);
+    return static_cast<double>(__result);
+}
+
+GMEXPORT double __EXT_NATIVE__bluetooth_remove_callback_state_changed()
+{
+    auto&& __result = bluetooth_remove_callback_state_changed();
     return static_cast<double>(__result);
 }
 
