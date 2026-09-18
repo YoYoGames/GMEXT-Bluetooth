@@ -722,7 +722,10 @@ public class GMBluetooth extends GMBluetoothInternal
     private boolean hasScanPermission()
     {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-            return hasPermission(Manifest.permission.BLUETOOTH_SCAN);
+        {
+            return hasPermission(Manifest.permission.ACCESS_FINE_LOCATION) &&
+                   hasPermission(Manifest.permission.BLUETOOTH_SCAN);
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
             return hasPermission(Manifest.permission.ACCESS_FINE_LOCATION);
@@ -1539,7 +1542,9 @@ public class GMBluetooth extends GMBluetoothInternal
         if (!initialized)
             return PERMISSION_UNKNOWN;
 
-        return hasScanPermission() && hasConnectPermission()
+        return hasScanPermission() &&
+               hasConnectPermission() &&
+               hasAdvertisePermission()
             ? PERMISSION_GRANTED
             : PERMISSION_DENIED_STATUS;
     }
@@ -1569,8 +1574,10 @@ public class GMBluetooth extends GMBluetoothInternal
             {
                 current.requestPermissions(
                     new String[] {
+                        Manifest.permission.ACCESS_FINE_LOCATION,
                         Manifest.permission.BLUETOOTH_SCAN,
-                        Manifest.permission.BLUETOOTH_CONNECT
+                        Manifest.permission.BLUETOOTH_CONNECT,
+                        Manifest.permission.BLUETOOTH_ADVERTISE
                     },
                     REQUEST_CODE_BLUETOOTH);
             }
@@ -3700,6 +3707,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
         final BluetoothGattService gattService;
         final String serviceUuid;
+        final String serviceKey;
 
         try
         {
@@ -3707,8 +3715,11 @@ public class GMBluetooth extends GMBluetoothInternal
             if (serviceUuid == null || serviceUuid.isEmpty())
                 return result(INVALID_ARGUMENT, "service.uuid cannot be empty");
 
+            UUID parsedServiceUuid = UUID.fromString(serviceUuid);
+            serviceKey = parsedServiceUuid.toString();
+
             gattService = new BluetoothGattService(
-                UUID.fromString(serviceUuid),
+                parsedServiceUuid,
                 BluetoothGattService.SERVICE_TYPE_PRIMARY);
 
             Object[] characteristics = objectArray(service, "characteristics");
@@ -3772,7 +3783,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
         synchronized (leServerAddServiceLock)
         {
-            leServerAddServiceCallbacks.put(serviceUuid, callback);
+            leServerAddServiceCallbacks.put(serviceKey, callback);
         }
 
         try
@@ -3783,7 +3794,7 @@ public class GMBluetooth extends GMBluetoothInternal
             {
                 synchronized (leServerAddServiceLock)
                 {
-                    leServerAddServiceCallbacks.remove(serviceUuid);
+                    leServerAddServiceCallbacks.remove(serviceKey);
                 }
 
                 return result(OPERATION_FAILED, "addService() failed to start");
@@ -3793,7 +3804,7 @@ public class GMBluetooth extends GMBluetoothInternal
         {
             synchronized (leServerAddServiceLock)
             {
-                leServerAddServiceCallbacks.remove(serviceUuid);
+                leServerAddServiceCallbacks.remove(serviceKey);
             }
 
             return result(OPERATION_FAILED, throwableMessage(throwable));

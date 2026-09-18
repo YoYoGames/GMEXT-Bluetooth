@@ -1,3 +1,4 @@
+
 show_debug_message("========== BLUETOOTH LE CLIENT (DEMO) ==========");
 
 bt_ready = bluetooth_is_initialized();
@@ -56,6 +57,10 @@ bluetooth_set_callback_device_found(function(_device)
 {
     // The public discovery callback is shared by BLE and Classic.
     if (bluetooth_device_get_transport(_device) != BluetoothTransport.LowEnergy) return;
+	
+	//Let's filter devices without name...
+	if(bluetooth_device_get_name(_device) == "")
+		return;
 
     instance_create_depth(_x, _y, 0, obj_bt_le_device, {device: _device});
     _y += 100;
