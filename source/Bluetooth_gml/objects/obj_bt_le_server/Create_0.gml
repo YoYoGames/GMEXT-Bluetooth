@@ -8,6 +8,13 @@ permission_request_sent = false;
 global.ble_server_conn = 0;
 global.ble_server_conn_inst = noone;
 
+server_info_text = "GMBluetooth BLE Demo - READ characteristic OK";
+info_version = 0;
+notify_counter = 0;
+last_rx_text = "-";
+last_notify_text = "-";
+control_buttons = [];
+
 if (!bt_ready)
 {
     show_debug_message("[GML] Bluetooth is not initialized");
@@ -35,6 +42,69 @@ if (!bluetooth_le_advertise_is_supported())
     show_debug_message("[GML] Bluetooth LE advertising is not supported on this platform");
     exit;
 }
+
+function bytes_to_string(_buf, _n)
+{
+    var _s = "";
+    for (var i = 0; i < _n; i++)
+    {
+        _s += chr(buffer_peek(_buf, i, buffer_u8));
+    }
+    return _s;
+}
+
+change_info_value = function()
+{
+    info_version++;
+    server_info_text = "GMBluetooth BLE Demo INFO #" + string(info_version);
+    show_debug_message("[GML] INFO value changed: " + server_info_text);
+
+    if (instance_exists(global.ble_server_conn_inst))
+    {
+        global.ble_server_conn_inst.log_msg("INFO changed: " + server_info_text);
+    }
+};
+
+send_demo_notification = function()
+{
+    // A connection handle of 0 means broadcast to current subscribers.
+    // This is required on platforms such as Windows where the local GATT
+    // server does not expose a per-peer connection handle to the GML layer.
+    notify_counter++;
+    var _text = "Hello from BLE server #" + string(notify_counter);
+    var _buf = buffer_create(string_byte_length(_text) + 1, buffer_grow, 1);
+    buffer_write(_buf, buffer_text, _text);
+    var _size = buffer_tell(_buf);
+
+    var _r = bluetooth_le_server_notify_value(
+        DEMO_SERVICE_UUID,
+        DEMO_CHAR_TX_UUID,
+        0,
+        _buf,
+        0,
+        _size
+    );
+
+    buffer_delete(_buf);
+
+    if (_r == BluetoothError.Ok)
+    {
+        last_notify_text = _text;
+        if (instance_exists(global.ble_server_conn_inst))
+        {
+            global.ble_server_conn_inst.log_msg("TX notify: " + _text);
+        }
+    }
+    else
+    {
+        var _message = bluetooth_last_error_message();
+        show_debug_message("[GML] NOTIFY failed: " + _message);
+        if (instance_exists(global.ble_server_conn_inst))
+        {
+            global.ble_server_conn_inst.log_msg("notify failed: " + _message);
+        }
+    }
+};
 
 bluetooth_set_callback_le_server_connection_state_changed(
     function(_connection, _connected, _device)
@@ -99,13 +169,18 @@ bluetooth_set_callback_le_server_write_request(
 
         show_debug_message("[GML] LE WRITE bytes received: " + string(_n));
 
-        if (_n > 0 && instance_exists(global.ble_server_conn_inst))
+        if (_n > 0)
         {
-            global.ble_server_conn_inst.on_receive(
-                _characteristic_uuid,
-                _buf,
-                _n
-            );
+            last_rx_text = bytes_to_string(_buf, _n);
+
+            if (instance_exists(global.ble_server_conn_inst))
+            {
+                global.ble_server_conn_inst.on_receive(
+                    _characteristic_uuid,
+                    _buf,
+                    _n
+                );
+            }
         }
 
         buffer_delete(_buf);
@@ -149,8 +224,8 @@ bluetooth_set_callback_le_server_read_request(
             exit;
         }
 
-        var _info_text = "GMBluetooth BLE Demo - READ characteristic OK";
-        var _buf = buffer_create(128, buffer_grow, 1);
+        var _info_text = server_info_text;
+        var _buf = buffer_create(256, buffer_grow, 1);
         buffer_seek(_buf, buffer_seek_start, 0);
         buffer_write(_buf, buffer_text, _info_text);
 
@@ -308,5 +383,19 @@ start_le_server_demo = function()
         );
     }
 };
+
+array_push(control_buttons, instance_create_depth(760, 300, 0, obj_bt_le_char_button, {
+    owner: id,
+    row: noone,
+    characteristic: 0,
+    action: "server_info"
+}));
+
+array_push(control_buttons, instance_create_depth(1010, 300, 0, obj_bt_le_char_button, {
+    owner: id,
+    row: noone,
+    characteristic: 0,
+    action: "server_notify"
+}));
 
 start_le_server_demo();

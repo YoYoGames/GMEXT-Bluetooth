@@ -1,3 +1,8 @@
+for (var i = 0; i < array_length(control_buttons); i++)
+{
+    if (instance_exists(control_buttons[i])) instance_destroy(control_buttons[i]);
+}
+
 if (!bt_ready) exit;
 
 if (bluetooth_le_advertise_is_running())

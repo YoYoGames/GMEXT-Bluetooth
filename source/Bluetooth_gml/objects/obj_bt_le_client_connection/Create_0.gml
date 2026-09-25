@@ -3,7 +3,9 @@
 rows = [];
 buttons = [];
 log_lines = [];
-next_row_y = 220;
+next_row_y = 250;
+discovery_in_progress = false;
+discover_button = noone;
 
 function log_msg(_s)
 {
@@ -20,6 +22,23 @@ function bytes_to_string(_buf, _n)
         _s += chr(buffer_peek(_buf, i, buffer_u8));
     }
     return _s;
+}
+
+function clear_gatt_ui()
+{
+    for (var i = 0; i < array_length(rows); i++)
+    {
+        if (instance_exists(rows[i])) instance_destroy(rows[i]);
+    }
+
+    for (var i = 0; i < array_length(buttons); i++)
+    {
+        if (instance_exists(buttons[i])) instance_destroy(buttons[i]);
+    }
+
+    rows = [];
+    buttons = [];
+    next_row_y = 250;
 }
 
 function property_names(_properties)
@@ -67,14 +86,14 @@ function add_characteristic_row(_characteristic, _service_uuid)
         + " (" + string(_properties) + ")"
     );
 
-    var _row = instance_create_depth(16, _y, 0, obj_bt_le_characteristic, {
+    var _row = instance_create_depth(650, _y, 0, obj_bt_le_characteristic, {
         characteristic: _characteristic,
         service_uuid: _service_uuid,
         properties: _properties
     });
     array_push(rows, _row);
 
-    var _bx = 500;
+    var _bx = 1040;
 
     if (_properties & BluetoothLeCharacteristicProperty.Read)
     {
@@ -175,7 +194,11 @@ function discover_characteristics(_service)
                 + string(_error_code) + " " + _message
             );
 
-            if (_error_code != BluetoothError.Ok) return;
+            if (_error_code != BluetoothError.Ok)
+            {
+                conn.discovery_in_progress = false;
+                return;
+            }
 
             var _char_count = bluetooth_le_characteristic_get_count(_service);
             conn.log_msg("characteristics found: " + string(_char_count));
@@ -191,17 +214,24 @@ function discover_characteristics(_service)
 
                 conn.add_characteristic_row(_characteristic, uuid);
             }
+
+            conn.discovery_in_progress = false;
         })
     );
 
     if (_r != BluetoothError.Ok)
     {
+        discovery_in_progress = false;
         log_msg("characteristics_discover failed to start: " + bluetooth_last_error_message());
     }
 }
 
 function discover_all()
 {
+    if (discovery_in_progress) return;
+
+    clear_gatt_ui();
+    discovery_in_progress = true;
     log_msg("discovering services...");
 
     var _r = bluetooth_le_services_discover(
@@ -211,7 +241,11 @@ function discover_all()
             if (!instance_exists(id)) return;
 
             log_msg("services: " + string(_error_code) + " " + _message);
-            if (_error_code != BluetoothError.Ok) return;
+            if (_error_code != BluetoothError.Ok)
+            {
+                discovery_in_progress = false;
+                return;
+            }
 
             var _service_count = bluetooth_le_service_get_count(connection);
             log_msg("services found: " + string(_service_count));
@@ -233,6 +267,7 @@ function discover_all()
             if (_demo_service == 0)
             {
                 log_msg("demo service not found: " + DEMO_SERVICE_UUID);
+                discovery_in_progress = false;
                 return;
             }
 
@@ -243,6 +278,7 @@ function discover_all()
 
     if (_r != BluetoothError.Ok)
     {
+        discovery_in_progress = false;
         log_msg("services_discover failed to start: " + bluetooth_last_error_message());
     }
 }
@@ -270,4 +306,11 @@ on_value_changed = function(_characteristic, _connection)
 };
 
 log_msg("connected handle=" + string(connection));
-discover_all();
+log_msg("press DISCOVER GATT to find the demo service");
+
+discover_button = instance_create_depth(760, 170, 0, obj_bt_le_char_button, {
+    owner: id,
+    row: noone,
+    characteristic: 0,
+    action: "discover"
+});

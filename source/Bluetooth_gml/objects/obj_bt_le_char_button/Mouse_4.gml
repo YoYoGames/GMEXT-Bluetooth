@@ -1,23 +1,43 @@
 if (locked) exit;
 if (!instance_exists(owner)) exit;
+
+// Actions that do not target a remote characteristic row.
+switch (action)
+{
+    case "discover":
+        owner.discover_all();
+        exit;
+
+    case "server_info":
+        owner.change_info_value();
+        exit;
+
+    case "server_notify":
+        owner.send_demo_notification();
+        exit;
+}
+
 if (!instance_exists(row)) exit;
 
 switch (action)
 {
     case "read":
     {
+        locked = true;
         row.status_text = "Reading...";
         owner.log_msg("READ start: " + bluetooth_le_characteristic_get_uuid(characteristic));
 
         var _ctx = {
             conn: owner,
-            row_inst: row
+            row_inst: row,
+            button_inst: id
         };
 
         var _r = bluetooth_le_characteristic_read(
             characteristic,
             method(_ctx, function(_error_code, _message, _characteristic)
             {
+                if (instance_exists(button_inst)) button_inst.locked = false;
                 if (!instance_exists(conn)) return;
 
                 conn.log_msg(
@@ -63,6 +83,7 @@ switch (action)
 
         if (_r != BluetoothError.Ok)
         {
+            locked = false;
             row.status_text = "Read failed to start";
             owner.log_msg(
                 "READ failed to start: "
@@ -77,6 +98,7 @@ switch (action)
 
     case "write":
     {
+        locked = true;
         var _text = "Hello from GMBluetooth BLE client";
         var _buf = buffer_create(string_byte_length(_text) + 1, buffer_grow, 1);
         buffer_write(_buf, buffer_text, _text);
@@ -87,7 +109,8 @@ switch (action)
 
         var _ctx = {
             conn: owner,
-            row_inst: row
+            row_inst: row,
+            button_inst: id
         };
 
         var _r = bluetooth_le_characteristic_write(
@@ -98,6 +121,7 @@ switch (action)
             write_type,
             method(_ctx, function(_error_code, _message, _characteristic)
             {
+                if (instance_exists(button_inst)) button_inst.locked = false;
                 if (!instance_exists(conn)) return;
 
                 conn.log_msg(
@@ -124,6 +148,7 @@ switch (action)
 
         if (_r != BluetoothError.Ok)
         {
+            locked = false;
             row.status_text = "Write failed to start";
             owner.log_msg(
                 "WRITE failed to start: "

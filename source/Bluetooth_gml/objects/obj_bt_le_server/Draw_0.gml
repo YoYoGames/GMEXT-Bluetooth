@@ -73,4 +73,13 @@ _y += _line;
 draw_text(_x, _y, "INFO READ: " + DEMO_CHAR_INFO_UUID);
 _y += _line * 2;
 
+draw_text(_x, _y, "INFO value: " + server_info_text);
+_y += _line;
+
+draw_text(_x, _y, "Last RX write: " + last_rx_text);
+_y += _line;
+
+draw_text(_x, _y, "Last TX notify: " + last_notify_text);
+_y += _line;
+
 draw_text(_x, _y, "Last event: " + _last_peer_message);

@@ -8,6 +8,11 @@ for (var i = 0; i < array_length(buttons); i++)
     if (instance_exists(buttons[i])) instance_destroy(buttons[i]);
 }
 
+if (instance_exists(discover_button))
+{
+    instance_destroy(discover_button);
+}
+
 if (bluetooth_le_connection_is_connected(connection))
 {
     bluetooth_le_disconnect(connection);

@@ -60,7 +60,7 @@ bluetooth_start_le_scan = function()
     show_debug_message($"[GML] bluetooth_le_scan_start() = {_error}");
 };
 
-_x = room_width/2;
+_x = max(650, room_width * 0.55);
 _y = 100;
 
 bluetooth_set_callback_device_found(function(_device)

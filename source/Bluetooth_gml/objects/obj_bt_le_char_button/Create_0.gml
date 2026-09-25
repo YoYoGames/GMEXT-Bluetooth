@@ -20,6 +20,21 @@ switch (action)
         image_xscale = 2.15;
         break;
 
+    case "discover":
+        text = "DISCOVER GATT";
+        image_xscale = 2.4;
+        break;
+
+    case "server_info":
+        text = "CHANGE INFO";
+        image_xscale = 2.1;
+        break;
+
+    case "server_notify":
+        text = "NOTIFY CLIENT";
+        image_xscale = 2.4;
+        break;
+
     default:
         text = string_upper(action);
         image_xscale = 1.5;

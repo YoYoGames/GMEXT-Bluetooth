@@ -3,11 +3,10 @@ draw_set_valign(fa_top);
 draw_set_color(c_white);
 
 draw_text(16, 16, "BLE Client - Connected");
-draw_text(16, 36, "Discovering GATT services and characteristics automatically.");
-draw_text(16, 56, "Use READ on the INFO characteristic to fetch text from the BLE server.");
-draw_text(16, 76, "Buttons are created only for operations supported by each characteristic.");
+draw_text(16, 36, "Press DISCOVER GATT to find the demo service.");
+draw_text(16, 56, "INFO = READ, RX = WRITE, TX = SUBSCRIBE / NOTIFY.");
 
-var _y = 104;
+var _y = 84;
 for (var i = 0; i < array_length(log_lines); i++)
 {
     draw_text(16, _y, log_lines[i]);
