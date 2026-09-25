@@ -40,6 +40,7 @@
 
 namespace gmbluetooth
 {
+    namespace WF = winrt::Windows::Foundation;
     namespace WDB = winrt::Windows::Devices::Bluetooth;
     namespace WDBA = winrt::Windows::Devices::Bluetooth::Advertisement;
     namespace WDBG = winrt::Windows::Devices::Bluetooth::GenericAttributeProfile;
@@ -397,11 +398,13 @@ namespace gmbluetooth
         struct PendingGattRead
         {
             WDBG::GattReadRequest request{nullptr};
+            WF::Deferral deferral{nullptr};
         };
 
         struct PendingGattWrite
         {
             WDBG::GattWriteRequest request{nullptr};
+            WF::Deferral deferral{nullptr};
             bool with_response = true;
         };
 
@@ -2467,16 +2470,20 @@ namespace gmbluetooth
                                 const WDBG::GattLocalCharacteristic&,
                                 const WDBG::GattReadRequestedEventArgs& args)
                             {
+                                const auto deferral = args.GetDeferral();
                                 try
                                 {
                                     const auto request = args.GetRequestAsync().get();
                                     if (!request)
+                                    {
+                                        deferral.Complete();
                                         return;
+                                    }
 
                                     const std::int32_t request_id = next_gatt_request_id_.fetch_add(1);
                                     {
                                         std::scoped_lock lock(gatt_request_mutex_);
-                                        pending_gatt_reads_[request_id] = PendingGattRead{request};
+                                        pending_gatt_reads_[request_id] = PendingGattRead{request, deferral};
                                     }
 
                                     if (hooks_.push_event)
@@ -2497,6 +2504,7 @@ namespace gmbluetooth
                                 }
                                 catch (...)
                                 {
+                                    deferral.Complete();
                                 }
                             });
 
@@ -2505,18 +2513,22 @@ namespace gmbluetooth
                                 const WDBG::GattLocalCharacteristic&,
                                 const WDBG::GattWriteRequestedEventArgs& args)
                             {
+                                const auto deferral = args.GetDeferral();
                                 try
                                 {
                                     const auto request = args.GetRequestAsync().get();
                                     if (!request)
+                                    {
+                                        deferral.Complete();
                                         return;
+                                    }
 
                                     const std::vector<std::uint8_t> value = buffer_to_bytes(request.Value());
                                     const bool with_response = request.Option() == WDBG::GattWriteOption::WriteWithResponse;
                                     const std::int32_t request_id = next_gatt_request_id_.fetch_add(1);
                                     {
                                         std::scoped_lock lock(gatt_request_mutex_);
-                                        pending_gatt_writes_[request_id] = PendingGattWrite{request, with_response};
+                                        pending_gatt_writes_[request_id] = PendingGattWrite{request, deferral, with_response};
                                     }
 
                                     if (hooks_.push_event)
@@ -2537,6 +2549,7 @@ namespace gmbluetooth
                                 }
                                 catch (...)
                                 {
+                                    deferral.Complete();
                                 }
                             });
 
@@ -2583,16 +2596,20 @@ namespace gmbluetooth
                                         const WDBG::GattLocalDescriptor&,
                                         const WDBG::GattReadRequestedEventArgs& args)
                                     {
+                                        const auto deferral = args.GetDeferral();
                                         try
                                         {
                                             const auto request = args.GetRequestAsync().get();
                                             if (!request)
+                                            {
+                                                deferral.Complete();
                                                 return;
+                                            }
 
                                             const std::int32_t request_id = next_gatt_request_id_.fetch_add(1);
                                             {
                                                 std::scoped_lock lock(gatt_request_mutex_);
-                                                pending_gatt_reads_[request_id] = PendingGattRead{request};
+                                                pending_gatt_reads_[request_id] = PendingGattRead{request, deferral};
                                             }
 
                                             if (hooks_.push_event)
@@ -2613,6 +2630,7 @@ namespace gmbluetooth
                                         }
                                         catch (...)
                                         {
+                                            deferral.Complete();
                                         }
                                     });
 
@@ -2621,18 +2639,22 @@ namespace gmbluetooth
                                         const WDBG::GattLocalDescriptor&,
                                         const WDBG::GattWriteRequestedEventArgs& args)
                                     {
+                                        const auto deferral = args.GetDeferral();
                                         try
                                         {
                                             const auto request = args.GetRequestAsync().get();
                                             if (!request)
+                                            {
+                                                deferral.Complete();
                                                 return;
+                                            }
 
                                             const std::vector<std::uint8_t> value = buffer_to_bytes(request.Value());
                                             const bool with_response = request.Option() == WDBG::GattWriteOption::WriteWithResponse;
                                             const std::int32_t request_id = next_gatt_request_id_.fetch_add(1);
                                             {
                                                 std::scoped_lock lock(gatt_request_mutex_);
-                                                pending_gatt_writes_[request_id] = PendingGattWrite{request, with_response};
+                                                pending_gatt_writes_[request_id] = PendingGattWrite{request, deferral, with_response};
                                             }
 
                                             if (hooks_.push_event)
@@ -2653,6 +2675,7 @@ namespace gmbluetooth
                                         }
                                         catch (...)
                                         {
+                                            deferral.Complete();
                                         }
                                     });
 
@@ -2718,11 +2741,18 @@ namespace gmbluetooth
                 else
                     pending.request.RespondWithProtocolError(static_cast<std::uint8_t>(std::clamp(status, 1, 255)));
 
+                if (pending.deferral)
+                    pending.deferral.Complete();
+
                 message.clear();
                 return Error::Ok;
             }
             catch (const winrt::hresult_error& error)
             {
+                if (pending.deferral)
+                {
+                    try { pending.deferral.Complete(); } catch (...) {}
+                }
                 message = winrt::to_string(error.message());
                 return Error::OperationFailed;
             }
@@ -2756,11 +2786,18 @@ namespace gmbluetooth
                         pending.request.RespondWithProtocolError(static_cast<std::uint8_t>(std::clamp(status, 1, 255)));
                 }
 
+                if (pending.deferral)
+                    pending.deferral.Complete();
+
                 message.clear();
                 return Error::Ok;
             }
             catch (const winrt::hresult_error& error)
             {
+                if (pending.deferral)
+                {
+                    try { pending.deferral.Complete(); } catch (...) {}
+                }
                 message = winrt::to_string(error.message());
                 return Error::OperationFailed;
             }
