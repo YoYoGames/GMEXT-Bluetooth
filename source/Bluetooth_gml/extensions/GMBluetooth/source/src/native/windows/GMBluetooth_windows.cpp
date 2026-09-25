@@ -1,5 +1,6 @@
 #include "GMBluetooth_backend.h"
 #include "GMBluetooth_json.h"
+#include "GMBluetooth_log.h"
 
 #if defined(_WIN32)
 
@@ -1562,6 +1563,12 @@ namespace gmbluetooth
                         if (result.Status() !=
                             WDBG::GattCommunicationStatus::Success)
                         {
+                            const auto protocol_error = result.ProtocolError();
+                            GMBT_LOG(
+                                "GetCharacteristicsAsync failed: status=%d protocol_error=%d",
+                                static_cast<int>(result.Status()),
+                                protocol_error ? static_cast<int>(protocol_error.Value()) : -1);
+
                             push_le_client_event(
                                 shared,
                                 "bluetooth_le_service_get_characteristics",
@@ -1764,6 +1771,12 @@ namespace gmbluetooth
                         if (result.Status() !=
                             WDBG::GattCommunicationStatus::Success)
                         {
+                            const auto protocol_error = result.ProtocolError();
+                            GMBT_LOG(
+                                "ReadValueAsync failed: status=%d protocol_error=%d",
+                                static_cast<int>(result.Status()),
+                                protocol_error ? static_cast<int>(protocol_error.Value()) : -1);
+
                             push_le_client_event(
                                 shared,
                                 "bluetooth_le_characteristic_read",
@@ -1829,10 +1842,22 @@ namespace gmbluetooth
                             ? WDBG::GattWriteOption::WriteWithResponse
                             : WDBG::GattWriteOption::WriteWithoutResponse;
 
-                        const auto status =
-                            characteristic->characteristic.WriteValueAsync(
+                        const auto result =
+                            characteristic->characteristic.WriteValueWithResultAsync(
                                 bytes_to_buffer(payload),
                                 option).get();
+
+                        const auto status = result.Status();
+                        if (status != WDBG::GattCommunicationStatus::Success)
+                        {
+                            const auto protocol_error = result.ProtocolError();
+                            GMBT_LOG(
+                                "WriteValueWithResultAsync failed: status=%d protocol_error=%d with_response=%d bytes=%zu",
+                                static_cast<int>(status),
+                                protocol_error ? static_cast<int>(protocol_error.Value()) : -1,
+                                with_response ? 1 : 0,
+                                payload.size());
+                        }
 
                         push_le_client_event(
                             shared,
@@ -2736,6 +2761,16 @@ namespace gmbluetooth
 
             try
             {
+                WinrtWorkerApartment apartment;
+
+                GMBT_LOG(
+                    "Responding to GATT read: request_id=%d status=%d request_state=%d request_offset=%u bytes=%zu",
+                    request_id,
+                    status,
+                    static_cast<int>(pending.request.State()),
+                    pending.request.Offset(),
+                    json::base64_decode(value_base64).size());
+
                 if (status == 0)
                     pending.request.RespondWithValue(bytes_to_buffer(json::base64_decode(value_base64)));
                 else
@@ -2744,11 +2779,21 @@ namespace gmbluetooth
                 if (pending.deferral)
                     pending.deferral.Complete();
 
+                GMBT_LOG(
+                    "GATT read response completed: request_id=%d final_state=%d",
+                    request_id,
+                    static_cast<int>(pending.request.State()));
+
                 message.clear();
                 return Error::Ok;
             }
             catch (const winrt::hresult_error& error)
             {
+                GMBT_LOG(
+                    "GATT read response FAILED: request_id=%d hresult=0x%08X message='%s'",
+                    request_id,
+                    static_cast<unsigned>(error.code().value),
+                    winrt::to_string(error.message()).c_str());
                 if (pending.deferral)
                 {
                     try { pending.deferral.Complete(); } catch (...) {}
@@ -2778,6 +2823,16 @@ namespace gmbluetooth
 
             try
             {
+                WinrtWorkerApartment apartment;
+
+                GMBT_LOG(
+                    "Responding to GATT write: request_id=%d status=%d with_response=%d request_state=%d bytes=%u",
+                    request_id,
+                    status,
+                    pending.with_response ? 1 : 0,
+                    static_cast<int>(pending.request.State()),
+                    pending.request.Value() ? pending.request.Value().Length() : 0);
+
                 if (pending.with_response)
                 {
                     if (status == 0)
@@ -2789,11 +2844,21 @@ namespace gmbluetooth
                 if (pending.deferral)
                     pending.deferral.Complete();
 
+                GMBT_LOG(
+                    "GATT write response completed: request_id=%d final_state=%d",
+                    request_id,
+                    static_cast<int>(pending.request.State()));
+
                 message.clear();
                 return Error::Ok;
             }
             catch (const winrt::hresult_error& error)
             {
+                GMBT_LOG(
+                    "GATT write response FAILED: request_id=%d hresult=0x%08X message='%s'",
+                    request_id,
+                    static_cast<unsigned>(error.code().value),
+                    winrt::to_string(error.message()).c_str());
                 if (pending.deferral)
                 {
                     try { pending.deferral.Complete(); } catch (...) {}
