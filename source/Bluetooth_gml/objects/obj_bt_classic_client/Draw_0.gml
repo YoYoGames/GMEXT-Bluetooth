@@ -1,8 +1,8 @@
 
 /// obj_bt_classic_client : Draw GUI
 
-var _x = room_width-16;
-var _y = 100;
+var _x = 16;
+var _y = 400;
 var _line = 17;
 
 
@@ -108,7 +108,7 @@ if (instance_exists(global.classic_conn_inst))
 
 draw_set_font(fnt_gm_15);
 draw_set_color(c_white);
-draw_set_halign(fa_right);
+draw_set_halign(fa_left);
 draw_set_valign(fa_top);
 
 

@@ -275,8 +275,7 @@ function bluetooth_classic_receive_available(
     [type_hint=`uint64`] connection: gmval
 ): int32;
 
-/// TODO: final GMBuffer bridge intentionally left unimplemented until the
-/// project-specific buffer convention is supplied.
+/// Sends bytes from a GameMaker buffer over the RFCOMM connection.
 [global, bind = typed_gml]
 function bluetooth_classic_send(
     [type_hint=`uint64`] connection: gmval,
@@ -285,8 +284,7 @@ function bluetooth_classic_send(
     size: uint32
 ): int32;
 
-/// TODO: final GMBuffer bridge intentionally left unimplemented until the
-/// project-specific buffer convention is supplied.
+/// Copies available RFCOMM bytes into a GameMaker buffer.
 [global, bind = typed_gml]
 function bluetooth_classic_receive(
     [type_hint=`uint64`] connection: gmval,

@@ -10,6 +10,15 @@ if (!variable_instance_exists(id, "properties"))
 value_text = "";
 status_text = "Ready";
 
+name = "Characteristic";
+
+if (string_lower(uuid) == string_lower(DEMO_CHAR_RX_UUID))
+    name = "RX (client -> server)";
+else if (string_lower(uuid) == string_lower(DEMO_CHAR_TX_UUID))
+    name = "TX (server -> client)";
+else if (string_lower(uuid) == string_lower(DEMO_CHAR_INFO_UUID))
+    name = "INFO";
+
 function short_uuid(_uuid)
 {
     return (string_length(_uuid) > 13)

@@ -8,9 +8,6 @@ permission_request_sent = false;
 global.ble_server_conn = 0;
 global.ble_server_conn_inst = noone;
 
-// Third demo characteristic: readable device/demo information.
-var _demo_char_info_uuid = "6e400004-b5a3-f393-e0a9-e50e24dcca9e";
-
 if (!bt_ready)
 {
     show_debug_message("[GML] Bluetooth is not initialized");
@@ -138,7 +135,7 @@ bluetooth_set_callback_le_server_read_request(
         );
 
         // Only the INFO characteristic is readable in this demo profile.
-        if (string_lower(_characteristic_uuid) != string_lower("6e400004-b5a3-f393-e0a9-e50e24dcca9e"))
+        if (string_lower(_characteristic_uuid) != string_lower(DEMO_CHAR_INFO_UUID))
         {
             var _empty = buffer_create(1, buffer_fixed, 1);
             bluetooth_le_server_respond_read(
@@ -196,7 +193,7 @@ _tx.permissions = 0;
 _tx.descriptors = [];
 
 var _info = new BluetoothLeCharacteristicDefinition();
-_info.uuid = _demo_char_info_uuid;
+_info.uuid = DEMO_CHAR_INFO_UUID;
 _info.properties = BluetoothLeCharacteristicProperty.Read;
 _info.permissions = GATT_PERMISSION_READ;
 _info.descriptors = [];
@@ -208,7 +205,7 @@ service_definition.characteristics = [_rx, _tx, _info];
 show_debug_message("[GML] Demo service: " + DEMO_SERVICE_UUID);
 show_debug_message("[GML]   RX   " + DEMO_CHAR_RX_UUID + " [WRITE, WRITE_NO_RESPONSE]");
 show_debug_message("[GML]   TX   " + DEMO_CHAR_TX_UUID + " [NOTIFY]");
-show_debug_message("[GML]   INFO " + _demo_char_info_uuid + " [READ]");
+show_debug_message("[GML]   INFO " + DEMO_CHAR_INFO_UUID + " [READ]");
 
 start_le_server_demo = function()
 {

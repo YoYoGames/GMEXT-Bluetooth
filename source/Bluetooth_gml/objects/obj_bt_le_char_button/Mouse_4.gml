@@ -76,12 +76,122 @@ switch (action)
     }
 
     case "write":
-        row.status_text = "WRITE demo is the next step";
-        owner.log_msg("WRITE button: operation not wired in this step");
+    {
+        var _text = "Hello from GMBluetooth BLE client";
+        var _buf = buffer_create(string_byte_length(_text) + 1, buffer_grow, 1);
+        buffer_write(_buf, buffer_text, _text);
+        var _size = buffer_tell(_buf);
+
+        row.status_text = "Writing...";
+        owner.log_msg("WRITE start: " + bluetooth_le_characteristic_get_uuid(characteristic));
+
+        var _ctx = {
+            conn: owner,
+            row_inst: row
+        };
+
+        var _r = bluetooth_le_characteristic_write(
+            characteristic,
+            _buf,
+            0,
+            _size,
+            write_type,
+            method(_ctx, function(_error_code, _message, _characteristic)
+            {
+                if (!instance_exists(conn)) return;
+
+                conn.log_msg(
+                    "WRITE complete: "
+                    + string(_error_code)
+                    + " "
+                    + _message
+                );
+
+                if (!instance_exists(row_inst)) return;
+
+                if (_error_code == BluetoothError.Ok)
+                {
+                    row_inst.status_text = "Write OK";
+                }
+                else
+                {
+                    row_inst.status_text = "Write failed: " + _message;
+                }
+            })
+        );
+
+        buffer_delete(_buf);
+
+        if (_r != BluetoothError.Ok)
+        {
+            row.status_text = "Write failed to start";
+            owner.log_msg(
+                "WRITE failed to start: "
+                + string(bluetooth_last_error_code())
+                + " "
+                + bluetooth_last_error_message()
+            );
+        }
+
         break;
+    }
 
     case "subscribe":
-        row.status_text = "SUBSCRIBE demo is the next step";
-        owner.log_msg("SUBSCRIBE button: operation not wired in this step");
+    {
+        row.status_text = "Subscribing...";
+        owner.log_msg("SUBSCRIBE start: " + bluetooth_le_characteristic_get_uuid(characteristic));
+
+        var _ctx = {
+            conn: owner,
+            row_inst: row,
+            button_inst: id
+        };
+
+        var _r = bluetooth_le_characteristic_subscribe(
+            characteristic,
+            subscribe_mode,
+            method(_ctx, function(_error_code, _message, _characteristic)
+            {
+                if (!instance_exists(conn)) return;
+
+                conn.log_msg(
+                    "SUBSCRIBE complete: "
+                    + string(_error_code)
+                    + " "
+                    + _message
+                );
+
+                if (instance_exists(row_inst))
+                {
+                    if (_error_code == BluetoothError.Ok)
+                    {
+                        row_inst.status_text = "Subscribed - waiting for notifications";
+                    }
+                    else
+                    {
+                        row_inst.status_text = "Subscribe failed: " + _message;
+                    }
+                }
+
+                if (_error_code == BluetoothError.Ok && instance_exists(button_inst))
+                {
+                    button_inst.text = "SUBSCRIBED";
+                    button_inst.locked = true;
+                }
+            })
+        );
+
+        if (_r != BluetoothError.Ok)
+        {
+            row.status_text = "Subscribe failed to start";
+            owner.log_msg(
+                "SUBSCRIBE failed to start: "
+                + string(bluetooth_last_error_code())
+                + " "
+                + bluetooth_last_error_message()
+            );
+        }
+
         break;
+    }
 }

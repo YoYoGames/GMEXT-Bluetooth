@@ -1,7 +1,7 @@
 /// obj_bt_le_client : Draw GUI
 
-var _x = room_width-16;
-var _y = 100;
+var _x = 16;
+var _y = 400;
 var _line = 17;
 
 
@@ -48,7 +48,6 @@ var _device_name = "-";
 var _device_address = "-";
 var _device_id = "-";
 var _rssi = "-";
-var _service_count = 0;
 
 if (_conn != 0 && bluetooth_le_connection_is_valid(_conn))
 {
@@ -72,7 +71,6 @@ if (_conn != 0 && bluetooth_le_connection_is_valid(_conn))
         }
     }
 
-    _service_count = bluetooth_le_service_get_count(_conn);
 }
 
 
@@ -96,7 +94,7 @@ if (instance_exists(global.ble_conn_inst))
 
 draw_set_font(fnt_gm_15);
 draw_set_color(c_white);
-draw_set_halign(fa_right);
+draw_set_halign(fa_left);
 draw_set_valign(fa_top);
 
 draw_text(_x, _y, "BLE CLIENT");
@@ -153,10 +151,7 @@ if (_connected)
     draw_text(
         _x,
         _y,
-        "GATT: "
-        + string(_service_count)
-        + " services / "
+        "Demo characteristics: "
         + string(_rows_count)
-        + " characteristics"
     );
 }

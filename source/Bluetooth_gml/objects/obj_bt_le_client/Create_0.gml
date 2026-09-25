@@ -9,8 +9,9 @@ auto_scan_after_permission = true;
 global.ble_conn = 0;
 global.ble_conn_inst = noone;
 
-// devices[] is a fresh list rebuilt each time device_found fires.
+// devices[] is a fresh list rebuilt for each scan.
 devices = [];
+device_instances = [];
 
 if (!bt_ready)
 {
@@ -46,6 +47,15 @@ bluetooth_start_le_scan = function()
     bluetooth_device_clear();
     devices = [];
 
+    // Remove buttons from a previous scan before rebuilding the list.
+    with (obj_bt_le_device)
+    {
+        instance_destroy();
+    }
+
+    device_instances = [];
+    _y = 100;
+
     var _error = bluetooth_le_scan_start(true);
     show_debug_message($"[GML] bluetooth_le_scan_start() = {_error}");
 };
@@ -57,21 +67,44 @@ bluetooth_set_callback_device_found(function(_device)
 {
     // The public discovery callback is shared by BLE and Classic.
     if (bluetooth_device_get_transport(_device) != BluetoothTransport.LowEnergy) return;
-	
-	//Let's filter devices without name...
-	if(bluetooth_device_get_name(_device) == "")
-		return;
 
-    instance_create_depth(_x, _y, 0, obj_bt_le_device, {device: _device});
-    _y += 100;
+    // Keep the demo scan focused: only show BLE devices with a visible name.
+    // An unnamed advertisement may be reported again later with its scan-response
+    // name, at which point it will be accepted.
+    var _name = bluetooth_device_get_name(_device);
+    if (_name == "") return;
 
+    var _device_id = bluetooth_device_get_id(_device);
+
+    // Avoid duplicate buttons when the same peripheral advertises repeatedly.
+    for (var i = 0; i < array_length(devices); i++)
+    {
+        if (devices[i].id == _device_id) return;
+    }
+
+    var _address = bluetooth_device_has_address(_device)
+        ? bluetooth_device_get_address(_device)
+        : "<no address>";
+
+    var _inst = instance_create_depth(
+        _x,
+        _y,
+        0,
+        obj_bt_le_device,
+        {device: _device}
+    );
+
+    _inst.text = _name + " - " + _address;
+
+    array_push(device_instances, _inst);
     array_push(devices, {
         device: _device,
-        name: bluetooth_device_get_name(_device),
-        address: bluetooth_device_has_address(_device)
-            ? bluetooth_device_get_address(_device)
-            : "<no address>"
+        id: _device_id,
+        name: _name,
+        address: _address
     });
+
+    _y += 60;
 });
 
 bluetooth_set_callback_scan_stopped(function(_error, _message)

@@ -132,6 +132,16 @@ function add_characteristic_row(_characteristic, _service_uuid)
     }
 }
 
+
+function is_demo_characteristic_uuid(_uuid)
+{
+    var _u = string_lower(_uuid);
+
+    return _u == string_lower(DEMO_CHAR_RX_UUID)
+        || _u == string_lower(DEMO_CHAR_TX_UUID)
+        || _u == string_lower(DEMO_CHAR_INFO_UUID);
+}
+
 function find_row_for_characteristic(_characteristic)
 {
     for (var i = 0; i < array_length(rows); i++)
@@ -172,10 +182,14 @@ function discover_characteristics(_service)
 
             for (var j = 0; j < _char_count; j++)
             {
-                conn.add_characteristic_row(
-                    bluetooth_le_characteristic_get_at(_service, j),
-                    uuid
-                );
+                var _characteristic = bluetooth_le_characteristic_get_at(_service, j);
+                var _char_uuid = bluetooth_le_characteristic_get_uuid(_characteristic);
+
+                // The demo only exposes RX, TX and INFO. Ignore any unrelated
+                // characteristics a platform/device may report.
+                if (!conn.is_demo_characteristic_uuid(_char_uuid)) continue;
+
+                conn.add_characteristic_row(_characteristic, uuid);
             }
         })
     );
@@ -202,12 +216,28 @@ function discover_all()
             var _service_count = bluetooth_le_service_get_count(connection);
             log_msg("services found: " + string(_service_count));
 
+            var _demo_service = 0;
+
             for (var i = 0; i < _service_count; i++)
             {
                 var _service = bluetooth_le_service_get_at(connection, i);
-                log_msg("service[" + string(i) + "] " + bluetooth_le_service_get_uuid(_service));
-                discover_characteristics(_service);
+                var _uuid = bluetooth_le_service_get_uuid(_service);
+
+                if (string_lower(_uuid) == string_lower(DEMO_SERVICE_UUID))
+                {
+                    _demo_service = _service;
+                    break;
+                }
             }
+
+            if (_demo_service == 0)
+            {
+                log_msg("demo service not found: " + DEMO_SERVICE_UUID);
+                return;
+            }
+
+            log_msg("demo service found: " + DEMO_SERVICE_UUID);
+            discover_characteristics(_demo_service);
         }
     );
 
