@@ -66,7 +66,7 @@ bluetooth_start_classic_scan = function()
     show_debug_message($"[GML] bluetooth_classic_scan_start() = {_error}");
 };
 
-_x = 300;
+_x = room_width/2;
 _y = 100;
 
 bluetooth_set_callback_device_found(function(_device)
