@@ -8,19 +8,6 @@ if (instance_number(obj_bt_init) > 1)
     exit;
 }
 
-function bt_platform_name()
-{
-    switch (os_type)
-    {
-        case os_windows: return "Windows";
-        case os_macosx:  return "macOS";
-        case os_android: return "Android";
-        case os_ios:     return "iOS";
-    }
-
-    return "Other / Unknown";
-}
-
 function bt_state_name(_state)
 {
     switch (_state)
@@ -88,7 +75,6 @@ global.bt_capabilities.classic_server = bluetooth_classic_server_is_supported();
 global.bt_permission_status = bluetooth_permission_get_status();
 
 show_debug_message("----------------------------------------");
-show_debug_message("[GML] Platform: " + bt_platform_name());
 show_debug_message("[GML] Initialized: " + bt_yes_no(bluetooth_is_initialized()));
 show_debug_message("[GML] Permission status: " + bt_permission_name(global.bt_permission_status));
 show_debug_message("[GML] BLE supported: " + bt_yes_no(global.bt_capabilities.le));

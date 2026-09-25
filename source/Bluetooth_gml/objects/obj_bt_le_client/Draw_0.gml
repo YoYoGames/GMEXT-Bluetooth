@@ -1,9 +1,13 @@
 /// obj_bt_le_client : Draw GUI
 
-var _x = 16;
-var _y = 16;
-var _w = 270;
-var _line = 22;
+var _x = room_width-16;
+var _y = 100;
+var _line = 17;
+
+
+// -----------------------------------------------------------------------------
+// Permission
+// -----------------------------------------------------------------------------
 
 var _permission = bluetooth_permission_get_status();
 
@@ -21,6 +25,10 @@ switch (_permission)
 }
 
 
+// -----------------------------------------------------------------------------
+// Scan state
+// -----------------------------------------------------------------------------
+
 var _scan_running = false;
 
 if (bt_ready)
@@ -28,6 +36,10 @@ if (bt_ready)
     _scan_running = bluetooth_le_scan_is_running();
 }
 
+
+// -----------------------------------------------------------------------------
+// Connection state
+// -----------------------------------------------------------------------------
 
 var _conn = global.ble_conn;
 
@@ -64,6 +76,10 @@ if (_conn != 0 && bluetooth_le_connection_is_valid(_conn))
 }
 
 
+// -----------------------------------------------------------------------------
+// GATT UI state
+// -----------------------------------------------------------------------------
+
 var _rows_count = 0;
 var _button_count = 0;
 
@@ -74,64 +90,69 @@ if (instance_exists(global.ble_conn_inst))
 }
 
 
-draw_set_alpha(0.78);
-draw_set_color(c_black);
-draw_rectangle(_x, _y, _x + _w, _y + 190, false);
-draw_set_alpha(1);
+// -----------------------------------------------------------------------------
+// Draw
+// -----------------------------------------------------------------------------
 
-draw_set_font(fnt_gm_20);
-draw_set_halign(fa_left);
+draw_set_font(fnt_gm_15);
+draw_set_color(c_white);
+draw_set_halign(fa_right);
 draw_set_valign(fa_top);
 
-draw_set_color(c_aqua);
-draw_text(_x + 10, _y + 8, "BLE CLIENT");
+draw_text(_x, _y, "BLE CLIENT");
+_y += _line * 2;
 
-draw_set_color(c_white);
-
-var _yy = _y + 34;
-
-draw_text(_x + 10, _yy, "Permission: " + _permission_text);
-_yy += _line;
+draw_text(_x, _y, "Permission: " + _permission_text);
+_y += _line;
 
 draw_text(
-    _x + 10,
-    _yy,
+    _x,
+    _y,
     "Scan: " + (_scan_running ? "RUNNING" : "STOPPED")
 );
-_yy += _line;
+_y += _line;
 
 draw_text(
-    _x + 10,
-    _yy,
+    _x,
+    _y,
     "Devices: " + string(array_length(devices))
 );
-_yy += _line;
+_y += _line;
 
 draw_text(
-    _x + 10,
-    _yy,
+    _x,
+    _y,
     "Connection: " + string(_conn)
 );
-_yy += _line;
+_y += _line;
 
 draw_text(
-    _x + 10,
-    _yy,
+    _x,
+    _y,
     "Connected: " + (_connected ? "YES" : "NO")
 );
-_yy += _line;
+_y += _line;
+
 
 if (_connected)
 {
-    draw_text(_x + 10, _yy, "Device: " + _device_name);
-    _yy += _line;
+    _y += _line;
 
-    draw_text(_x + 10, _yy, "RSSI: " + _rssi);
-    _yy += _line;
+    draw_text(_x, _y, "Device: " + _device_name);
+    _y += _line;
+
+    draw_text(_x, _y, "Device ID: " + _device_id);
+    _y += _line;
+
+    draw_text(_x, _y, "Address: " + _device_address);
+    _y += _line;
+
+    draw_text(_x, _y, "RSSI: " + _rssi);
+    _y += _line;
 
     draw_text(
-        _x + 10,
-        _yy,
+        _x,
+        _y,
         "GATT: "
         + string(_service_count)
         + " services / "
