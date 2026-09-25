@@ -163,6 +163,7 @@ switch (action)
 
     case "subscribe":
     {
+        locked = true;
         row.status_text = "Subscribing...";
         owner.log_msg("SUBSCRIBE start: " + bluetooth_le_characteristic_get_uuid(characteristic));
 
@@ -177,6 +178,11 @@ switch (action)
             subscribe_mode,
             method(_ctx, function(_error_code, _message, _characteristic)
             {
+                if (_error_code != BluetoothError.Ok && instance_exists(button_inst))
+                {
+                    button_inst.locked = false;
+                }
+
                 if (!instance_exists(conn)) return;
 
                 conn.log_msg(
@@ -208,6 +214,7 @@ switch (action)
 
         if (_r != BluetoothError.Ok)
         {
+            locked = false;
             row.status_text = "Subscribe failed to start";
             owner.log_msg(
                 "SUBSCRIBE failed to start: "

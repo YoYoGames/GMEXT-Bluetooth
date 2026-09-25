@@ -13,6 +13,7 @@ info_version = 0;
 notify_counter = 0;
 last_rx_text = "-";
 last_notify_text = "-";
+last_server_event = "-";
 control_buttons = [];
 
 if (!bt_ready)
@@ -58,6 +59,7 @@ change_info_value = function()
     info_version++;
     server_info_text = "GMBluetooth BLE Demo INFO #" + string(info_version);
     show_debug_message("[GML] INFO value changed: " + server_info_text);
+    last_server_event = "INFO changed";
 
     if (instance_exists(global.ble_server_conn_inst))
     {
@@ -90,6 +92,8 @@ send_demo_notification = function()
     if (_r == BluetoothError.Ok)
     {
         last_notify_text = _text;
+        last_server_event = "TX notification broadcast";
+        show_debug_message("[GML] NOTIFY broadcast: \"" + _text + "\"");
         if (instance_exists(global.ble_server_conn_inst))
         {
             global.ble_server_conn_inst.log_msg("TX notify: " + _text);
@@ -98,6 +102,7 @@ send_demo_notification = function()
     else
     {
         var _message = bluetooth_last_error_message();
+        last_server_event = "NOTIFY failed: " + _message;
         show_debug_message("[GML] NOTIFY failed: " + _message);
         if (instance_exists(global.ble_server_conn_inst))
         {
@@ -172,6 +177,7 @@ bluetooth_set_callback_le_server_write_request(
         if (_n > 0)
         {
             last_rx_text = bytes_to_string(_buf, _n);
+            last_server_event = "RX write received";
 
             if (instance_exists(global.ble_server_conn_inst))
             {
@@ -232,6 +238,8 @@ bluetooth_set_callback_le_server_read_request(
         var _total_size = buffer_tell(_buf);
         var _read_offset = clamp(_offset, 0, _total_size);
         var _read_size = max(0, _total_size - _read_offset);
+
+        last_server_event = "INFO read request";
 
         show_debug_message(
             "[GML] LE READ response: \""

@@ -10,7 +10,6 @@ var _line = 17;
 var _permission = bluetooth_permission_get_status();
 var _server_running = bt_ready && bluetooth_le_server_is_running();
 var _advertising = bt_ready && bluetooth_le_advertise_is_running();
-var _peer = global.ble_server_conn;
 
 
 // Permission text
@@ -58,7 +57,7 @@ _y += _line;
 draw_text(_x, _y, "Advertising: " + (_advertising ? "YES" : "NO"));
 _y += _line;
 
-draw_text(_x, _y, "Peer: " + string(_peer));
+draw_text(_x, _y, "Notify target: all subscribed clients");
 _y += _line * 2;
 
 draw_text(_x, _y, "Service: " + DEMO_SERVICE_UUID);
@@ -82,4 +81,4 @@ _y += _line;
 draw_text(_x, _y, "Last TX notify: " + last_notify_text);
 _y += _line;
 
-draw_text(_x, _y, "Last event: " + _last_peer_message);
+draw_text(_x, _y, "Last event: " + last_server_event);
