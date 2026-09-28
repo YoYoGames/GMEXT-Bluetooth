@@ -2694,7 +2694,13 @@ namespace
             BackendEvent ev;
             ev.type = BackendEventType::ScanStopped;
             ev.transport = Transport::Classic;
-            if (error != kIOReturnSuccess) { ev.error = Error::OperationFailed; ev.message = "Classic device inquiry ended with an error"; }
+            if (error != kIOReturnSuccess)
+            {
+                char text[96];
+                std::snprintf(text, sizeof(text), "Classic device inquiry ended with an error (IOReturn 0x%08x)", error);
+                ev.error = Error::OperationFailed;
+                ev.message = text;
+            }
             hooks_.push_event(std::move(ev));
         }
 
