@@ -2334,6 +2334,19 @@ namespace
                 classic_connections_[connection] = state;
             }
 
+            // Paired devices keep the SDP records from pairing (or the last
+            // query) cached on the IOBluetoothDevice. Use them directly when
+            // they already hold the requested service: a fresh SDP query can
+            // stall without ever calling back.
+            BluetoothRFCOMMChannelID cachedChannel = 0;
+            if (classic_find_rfcomm_channel(btDevice, service_uuid, false, cachedChannel))
+            {
+                GMBT_LOG("Classic connect: using cached SDP record, RFCOMM channel %d", (int)cachedChannel);
+                classic_open_rfcomm(connection, btDevice, cachedChannel);
+                message.clear();
+                return Error::Ok;
+            }
+
             GMBTSDPQueryHandler* sdpHandler = [GMBTSDPQueryHandler new];
             AppleBackend* self = this;
             const std::string uuidCopy = service_uuid;
@@ -2345,10 +2358,22 @@ namespace
                 classic_pending_sdp_[connection] = sdpHandler;
             }
 
-            IOBluetoothSDPUUID* uuid = classic_uuid_from_string(service_uuid);
-            const IOReturn status = uuid ? [btDevice performSDPQuery:sdpHandler uuids:@[ uuid ]]
-                                          : [btDevice performSDPQuery:sdpHandler];
-            GMBT_LOG("Classic connect: SDP query start -> IOReturn=0x%08x", status);
+            // Unfiltered: the UUID-filtered overload is less reliable against
+            // some stacks, and the record is matched by UUID afterwards anyway.
+            const IOReturn status = [btDevice performSDPQuery:sdpHandler];
+            GMBT_LOG("Classic connect: SDP query start (cached records=%d) -> IOReturn=0x%08x",
+                (int)[[btDevice services] count], status);
+            if (status == kIOReturnSuccess)
+            {
+                // Fail the connect instead of leaving the GML callback waiting
+                // forever if IOBluetooth never delivers sdpQueryComplete:.
+                std::weak_ptr<int> alive = lifetime_;
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kClassicSdpTimeoutSeconds * NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), ^{
+                    if (alive.expired()) return;
+                    self->handle_classic_sdp_timeout(connection);
+                });
+            }
             if (status != kIOReturnSuccess)
             {
                 std::scoped_lock lock(classic_mutex_);
@@ -2704,20 +2729,57 @@ namespace
             hooks_.push_event(std::move(ev));
         }
 
-        void handle_classic_sdp_complete(std::uint64_t connection, IOBluetoothDevice* device, IOReturn status, std::string service_uuid)
+        static constexpr double kClassicSdpTimeoutSeconds = 15.0;
+
+        // Expires with the backend, so delayed blocks can tell it is gone.
+        std::shared_ptr<int> lifetime_ = std::make_shared<int>(0);
+
+        // Finds the RFCOMM channel for service_uuid in the device's current SDP
+        // records. With allow_any_rfcomm, falls back to the first record that
+        // has an RFCOMM channel when the UUID is not listed.
+        static bool classic_find_rfcomm_channel(IOBluetoothDevice* device, const std::string& service_uuid,
+                                                bool allow_any_rfcomm, BluetoothRFCOMMChannelID& channelID)
+        {
+            IOBluetoothSDPUUID* uuid = classic_uuid_from_string(service_uuid);
+            if (uuid)
+            {
+                IOBluetoothSDPServiceRecord* record = [device getServiceRecordForUUID:uuid];
+                if (record && [record getRFCOMMChannelID:&channelID] == kIOReturnSuccess) return true;
+            }
+            if (!allow_any_rfcomm && uuid) return false;
+            for (IOBluetoothSDPServiceRecord* record in [device services])
+            {
+                if ([record getRFCOMMChannelID:&channelID] == kIOReturnSuccess) return true;
+            }
+            return false;
+        }
+
+        void handle_classic_sdp_timeout(std::uint64_t connection)
         {
             {
                 std::scoped_lock lock(classic_mutex_);
                 auto sdp = classic_pending_sdp_.find(connection);
-                if (sdp != classic_pending_sdp_.end())
-                {
-                    gmbt_release_after_callback(sdp->second);
-                    classic_pending_sdp_.erase(sdp);
-                }
-                if (classic_connections_.find(connection) == classic_connections_.end()) return; // disconnected/cancelled meanwhile
+                if (sdp == classic_pending_sdp_.end()) return; // already completed
+                gmbt_release_after_callback(sdp->second);
+                classic_pending_sdp_.erase(sdp);
             }
+            GMBT_LOG("Classic SDP query timed out after %.0fs (connection %llu)",
+                kClassicSdpTimeoutSeconds, static_cast<unsigned long long>(connection));
+            complete_classic_connect(connection, Error::Timeout, "Classic service discovery timed out");
+        }
+
+        void handle_classic_sdp_complete(std::uint64_t connection, IOBluetoothDevice* device, IOReturn status, std::string service_uuid)
+        {
             GMBT_LOG("Classic SDP complete: IOReturn=0x%08x records=%d",
                 status, (int)[[device services] count]);
+            {
+                std::scoped_lock lock(classic_mutex_);
+                auto sdp = classic_pending_sdp_.find(connection);
+                if (sdp == classic_pending_sdp_.end()) return; // timed out meanwhile
+                gmbt_release_after_callback(sdp->second);
+                classic_pending_sdp_.erase(sdp);
+                if (classic_connections_.find(connection) == classic_connections_.end()) return; // disconnected/cancelled meanwhile
+            }
             if (status != kIOReturnSuccess)
             {
                 complete_classic_connect(connection, Error::NotFound, "Classic service discovery failed");
@@ -2725,26 +2787,16 @@ namespace
             }
 
             BluetoothRFCOMMChannelID channelID = 0;
-            BOOL found = NO;
-            IOBluetoothSDPUUID* uuid = classic_uuid_from_string(service_uuid);
-            if (uuid)
-            {
-                IOBluetoothSDPServiceRecord* record = [device getServiceRecordForUUID:uuid];
-                if (record && [record getRFCOMMChannelID:&channelID] == kIOReturnSuccess) found = YES;
-            }
-            if (!found)
-            {
-                for (IOBluetoothSDPServiceRecord* record in [device services])
-                {
-                    if ([record getRFCOMMChannelID:&channelID] == kIOReturnSuccess) { found = YES; break; }
-                }
-            }
-            if (!found)
+            if (!classic_find_rfcomm_channel(device, service_uuid, true, channelID))
             {
                 complete_classic_connect(connection, Error::NotFound, "No RFCOMM service was found on the device");
                 return;
             }
+            classic_open_rfcomm(connection, device, channelID);
+        }
 
+        void classic_open_rfcomm(std::uint64_t connection, IOBluetoothDevice* device, BluetoothRFCOMMChannelID channelID)
+        {
             GMBTClassicChannelDelegate* delegate = [GMBTClassicChannelDelegate new];
             AppleBackend* self = this;
             delegate.onOpenComplete = ^(IOReturn openStatus) { self->handle_classic_channel_open_complete(connection, openStatus); };
