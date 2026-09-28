@@ -1948,7 +1948,21 @@ static NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length
 @end
 
 
+#if !__has_feature(objc_arc)
+#error "GMBluetooth_apple.mm must be compiled with -fobjc-arc: the C++ backend stores Objective-C objects in plain members and relies on ARC to retain them"
+#endif
+
 #if TARGET_OS_OSX
+
+// IOBluetooth invokes delegate methods on objects the backend owns, and the
+// completion handlers below drop the backend's reference to that same object.
+// Releasing it there frees the delegate - and the block it is still executing -
+// mid-call (EXC_BAD_ACCESS). Keep it alive until the next main-queue turn.
+static void gmbt_release_after_callback(id object)
+{
+    if (!object) return;
+    dispatch_async(dispatch_get_main_queue(), ^{ (void)object; });
+}
 
 // Bluetooth Classic (RFCOMM) support is macOS-only: IOBluetooth is not
 // available on iOS. These small delegate/notification shims translate
@@ -2673,6 +2687,8 @@ namespace
 
         void handle_classic_inquiry_complete(IOReturn error)
         {
+            gmbt_release_after_callback(classic_inquiry_);
+            gmbt_release_after_callback(classic_inquiry_delegate_);
             classic_inquiry_ = nil;
             classic_inquiry_delegate_ = nil;
             BackendEvent ev;
@@ -2686,7 +2702,12 @@ namespace
         {
             {
                 std::scoped_lock lock(classic_mutex_);
-                classic_pending_sdp_.erase(connection);
+                auto sdp = classic_pending_sdp_.find(connection);
+                if (sdp != classic_pending_sdp_.end())
+                {
+                    gmbt_release_after_callback(sdp->second);
+                    classic_pending_sdp_.erase(sdp);
+                }
                 if (classic_connections_.find(connection) == classic_connections_.end()) return; // disconnected/cancelled meanwhile
             }
             GMBT_LOG("Classic SDP complete: IOReturn=0x%08x records=%d",
@@ -2762,7 +2783,13 @@ namespace
             if (error != Error::Ok)
             {
                 std::scoped_lock lock(classic_mutex_);
-                classic_connections_.erase(connection);
+                auto it = classic_connections_.find(connection);
+                if (it != classic_connections_.end())
+                {
+                    gmbt_release_after_callback(it->second->channel);
+                    gmbt_release_after_callback(it->second->delegate);
+                    classic_connections_.erase(it);
+                }
             }
             BackendEvent ev;
             ev.type = BackendEventType::ClassicConnected;
@@ -2781,8 +2808,10 @@ namespace
         {
             {
                 std::scoped_lock lock(pair_mutex_);
-                pending_pairs_.erase(device_handle);
-                pending_pair_delegates_.erase(device_handle);
+                auto p = pending_pairs_.find(device_handle);
+                if (p != pending_pairs_.end()) { gmbt_release_after_callback(p->second); pending_pairs_.erase(p); }
+                auto d = pending_pair_delegates_.find(device_handle);
+                if (d != pending_pair_delegates_.end()) { gmbt_release_after_callback(d->second); pending_pair_delegates_.erase(d); }
             }
 
             BackendEvent ev;
@@ -2828,6 +2857,8 @@ namespace
                 auto it = classic_connections_.find(connection);
                 if (it == classic_connections_.end()) return;
                 wasConnected = it->second->connected;
+                gmbt_release_after_callback(it->second->channel);
+                gmbt_release_after_callback(it->second->delegate);
                 classic_connections_.erase(it);
             }
             // A channel that closes before it ever finished opening is reported
