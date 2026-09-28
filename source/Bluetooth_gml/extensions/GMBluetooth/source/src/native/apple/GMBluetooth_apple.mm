@@ -2452,13 +2452,26 @@ namespace
             IOBluetoothSDPUUID* uuid = classic_uuid_from_string(service_uuid);
             if (!uuid) { message = "Invalid service UUID"; return Error::InvalidArgument; }
 
+            // Laid out like Apple's SerialPortDictionary.plist. The RFCOMM
+            // channel must be an explicit 1-byte unsigned integer: a bare
+            // NSNumber is encoded as a 4-byte value, which macOS clients
+            // tolerate but Windows' SDP parser rejects, so the service is
+            // never matched there. The channel number is only a preference;
+            // publishing assigns a free one, read back below.
+            NSDictionary* rfcommChannel = @{
+                @"DataElementType" : @1,  // unsigned integer
+                @"DataElementSize" : @1,  // 1 byte
+                @"DataElementValue" : @10,
+            };
             NSDictionary* serviceDict = @{
-                @"0100 - ServiceName" : to_ns(name),
                 @"0001 - ServiceClassIDList" : @[ uuid ],
                 @"0004 - ProtocolDescriptorList" : @[
                     @[ [IOBluetoothSDPUUID uuid16:kBluetoothSDPUUID16L2CAP] ],
-                    @[ [IOBluetoothSDPUUID uuid16:kBluetoothSDPUUID16RFCOMM], @0 ],
+                    @[ [IOBluetoothSDPUUID uuid16:kBluetoothSDPUUID16RFCOMM], rfcommChannel ],
                 ],
+                // Public Browse Root, so SDP browsing clients list the service too.
+                @"0005 - BrowseGroupList" : @[ [IOBluetoothSDPUUID uuid16:kBluetoothSDPUUID16ServiceClassPublicBrowseGroup] ],
+                @"0100 - ServiceName" : to_ns(name),
             };
 
             IOBluetoothSDPServiceRecord* record = [IOBluetoothSDPServiceRecord publishedServiceRecordWithDictionary:serviceDict];
@@ -2466,7 +2479,11 @@ namespace
 
             BluetoothRFCOMMChannelID channelID = 0;
             const IOReturn channelStatus = [record getRFCOMMChannelID:&channelID];
-            GMBT_LOG("Classic server: record published, RFCOMM channel=%d IOReturn=0x%08x", (int)channelID, channelStatus);
+            BluetoothSDPServiceRecordHandle recordHandle = 0;
+            [record getServiceRecordHandle:&recordHandle];
+            GMBT_LOG("Classic server: record published, handle=0x%08x RFCOMM channel=%d IOReturn=0x%08x uuid=%s local_address=%s",
+                (unsigned)recordHandle, (int)channelID, channelStatus, service_uuid.c_str(),
+                to_string([[IOBluetoothHostController defaultController] addressAsString]).c_str());
             if (channelStatus != kIOReturnSuccess)
             {
                 [record removeServiceRecord];
@@ -2934,9 +2951,11 @@ namespace
         void handle_classic_server_channel_opened(IOBluetoothRFCOMMChannel* channel)
         {
             IOBluetoothDevice* device = [channel getDevice];
+            const std::string address = classic_format_address([device addressString]);
+            GMBT_LOG("Classic server: incoming RFCOMM channel %d from %s (%s)",
+                (int)[channel getChannelID], address.c_str(), to_string([device name]).c_str());
             DiscoveredDevice d;
             d.transport = Transport::Classic;
-            const std::string address = classic_format_address([device addressString]);
             d.id = "apple:classic:" + address;
             d.name = to_string([device name]);
             d.address = address;
