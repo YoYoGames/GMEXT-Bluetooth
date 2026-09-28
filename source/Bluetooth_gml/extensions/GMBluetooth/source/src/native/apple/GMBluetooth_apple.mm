@@ -2250,17 +2250,32 @@ namespace
 
         Error classic_scan_start(std::string& message) override
         {
-            if (classic_inquiry_) { message.clear(); return Error::Ok; }
+            if (classic_inquiry_) { GMBT_LOG("Classic inquiry already running"); message.clear(); return Error::Ok; }
+
+            // IOBluetooth delivers every callback on the run loop of the thread
+            // that started the operation. CoreBluetooth (queue:nil) always uses
+            // the main queue instead, so BLE can work while Classic stays silent
+            // if this is not the main thread.
+            GMBT_LOG("Classic inquiry start: main_thread=%d current_runloop_is_main=%d",
+                [NSThread isMainThread] ? 1 : 0,
+                CFRunLoopGetCurrent() == CFRunLoopGetMain() ? 1 : 0);
+            GMBT_LOG("Classic inquiry start: controller powered=%d address=%s",
+                [[IOBluetoothHostController defaultController] powerState] == kBluetoothHCIPowerStateON ? 1 : 0,
+                to_string([[IOBluetoothHostController defaultController] addressAsString]).c_str());
 
             GMBTClassicInquiryDelegate* delegate = [GMBTClassicInquiryDelegate new];
             AppleBackend* self = this;
             delegate.onDeviceFound = ^(IOBluetoothDevice* device) { self->handle_classic_device_found(device); };
-            delegate.onComplete = ^(IOReturn error, BOOL aborted) { (void)aborted; self->handle_classic_inquiry_complete(error); };
+            delegate.onComplete = ^(IOReturn error, BOOL aborted) {
+                GMBT_LOG("Classic inquiry complete: IOReturn=0x%08x aborted=%d", error, aborted ? 1 : 0);
+                self->handle_classic_inquiry_complete(error);
+            };
 
             IOBluetoothDeviceInquiry* inquiry = [IOBluetoothDeviceInquiry inquiryWithDelegate:delegate];
             [inquiry setInquiryLength:10];
             [inquiry setUpdateNewDeviceNames:YES];
             const IOReturn status = [inquiry start];
+            GMBT_LOG("Classic inquiry start -> IOReturn=0x%08x", status);
             if (status != kIOReturnSuccess)
             {
                 message = "Bluetooth Classic scan could not start";
@@ -2291,9 +2306,12 @@ namespace
             IOBluetoothDevice* btDevice = classic_device_for_address(device.address);
             if (!btDevice)
             {
+                GMBT_LOG("Classic connect: could not resolve address '%s'", device.address.c_str());
                 message = "Classic device could not be resolved";
                 return Error::NotFound;
             }
+            GMBT_LOG("Classic connect: address=%s paired=%d service_uuid='%s'",
+                device.address.c_str(), [btDevice isPaired] ? 1 : 0, service_uuid.c_str());
 
             auto state = std::make_shared<ClassicConnectionState>();
             state->connection = connection;
@@ -2316,6 +2334,7 @@ namespace
             IOBluetoothSDPUUID* uuid = classic_uuid_from_string(service_uuid);
             const IOReturn status = uuid ? [btDevice performSDPQuery:sdpHandler uuids:@[ uuid ]]
                                           : [btDevice performSDPQuery:sdpHandler];
+            GMBT_LOG("Classic connect: SDP query start -> IOReturn=0x%08x", status);
             if (status != kIOReturnSuccess)
             {
                 std::scoped_lock lock(classic_mutex_);
@@ -2407,7 +2426,9 @@ namespace
             if (!record) { message = "Classic service record could not be published"; return Error::OperationFailed; }
 
             BluetoothRFCOMMChannelID channelID = 0;
-            if ([record getRFCOMMChannelID:&channelID] != kIOReturnSuccess)
+            const IOReturn channelStatus = [record getRFCOMMChannelID:&channelID];
+            GMBT_LOG("Classic server: record published, RFCOMM channel=%d IOReturn=0x%08x", (int)channelID, channelStatus);
+            if (channelStatus != kIOReturnSuccess)
             {
                 [record removeServiceRecord];
                 message = "Classic service record has no RFCOMM channel";
@@ -2668,6 +2689,8 @@ namespace
                 classic_pending_sdp_.erase(connection);
                 if (classic_connections_.find(connection) == classic_connections_.end()) return; // disconnected/cancelled meanwhile
             }
+            GMBT_LOG("Classic SDP complete: IOReturn=0x%08x records=%d",
+                status, (int)[[device services] count]);
             if (status != kIOReturnSuccess)
             {
                 complete_classic_connect(connection, Error::NotFound, "Classic service discovery failed");
@@ -2703,6 +2726,7 @@ namespace
 
             IOBluetoothRFCOMMChannel* channel = nil;
             const IOReturn openStatus = [device openRFCOMMChannelAsync:&channel withChannelID:channelID delegate:delegate];
+            GMBT_LOG("Classic RFCOMM open (channel %d) -> IOReturn=0x%08x", (int)channelID, openStatus);
             if (openStatus != kIOReturnSuccess || !channel)
             {
                 complete_classic_connect(connection, Error::ConnectionFailed, "RFCOMM channel could not be opened");
@@ -2718,6 +2742,7 @@ namespace
 
         void handle_classic_channel_open_complete(std::uint64_t connection, IOReturn status)
         {
+            GMBT_LOG("Classic RFCOMM open complete: IOReturn=0x%08x", status);
             if (status != kIOReturnSuccess)
             {
                 complete_classic_connect(connection, Error::ConnectionFailed, "RFCOMM channel open failed");
