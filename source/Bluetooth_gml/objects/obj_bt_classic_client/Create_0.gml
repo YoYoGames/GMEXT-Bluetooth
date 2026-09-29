@@ -62,6 +62,14 @@ bluetooth_start_classic_scan = function()
     bluetooth_device_clear();
     devices = [];
 
+    // Remove buttons from a previous scan before rebuilding the list.
+    with (obj_bt_classic_device)
+    {
+        instance_destroy();
+    }
+
+    _y = 100;
+
     var _error = bluetooth_classic_scan_start();
     show_debug_message($"[GML] bluetooth_classic_scan_start() = {_error}");
 };

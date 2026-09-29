@@ -13,6 +13,11 @@ if (instance_exists(discover_button))
     instance_destroy(discover_button);
 }
 
+if (instance_exists(disconnect_button))
+{
+    instance_destroy(disconnect_button);
+}
+
 if (bluetooth_le_connection_is_connected(connection))
 {
     bluetooth_le_disconnect(connection);

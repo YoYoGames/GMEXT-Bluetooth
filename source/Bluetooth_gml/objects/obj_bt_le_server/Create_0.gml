@@ -2,6 +2,7 @@ show_debug_message("========== BLUETOOTH LE SERVER (DEMO) ==========");
 
 bt_ready = bluetooth_is_initialized();
 server_started = false;
+service_ready = false;
 startup_requested = false;
 permission_request_sent = false;
 
@@ -14,7 +15,6 @@ notify_counter = 0;
 last_rx_text = "-";
 last_notify_text = "-";
 last_server_event = "-";
-control_buttons = [];
 
 if (!bt_ready)
 {
@@ -42,16 +42,6 @@ if (!bluetooth_le_advertise_is_supported())
 {
     show_debug_message("[GML] Bluetooth LE advertising is not supported on this platform");
     exit;
-}
-
-function bytes_to_string(_buf, _n)
-{
-    var _s = "";
-    for (var i = 0; i < _n; i++)
-    {
-        _s += chr(buffer_peek(_buf, i, buffer_u8));
-    }
-    return _s;
 }
 
 change_info_value = function()
@@ -176,7 +166,7 @@ bluetooth_set_callback_le_server_write_request(
 
         if (_n > 0)
         {
-            last_rx_text = bytes_to_string(_buf, _n);
+            last_rx_text = ble_bytes_to_string(_buf, _n);
             last_server_event = "RX write received";
 
             if (instance_exists(global.ble_server_conn_inst))
@@ -344,39 +334,12 @@ start_le_server_demo = function()
 
             if (_error_code != BluetoothError.Ok) return;
 
-            var _settings_json = json_stringify({
-                txPowerLevel: 0
-            });
+            service_ready = true;
 
-            var _data_json = json_stringify({
-                includeName: true,
-                services: [
-                    {uuid: DEMO_SERVICE_UUID}
-                ]
-            });
-
-            var _r = bluetooth_le_advertise_start(
-                _settings_json,
-                _data_json,
-                function(_error_code, _message)
-                {
-                    show_debug_message(
-                        "[GML] le_advertise_start "
-                        + string(_error_code)
-                        + " "
-                        + _message
-                    );
-                }
-            );
-
-            if (_r != BluetoothError.Ok)
+            // Advertise straight away; the button can stop/restart it later.
+            with (obj_bt_le_button_advertise)
             {
-                show_debug_message(
-                    "[GML] le_advertise_start failed to start: "
-                    + string(bluetooth_last_error_code())
-                    + " "
-                    + bluetooth_last_error_message()
-                );
+                start_advertising();
             }
         }
     );
@@ -391,19 +354,5 @@ start_le_server_demo = function()
         );
     }
 };
-
-array_push(control_buttons, instance_create_depth(760, 300, 0, obj_bt_le_char_button, {
-    owner: id,
-    row: noone,
-    characteristic: 0,
-    action: "server_info"
-}));
-
-array_push(control_buttons, instance_create_depth(1010, 300, 0, obj_bt_le_char_button, {
-    owner: id,
-    row: noone,
-    characteristic: 0,
-    action: "server_notify"
-}));
 
 start_le_server_demo();

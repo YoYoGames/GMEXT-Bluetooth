@@ -5,4 +5,3 @@ if (auto_scan_after_permission && _permission == BluetoothPermissionStatus.Grant
     auto_scan_after_permission = false;
     bluetooth_start_le_scan();
 }
-last_permission_status = _permission;

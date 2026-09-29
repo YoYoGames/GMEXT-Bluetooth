@@ -5,11 +5,45 @@
 #macro DEMO_CHAR_INFO_UUID "6e400004-b5a3-f393-e0a9-e50e24dcca9e"  // client reads demo/server info
 
 // GATT permission bitmasks used by the demo service definition.
-#macro GATT_PROPERTY_READ             0x02
-#macro GATT_PROPERTY_WRITE            0x08
-#macro GATT_PROPERTY_WRITE_NO_RESPONSE 0x04
-#macro GATT_PROPERTY_NOTIFY           0x10
-#macro GATT_PROPERTY_INDICATE         0x20
-#macro GATT_PERMISSION_WRITE          0x10
-#macro GATT_PERMISSION_READ           0x01
+#macro GATT_PERMISSION_WRITE 0x10
+#macro GATT_PERMISSION_READ  0x01
 
+// write_type argument of bluetooth_le_characteristic_write().
+#macro BLE_WRITE_WITH_RESPONSE    0
+#macro BLE_WRITE_WITHOUT_RESPONSE 1
+
+/// @func ble_bytes_to_string(buffer, size)
+/// @desc Reads the first `size` bytes of a buffer as plain ASCII text.
+function ble_bytes_to_string(_buf, _n)
+{
+    var _s = "";
+    for (var i = 0; i < _n; i++)
+    {
+        _s += chr(buffer_peek(_buf, i, buffer_u8));
+    }
+    return _s;
+}
+
+/// @func ble_property_names(properties)
+/// @desc Turns a BluetoothLeCharacteristicProperty bitmask into readable text.
+function ble_property_names(_properties)
+{
+    var _s = "";
+
+    if (_properties & BluetoothLeCharacteristicProperty.Read)
+        _s += (_s == "" ? "" : " | ") + "READ";
+
+    if (_properties & BluetoothLeCharacteristicProperty.Write)
+        _s += (_s == "" ? "" : " | ") + "WRITE";
+
+    if (_properties & BluetoothLeCharacteristicProperty.WriteWithoutResponse)
+        _s += (_s == "" ? "" : " | ") + "WRITE NO RESP";
+
+    if (_properties & BluetoothLeCharacteristicProperty.Notify)
+        _s += (_s == "" ? "" : " | ") + "NOTIFY";
+
+    if (_properties & BluetoothLeCharacteristicProperty.Indicate)
+        _s += (_s == "" ? "" : " | ") + "INDICATE";
+
+    return (_s == "") ? "NONE" : _s;
+}

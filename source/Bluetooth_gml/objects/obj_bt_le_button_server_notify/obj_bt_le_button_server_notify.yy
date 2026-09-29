@@ -1,17 +1,16 @@
 {
   "$GMObject":"",
-  "%Name":"obj_bt_le_char_button",
+  "%Name":"obj_bt_le_button_server_notify",
   "eventList":[
     {"$GMEvent":"v1","%Name":"","collisionObjectId":null,"eventNum":0,"eventType":0,"isDnD":false,"name":"","resourceType":"GMEvent","resourceVersion":"2.0",},
     {"$GMEvent":"v1","%Name":"","collisionObjectId":null,"eventNum":4,"eventType":6,"isDnD":false,"name":"","resourceType":"GMEvent","resourceVersion":"2.0",},
-    {"$GMEvent":"v1","%Name":"","collisionObjectId":null,"eventNum":63,"eventType":7,"isDnD":false,"name":"","resourceType":"GMEvent","resourceVersion":"2.0",},
   ],
   "managed":true,
-  "name":"obj_bt_le_char_button",
+  "name":"obj_bt_le_button_server_notify",
   "overriddenProperties":[],
   "parent":{
-    "name":"Client",
-    "path":"folders/GMBluetooth DEMO/BLE/Client.yy",
+    "name":"Server",
+    "path":"folders/GMBluetooth DEMO/BLE/Server.yy",
   },
   "parentObjectId":{
     "name":"obj_gm_button",

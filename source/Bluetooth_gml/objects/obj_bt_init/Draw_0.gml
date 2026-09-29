@@ -1,4 +1,4 @@
-/// obj_bt_init : Draw GUI
+/// obj_bt_init : Draw
 
 var _x = 16;
 var _y = 100;

@@ -3,7 +3,6 @@ show_debug_message("========== BLUETOOTH LE CLIENT (DEMO) ==========");
 
 bt_ready = bluetooth_is_initialized();
 
-last_permission_status = BluetoothPermissionStatus.Unknown;
 auto_scan_after_permission = true;
 
 global.ble_conn = 0;
@@ -54,14 +53,14 @@ bluetooth_start_le_scan = function()
     }
 
     device_instances = [];
-    _y = 100;
+    list_y = 100;
 
     var _error = bluetooth_le_scan_start(true);
     show_debug_message($"[GML] bluetooth_le_scan_start() = {_error}");
 };
 
-_x = max(650, room_width * 0.55);
-_y = 100;
+list_x = max(650, room_width * 0.55);
+list_y = 100;
 
 bluetooth_set_callback_device_found(function(_device)
 {
@@ -87,14 +86,12 @@ bluetooth_set_callback_device_found(function(_device)
         : "<no address>";
 
     var _inst = instance_create_depth(
-        _x,
-        _y,
+        list_x,
+        list_y,
         0,
         obj_bt_le_device,
         {device: _device}
     );
-
-    _inst.text = _name + " - " + _address;
 
     array_push(device_instances, _inst);
     array_push(devices, {
@@ -104,7 +101,7 @@ bluetooth_set_callback_device_found(function(_device)
         address: _address
     });
 
-    _y += 60;
+    list_y += 60;
 });
 
 bluetooth_set_callback_scan_stopped(function(_error, _message)
@@ -141,9 +138,7 @@ bluetooth_set_callback_le_disconnected(
 
 bluetooth_device_clear();
 
-last_permission_status = bluetooth_permission_get_status();
-
-if (last_permission_status == BluetoothPermissionStatus.Granted)
+if (bluetooth_permission_get_status() == BluetoothPermissionStatus.Granted)
 {
     auto_scan_after_permission = false;
     bluetooth_start_le_scan();

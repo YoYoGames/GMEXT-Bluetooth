@@ -19,34 +19,4 @@ else if (string_lower(uuid) == string_lower(DEMO_CHAR_TX_UUID))
 else if (string_lower(uuid) == string_lower(DEMO_CHAR_INFO_UUID))
     name = "INFO";
 
-function short_uuid(_uuid)
-{
-    return (string_length(_uuid) > 13)
-        ? string_copy(_uuid, 1, 8) + "..."
-        : _uuid;
-}
-
-function property_names(_properties)
-{
-    var _s = "";
-
-    if (_properties & BluetoothLeCharacteristicProperty.Read)
-        _s += (_s == "" ? "" : " | ") + "READ";
-
-    if (_properties & BluetoothLeCharacteristicProperty.Write)
-        _s += (_s == "" ? "" : " | ") + "WRITE";
-
-    if (_properties & BluetoothLeCharacteristicProperty.WriteWithoutResponse)
-        _s += (_s == "" ? "" : " | ") + "WRITE NO RESP";
-
-    if (_properties & BluetoothLeCharacteristicProperty.Notify)
-        _s += (_s == "" ? "" : " | ") + "NOTIFY";
-
-    if (_properties & BluetoothLeCharacteristicProperty.Indicate)
-        _s += (_s == "" ? "" : " | ") + "INDICATE";
-
-    return (_s == "") ? "NONE" : _s;
-}
-
-label = short_uuid(service_uuid) + " / " + short_uuid(uuid);
-properties_text = property_names(properties);
+properties_text = ble_property_names(properties);

@@ -3,25 +3,27 @@
 rows = [];
 buttons = [];
 log_lines = [];
-next_row_y = 250;
+
+// Right half of the room; the left half belongs to the Bluetooth/BLE status panels.
+ui_x = 560;
+rows_top = 230;
+row_h = 76;
+next_row_y = rows_top;
+
+// Characteristic action buttons: small, laid out left-to-right, text to their right.
+action_w = 128;
+action_h = 38;
+action_gap = 8;
+
 discovery_in_progress = false;
 discover_button = noone;
+disconnect_button = noone;
 
 function log_msg(_s)
 {
     show_debug_message("[GML] " + _s);
     array_push(log_lines, _s);
     if (array_length(log_lines) > 8) array_delete(log_lines, 0, 1);
-}
-
-function bytes_to_string(_buf, _n)
-{
-    var _s = "";
-    for (var i = 0; i < _n; i++)
-    {
-        _s += chr(buffer_peek(_buf, i, buffer_u8));
-    }
-    return _s;
 }
 
 function clear_gatt_ui()
@@ -38,36 +40,7 @@ function clear_gatt_ui()
 
     rows = [];
     buttons = [];
-    next_row_y = 250;
-}
-
-function property_names(_properties)
-{
-    var _names = [];
-
-    if (_properties & BluetoothLeCharacteristicProperty.Read)
-        array_push(_names, "READ");
-
-    if (_properties & BluetoothLeCharacteristicProperty.Write)
-        array_push(_names, "WRITE");
-
-    if (_properties & BluetoothLeCharacteristicProperty.WriteWithoutResponse)
-        array_push(_names, "WRITE_NO_RESPONSE");
-
-    if (_properties & BluetoothLeCharacteristicProperty.Notify)
-        array_push(_names, "NOTIFY");
-
-    if (_properties & BluetoothLeCharacteristicProperty.Indicate)
-        array_push(_names, "INDICATE");
-
-    var _s = "";
-    for (var i = 0; i < array_length(_names); i++)
-    {
-        if (i > 0) _s += ", ";
-        _s += _names[i];
-    }
-
-    return (_s == "") ? "NONE" : _s;
+    next_row_y = rows_top;
 }
 
 // One row per discovered characteristic: a label plus action buttons gated on
@@ -75,38 +48,44 @@ function property_names(_properties)
 function add_characteristic_row(_characteristic, _service_uuid)
 {
     var _y = next_row_y;
-    next_row_y += 112;
+    next_row_y += row_h;
 
     var _properties = bluetooth_le_characteristic_get_properties(_characteristic);
     var _uuid = bluetooth_le_characteristic_get_uuid(_characteristic);
 
     log_msg(
         "characteristic " + _uuid
-        + " properties=" + property_names(_properties)
+        + " properties=" + ble_property_names(_properties)
         + " (" + string(_properties) + ")"
     );
 
-    var _row = instance_create_depth(650, _y, 0, obj_bt_le_characteristic, {
+    var _row = instance_create_depth(ui_x, _y, 0, obj_bt_le_characteristic, {
         characteristic: _characteristic,
         service_uuid: _service_uuid,
         properties: _properties
     });
     array_push(rows, _row);
 
-    var _bx = 1040;
+    // Buttons from left to right; the row's text is drawn after the last one.
+    var _bx = ui_x;
+    var _by = _y + action_h / 2;
+
+    var _add_button = function(_object, _bx, _by, _extra)
+    {
+        _extra.owner = id;
+        var _inst = instance_create_depth(_bx + action_w / 2, _by, 0, _object, _extra);
+        _inst.image_xscale = action_w / sprite_get_width(spr_gm_button);
+        _inst.image_yscale = action_h / sprite_get_height(spr_gm_button);
+        array_push(buttons, _inst);
+        return _bx + action_w + action_gap;
+    };
 
     if (_properties & BluetoothLeCharacteristicProperty.Read)
     {
-        array_push(
-            buttons,
-            instance_create_depth(_bx, _y + 28, 0, obj_bt_le_char_button, {
-                owner: id,
-                row: _row,
-                characteristic: _characteristic,
-                action: "read"
-            })
-        );
-        _bx += 112;
+        _bx = _add_button(obj_bt_le_button_read, _bx, _by, {
+            row: _row,
+            characteristic: _characteristic
+        });
     }
 
     if (_properties & (
@@ -114,19 +93,15 @@ function add_characteristic_row(_characteristic, _service_uuid)
         | BluetoothLeCharacteristicProperty.WriteWithoutResponse
     ))
     {
-        var _write_type = (_properties & BluetoothLeCharacteristicProperty.Write) ? 0 : 1;
+        var _write_type = (_properties & BluetoothLeCharacteristicProperty.Write)
+            ? BLE_WRITE_WITH_RESPONSE
+            : BLE_WRITE_WITHOUT_RESPONSE;
 
-        array_push(
-            buttons,
-            instance_create_depth(_bx, _y + 28, 0, obj_bt_le_char_button, {
-                owner: id,
-                row: _row,
-                characteristic: _characteristic,
-                action: "write",
-                write_type: _write_type
-            })
-        );
-        _bx += 112;
+        _bx = _add_button(obj_bt_le_button_write, _bx, _by, {
+            row: _row,
+            characteristic: _characteristic,
+            write_type: _write_type
+        });
     }
 
     if (_properties & (
@@ -138,17 +113,14 @@ function add_characteristic_row(_characteristic, _service_uuid)
             ? BluetoothLeSubscribeMode.Notify
             : BluetoothLeSubscribeMode.Indicate;
 
-        array_push(
-            buttons,
-            instance_create_depth(_bx, _y + 28, 0, obj_bt_le_char_button, {
-                owner: id,
-                row: _row,
-                characteristic: _characteristic,
-                action: "subscribe",
-                subscribe_mode: _sub_mode
-            })
-        );
+        _bx = _add_button(obj_bt_le_button_subscribe, _bx, _by, {
+            row: _row,
+            characteristic: _characteristic,
+            subscribe_mode: _sub_mode
+        });
     }
+
+    _row.x = _bx + action_gap;
 }
 
 
@@ -291,7 +263,7 @@ on_value_changed = function(_characteristic, _connection)
 
     if (_n > 0)
     {
-        var _text = bytes_to_string(_buf, _n);
+        var _text = ble_bytes_to_string(_buf, _n);
         log_msg("notification: " + _text);
 
         var _row = find_row_for_characteristic(_characteristic);
@@ -308,9 +280,10 @@ on_value_changed = function(_characteristic, _connection)
 log_msg("connected handle=" + string(connection));
 log_msg("press DISCOVER GATT to find the demo service");
 
-discover_button = instance_create_depth(760, 170, 0, obj_bt_le_char_button, {
-    owner: id,
-    row: noone,
-    characteristic: 0,
-    action: "discover"
+discover_button = instance_create_depth(872, 600, 0, obj_bt_le_button_discover, {
+    owner: id
+});
+
+disconnect_button = instance_create_depth(872, 672, 0, obj_bt_le_button_disconnect, {
+    owner: id
 });

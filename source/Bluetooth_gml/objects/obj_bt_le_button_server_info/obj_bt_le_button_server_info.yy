@@ -1,20 +1,21 @@
 {
   "$GMObject":"",
-  "%Name":"tm_bt_gmrt",
+  "%Name":"obj_bt_le_button_server_info",
   "eventList":[
     {"$GMEvent":"v1","%Name":"","collisionObjectId":null,"eventNum":0,"eventType":0,"isDnD":false,"name":"","resourceType":"GMEvent","resourceVersion":"2.0",},
-    {"$GMEvent":"v1","%Name":"","collisionObjectId":null,"eventNum":0,"eventType":3,"isDnD":false,"name":"","resourceType":"GMEvent","resourceVersion":"2.0",},
-    {"$GMEvent":"v1","%Name":"","collisionObjectId":null,"eventNum":64,"eventType":8,"isDnD":false,"name":"","resourceType":"GMEvent","resourceVersion":"2.0",},
-    {"$GMEvent":"v1","%Name":"","collisionObjectId":null,"eventNum":0,"eventType":12,"isDnD":false,"name":"","resourceType":"GMEvent","resourceVersion":"2.0",},
+    {"$GMEvent":"v1","%Name":"","collisionObjectId":null,"eventNum":4,"eventType":6,"isDnD":false,"name":"","resourceType":"GMEvent","resourceVersion":"2.0",},
   ],
   "managed":true,
-  "name":"tm_bt_gmrt",
+  "name":"obj_bt_le_button_server_info",
   "overriddenProperties":[],
   "parent":{
-    "name":"PRE TEST",
-    "path":"folders/GMBluetooth DEMO/PRE TEST.yy",
+    "name":"Server",
+    "path":"folders/GMBluetooth DEMO/BLE/Server.yy",
   },
-  "parentObjectId":null,
+  "parentObjectId":{
+    "name":"obj_gm_button",
+    "path":"objects/obj_gm_button/obj_gm_button.yy",
+  },
   "persistent":false,
   "physicsAngularDamping":0.1,
   "physicsDensity":0.5,
@@ -32,7 +33,10 @@
   "resourceType":"GMObject",
   "resourceVersion":"2.0",
   "solid":false,
-  "spriteId":null,
+  "spriteId":{
+    "name":"spr_gm_button",
+    "path":"sprites/spr_gm_button/spr_gm_button.yy",
+  },
   "spriteMaskId":null,
   "visible":true,
 }

@@ -1,4 +1,4 @@
-/// obj_bt_le_client : Draw GUI
+/// obj_bt_le_client : Draw
 
 var _x = 16;
 var _y = 400;
