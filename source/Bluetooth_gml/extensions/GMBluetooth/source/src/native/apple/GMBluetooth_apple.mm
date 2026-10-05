@@ -139,6 +139,11 @@
 
 @property(nonatomic, strong) NSMutableDictionary <NSString *, CBMutableService *> *addedServices;
 
+// Initial values CoreBluetooth cannot cache, keyed by their characteristic
+// object: it caches a value only on a read-only characteristic and throws for
+// any other, so these are served from didReceiveReadRequest instead.
+@property(nonatomic, strong) NSMapTable <CBMutableCharacteristic *, NSData *> *initialValues;
+
 @property(nonatomic, strong) NSMutableDictionary <NSNumber *, CBATTRequest *> *readRequestsLookup;
 @property(nonatomic, strong) NSMutableDictionary <NSNumber *, CBATTRequest *> *writeRequestsLookup;
 
@@ -428,7 +433,9 @@
         _connectedPeripherals = [NSMutableDictionary new];
         
         _addedServices = [NSMutableDictionary new];
-        
+        _initialValues = [NSMapTable mapTableWithKeyOptions:NSPointerFunctionsStrongMemory | NSPointerFunctionsObjectPointerPersonality
+                                               valueOptions:NSPointerFunctionsStrongMemory];
+
         _startAdvertisementQueue = [NSMutableArray new];
         
         _addServiceQueue = [NSMutableArray new];
@@ -522,6 +529,7 @@ static bool _scanPendingPowerOn = false;
 
     // The core fails the ops these held once the backend is gone.
     [_peripheralQueues removeAllObjects];
+    [_initialValues removeAllObjects];
 
     _centralManager = nil;
     _peripheralManager = nil;
@@ -837,11 +845,18 @@ static bool _scanPendingPowerOn = false;
                 }
             }
 
+            // CoreBluetooth caches a value only on a read-only characteristic
+            // and throws for any other; those get it from _initialValues.
+            const BOOL readOnly = charProperties == CBCharacteristicPropertyRead &&
+                (charPermissions & (CBAttributePermissionsWriteable | CBAttributePermissionsWriteEncryptionRequired)) == 0;
+
             CBMutableCharacteristic *characteristic =
                 [[CBMutableCharacteristic alloc] initWithType:charUUID
                                                    properties:charProperties
-                                                        value:initialValue
+                                                        value:(readOnly ? initialValue : nil)
                                                   permissions:charPermissions];
+            if (initialValue && !readOnly)
+                [_initialValues setObject:initialValue forKey:characteristic];
 
             NSMutableArray<CBMutableDescriptor *> *descriptorsArray = [NSMutableArray array];
             id descriptorsValue = charDict[@"descriptors"];
@@ -880,7 +895,8 @@ static bool _scanPendingPowerOn = false;
     if (!_isServerOpen) return -1;
     
     [_peripheralManager removeAllServices];
-    
+    [_initialValues removeAllObjects];
+
     [self notifyResult:@"bt_le_server_clear_services" errorCode:nil extraParams:nil];
 
     return 0;
@@ -891,7 +907,8 @@ static bool _scanPendingPowerOn = false;
     
     _isServerOpen = false;
     [_peripheralManager removeAllServices];
-    
+    [_initialValues removeAllObjects];
+
     if ([_peripheralManager isAdvertising]) {
         [_peripheralManager stopAdvertising];
     }
@@ -1004,6 +1021,10 @@ static bool _scanPendingPowerOn = false;
     if (!queuedService) return;
     
     if (!error) _addedServices[[service.UUID UUIDString]] = queuedService.service;
+    else {
+        for (CBMutableCharacteristic *characteristic in queuedService.service.characteristics)
+            [_initialValues removeObjectForKey:characteristic];
+    }
     [self completeOp:queuedService.opId error:error];
     
     [self handleAddServiceQueue];
@@ -1121,6 +1142,19 @@ static bool _scanPendingPowerOn = false;
 }
 
 - (void) peripheralManager:(CBPeripheralManager *)peripheral didReceiveReadRequest:(CBATTRequest *)request {
+    // An initial value CoreBluetooth could not cache is served here, the way
+    // Windows serves StaticValue, and GML never sees the request.
+    NSData *initialValue = [_initialValues objectForKey:(CBMutableCharacteristic *)request.characteristic];
+    if (initialValue) {
+        if (request.offset > initialValue.length) {
+            [peripheral respondToRequest:request withResult:CBATTErrorInvalidOffset];
+            return;
+        }
+        request.value = [initialValue subdataWithRange:NSMakeRange(request.offset, initialValue.length - request.offset)];
+        [peripheral respondToRequest:request withResult:CBATTErrorSuccess];
+        return;
+    }
+
     NSMutableDictionary *params = [NSMutableDictionary dictionary];
     BOOL isDescriptorRequest = NO;
     

@@ -2882,6 +2882,12 @@ public class GMBluetooth extends GMBluetoothInternal
         if (charEntry == null)
             return result(INVALID_HANDLE, "Invalid BLE characteristic handle");
 
+        // The CCCD has one writer on every platform, bluetooth_le_characteristic_subscribe.
+        if (descEntry.gattDescriptor != null && CCCD_UUID.equals(descEntry.gattDescriptor.getUuid()))
+            return result(
+                INVALID_ARGUMENT,
+                "The CCCD is written by bluetooth_le_characteristic_subscribe");
+
         LeConnectionEntry connEntry = getLeConnection(charEntry.connection);
 
         if (connEntry == null || connEntry.gatt == null || !connEntry.connected)

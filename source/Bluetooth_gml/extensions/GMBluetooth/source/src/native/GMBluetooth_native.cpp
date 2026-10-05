@@ -245,6 +245,40 @@ namespace
         return out;
     }
 
+    // The UUID spellings every backend can take: 4 or 8 hex digits, or the
+    // 36-character 8-4-4-4-12 form. Apple's [CBUUID UUIDWithString:] throws on
+    // anything else, so every UUID GML passes in is checked here first.
+    bool is_valid_uuid(std::string_view uuid)
+    {
+        const auto is_hex = [](char c) { return std::isxdigit(static_cast<unsigned char>(c)) != 0; };
+
+        if (uuid.size() == 4 || uuid.size() == 8)
+            return std::all_of(uuid.begin(), uuid.end(), is_hex);
+
+        if (uuid.size() != 36)
+            return false;
+
+        for (std::size_t i = 0; i < uuid.size(); ++i)
+        {
+            const bool dash = (i == 8 || i == 13 || i == 18 || i == 23);
+            if (dash ? uuid[i] != '-' : !is_hex(uuid[i]))
+                return false;
+        }
+        return true;
+    }
+
+    // The pre-flight for a UUID argument: false, with the last error set, when
+    // it is not one is_valid_uuid accepts.
+    bool check_uuid(std::string_view uuid)
+    {
+        if (is_valid_uuid(uuid))
+            return true;
+
+        g_last_error = Error::InvalidArgument;
+        g_last_error_message = "Invalid UUID: " + std::string(uuid);
+        return false;
+    }
+
     // Parent-scoped handle caches for GATT services/characteristics/descriptors.
     // Handles are 1-based indices into a flat vector, same idiom as DeviceManager;
     // find_or_insert is idempotent so re-running discovery doesn't mint duplicates.
@@ -1810,6 +1844,9 @@ std::uint64_t bluetooth_classic_connect(std::uint64_t device, std::string_view s
         return 0;
     }
 
+    if (!check_uuid(service_uuid))
+        return 0;
+
     const std::uint64_t connection = g_classic_connection_manager.create_connection(device);
 
     // Registered before calling the backend: connect runs asynchronously and may
@@ -1969,6 +2006,9 @@ std::int32_t bluetooth_classic_server_start(std::string_view name, std::string_v
         g_last_error_message = "Bluetooth backend is not initialized";
         return static_cast<std::int32_t>(Error::NotInitialized);
     }
+
+    if (!check_uuid(service_uuid))
+        return static_cast<std::int32_t>(Error::InvalidArgument);
 
     std::string message;
     const Error error = g_backend->classic_server_start(std::string(name), std::string(service_uuid), message);
@@ -2571,6 +2611,15 @@ std::int32_t bluetooth_le_descriptor_write(std::uint64_t descriptor, struct gm::
     const std::string characteristic_uuid = g_characteristic_cache.get_uuid(characteristic);
     const std::string descriptor_uuid = g_descriptor_cache.get_uuid(descriptor);
 
+    // The CCCD has one writer on every platform, bluetooth_le_characteristic_subscribe;
+    // CoreBluetooth throws on a direct write.
+    if (canonical_uuid(descriptor_uuid) == "00002902-0000-1000-8000-00805f9b34fb")
+    {
+        g_last_error = Error::InvalidArgument;
+        g_last_error_message = "The CCCD is written by bluetooth_le_characteristic_subscribe";
+        return static_cast<std::int32_t>(Error::InvalidArgument);
+    }
+
     if (!buffer_range_valid(data, offset, size, "bluetooth_le_descriptor_write"))
         return static_cast<std::int32_t>(Error::InvalidArgument);
 
@@ -2599,6 +2648,29 @@ std::int32_t bluetooth_le_advertise_start(std::string_view settings_json, std::s
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
         return static_cast<std::int32_t>(Error::NotInitialized);
+    }
+
+    // Only the service UUIDs are checked here; JSON that does not parse is
+    // still the backend's to reject.
+    if (auto data = json::parse(data_json); data && data->is_object())
+    {
+        if (const auto* services = data->find("services"); services && services->is_array())
+        {
+            for (const auto& entry : services->array_value)
+            {
+                const auto* uuid = entry.is_object() ? entry.find("uuid") : nullptr;
+                if (!uuid)
+                    continue;
+                if (!uuid->is_string())
+                {
+                    g_last_error = Error::InvalidArgument;
+                    g_last_error_message = "Invalid UUID: advertised service uuid is not a string";
+                    return static_cast<std::int32_t>(Error::InvalidArgument);
+                }
+                if (!check_uuid(uuid->string_value))
+                    return static_cast<std::int32_t>(Error::InvalidArgument);
+            }
+        }
     }
 
     const auto op_id = g_le_ops.add(LeOpKind::AdvertiseStart, callback, 0, 0);
@@ -2683,11 +2755,17 @@ std::int32_t bluetooth_le_server_add_service(const BluetoothLeServiceDefinition&
         return static_cast<std::int32_t>(Error::NotInitialized);
     }
 
-    if (service.uuid.empty())
-    {
-        g_last_error = Error::InvalidArgument;
-        g_last_error_message = "BLE service UUID is required";
+    if (!check_uuid(service.uuid))
         return static_cast<std::int32_t>(Error::InvalidArgument);
+    for (const auto& characteristic : service.characteristics)
+    {
+        if (!check_uuid(characteristic.uuid))
+            return static_cast<std::int32_t>(Error::InvalidArgument);
+        for (const auto& descriptor : characteristic.descriptors)
+        {
+            if (!check_uuid(descriptor.uuid))
+                return static_cast<std::int32_t>(Error::InvalidArgument);
+        }
     }
 
     const auto op_id = g_le_ops.add(LeOpKind::ServerAddService, callback, 0, 0);
@@ -2804,6 +2882,9 @@ std::int32_t bluetooth_le_server_notify_value(std::string_view service_uuid, std
     // per-connection targeting available below this layer yet, so
     // `connection` is accepted for forward-compatibility but not honored.
     (void)connection;
+
+    if (!check_uuid(service_uuid) || !check_uuid(characteristic_uuid))
+        return static_cast<std::int32_t>(Error::InvalidArgument);
 
     if (!buffer_range_valid(data, offset, size, "bluetooth_le_server_notify_value"))
         return static_cast<std::int32_t>(Error::InvalidArgument);
