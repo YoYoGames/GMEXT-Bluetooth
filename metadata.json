@@ -5,7 +5,7 @@
     "releaseTemplate": "templates/release_body.md",
     "extensionMetaData": [
         {
-            "extensionFile": "source/Bluetooth_gml/extensions/Bluetooth/Bluetooth.yy",
+            "extensionFile": "source/Bluetooth_gml/extensions/GMBluetooth/GMBluetooth.yy",
             "packageId": "com.yoyogames.bluetoothext",
             "packageName": "Bluetooth Ext",
             "packageVersion": "1.0.1",

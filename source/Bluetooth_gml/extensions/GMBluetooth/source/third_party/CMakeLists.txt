@@ -64,14 +64,12 @@ elseif(CMAKE_OSX_SYSROOT MATCHES "iphone")
     target_link_libraries(ext_third_party
         INTERFACE
             "-framework CoreBluetooth"
-            "-framework Foundation"
-            "-framework CoreLocation")
+            "-framework Foundation")
 
     target_link_libraries(${EXT_MAIN_TARGET}
         PRIVATE
             "-framework CoreBluetooth"
-            "-framework Foundation"
-            "-framework CoreLocation")
+            "-framework Foundation")
 
     # Framework search paths for Xcode
     set_target_properties(${EXT_MAIN_TARGET} PROPERTIES
@@ -96,14 +94,12 @@ elseif(APPLE AND NOT EXTGEN_IS_APPLE_MOBILE)
         INTERFACE
             "-framework CoreBluetooth"
             "-framework Foundation"
-            "-framework CoreLocation"
             "-framework IOBluetooth")
 
     target_link_libraries(${EXT_MAIN_TARGET}
         PRIVATE
             "-framework CoreBluetooth"
             "-framework Foundation"
-            "-framework CoreLocation"
             "-framework IOBluetooth")
 
 endif()

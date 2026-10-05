@@ -2258,6 +2258,32 @@ std::int32_t bluetooth_le_disconnect(std::uint64_t connection)
     // waiting on it may outlive the call.
     purge_le_connection(connection);
 
+    // A connect still in flight is cancelled, not completed: its callback
+    // fires now, and a late open event from the backend finds none.
+    GMFunction connect_callback;
+    {
+        std::scoped_lock lock(g_pending_le_connect_mutex);
+        const auto it = g_pending_le_connect_callbacks.find(connection);
+        if (it != g_pending_le_connect_callbacks.end())
+        {
+            connect_callback = it->second;
+            g_pending_le_connect_callbacks.erase(it);
+        }
+    }
+    if (connect_callback)
+    {
+        const std::uint64_t device = g_le_connection_manager.get_device(connection);
+        try
+        {
+            // callback(error_code, message, connection, device)
+            connect_callback.call(static_cast<double>(Error::ConnectionFailed), std::string("Connection cancelled by bluetooth_le_disconnect"), static_cast<double>(connection), static_cast<double>(device));
+        }
+        catch (const std::exception& e)
+        {
+            GMBT_LOG("Error dispatching le_connect callback: %s", e.what());
+        }
+    }
+
     return static_cast<std::int32_t>(error);
 }
 

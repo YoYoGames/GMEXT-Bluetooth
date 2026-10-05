@@ -346,7 +346,25 @@ public class GMBluetooth extends GMBluetoothInternal
         final Object receiveLock = new Object();
         final ArrayDeque<byte[]> receiveChunks = new ArrayDeque<>();
         int receiveAvailable = 0;
+
+        // Set when the read loop has ended. A finished entry stays only while
+        // it holds bytes the game has not read.
+        volatile boolean finished = false;
+
+        // Sends queued for the writer thread; sendQueuedBytes counts a chunk
+        // until its write() has returned.
+        final Object sendLock = new Object();
+        final ArrayDeque<byte[]> sendQueue = new ArrayDeque<>();
+        int sendQueuedBytes = 0;
+        boolean closeAfterSend = false;
     }
+
+    // Past this many queued bytes bluetooth_classic_send answers BUSY.
+    private static final int MAX_QUEUED_SEND_BYTES = 1024 * 1024;
+
+    // How long bluetooth_classic_disconnect lets queued bytes drain to a peer
+    // that has stopped reading before the socket is closed anyway.
+    private static final long CLOSE_AFTER_SEND_TIMEOUT_MS = 2000;
 
     private final Object connectionLock = new Object();
     private final HashMap<Long, ConnectionEntry> connections = new HashMap<>();
@@ -433,6 +451,11 @@ public class GMBluetooth extends GMBluetoothInternal
         boolean descriptorsDiscovered = false;
         volatile int subscribeMode = SUBSCRIBE_MODE_UNSUBSCRIBE;
 
+        // The last value read or notified, copied in the GATT callback. The
+        // stack and the write path both overwrite the shared characteristic
+        // object, so get_value never reads it.
+        volatile byte[] lastValue = new byte[0];
+
         final ArrayList<Long> descriptorHandles = new ArrayList<>();
     }
 
@@ -442,6 +465,9 @@ public class GMBluetooth extends GMBluetoothInternal
         long characteristic;
         BluetoothGattDescriptor gattDescriptor;
         String uuid = "";
+
+        // As LeCharacteristicEntry.lastValue, for the last read.
+        volatile byte[] lastValue = new byte[0];
     }
 
     private static final class LeServerRequestEntry
@@ -455,7 +481,12 @@ public class GMBluetooth extends GMBluetoothInternal
         boolean isWrite;
         boolean responseNeeded;
         byte[] writeValue = new byte[0];
+        long receivedAtNanos = System.nanoTime();
     }
+
+    // A write without response needs no answer, so nothing else removes it.
+    // It is kept this long for GML to read its value, then dropped.
+    private static final long NO_RESPONSE_WRITE_TTL_NANOS = 5_000_000_000L;
 
     private final Object leConnectionLock = new Object();
     private final HashMap<Long, LeConnectionEntry> leConnections = new HashMap<>();
@@ -890,6 +921,7 @@ public class GMBluetooth extends GMBluetoothInternal
         String message)
     {
         String safeMessage = message != null ? message : "";
+        ConnectionEntry entry = getConnection(connection);
 
         invoke(
             callbackClassicDisconnected,
@@ -897,10 +929,37 @@ public class GMBluetooth extends GMBluetoothInternal
             error,
             safeMessage);
 
-        eraseConnection(connection);
+        // Bytes the game has not read yet outlive a remote hang-up: the entry
+        // stays until bluetooth_classic_receive drains it,
+        // bluetooth_classic_disconnect drops it or shutdown clears it.
+        boolean keep = false;
+
+        if (entry != null)
+        {
+            synchronized (entry.receiveLock)
+            {
+                entry.finished = true;
+                entry.connected = false;
+                keep = !entry.manualClosing && entry.receiveAvailable > 0;
+            }
+
+            wakeWriter(entry);
+        }
+
+        if (!keep)
+            eraseConnection(connection);
 
         if (error != OK)
             setLastError(error, safeMessage);
+    }
+
+
+    private static void wakeWriter(ConnectionEntry entry)
+    {
+        synchronized (entry.sendLock)
+        {
+            entry.sendLock.notifyAll();
+        }
     }
 
 
@@ -1161,6 +1220,45 @@ public class GMBluetooth extends GMBluetoothInternal
         synchronized (leEntityLock)
         {
             return leDescriptors.get(handle);
+        }
+    }
+
+
+    // Copies a read or notified value onto the characteristic's entry, in the
+    // GATT callback. Returns the characteristic's handle, null when the
+    // object is not one this extension knows.
+    private Long storeCharacteristicValue(
+        BluetoothGattCharacteristic characteristic,
+        byte[] value)
+    {
+        byte[] copy = value != null ? value.clone() : new byte[0];
+
+        synchronized (leEntityLock)
+        {
+            Long handle = leCharacteristicHandleByObject.get(characteristic);
+            LeCharacteristicEntry entry = handle != null ? leCharacteristics.get(handle) : null;
+
+            if (entry != null)
+                entry.lastValue = copy;
+
+            return handle;
+        }
+    }
+
+
+    private void storeDescriptorValue(
+        BluetoothGattDescriptor descriptor,
+        byte[] value)
+    {
+        byte[] copy = value != null ? value.clone() : new byte[0];
+
+        synchronized (leEntityLock)
+        {
+            Long handle = leDescriptorHandleByObject.get(descriptor);
+            LeDescriptorEntry entry = handle != null ? leDescriptors.get(handle) : null;
+
+            if (entry != null)
+                entry.lastValue = copy;
         }
     }
 
@@ -2045,10 +2143,34 @@ public class GMBluetooth extends GMBluetoothInternal
             }
 
 
+            // Before API 33 the value exists only on the shared object, so it
+            // is copied here, before another read or notify replaces it.
             @Override
             public void onCharacteristicRead(
                 BluetoothGatt gatt,
                 BluetoothGattCharacteristic characteristic,
+                int status)
+            {
+                characteristicRead(characteristic, characteristic.getValue(), status);
+            }
+
+
+            // API 33+: the stack hands the value over and no longer calls the
+            // overload above.
+            @Override
+            public void onCharacteristicRead(
+                BluetoothGatt gatt,
+                BluetoothGattCharacteristic characteristic,
+                byte[] value,
+                int status)
+            {
+                characteristicRead(characteristic, value, status);
+            }
+
+
+            private void characteristicRead(
+                BluetoothGattCharacteristic characteristic,
+                byte[] value,
                 int status)
             {
                 if (generation.get() != workerGeneration)
@@ -2057,6 +2179,9 @@ public class GMBluetooth extends GMBluetoothInternal
                 LeConnectionEntry entry = getLeConnection(connection);
                 if (entry == null)
                     return;
+
+                if (status == BluetoothGatt.GATT_SUCCESS)
+                    storeCharacteristicValue(characteristic, value);
 
                 LePendingOp op = takeCurrentOp(entry);
 
@@ -2113,12 +2238,35 @@ public class GMBluetooth extends GMBluetoothInternal
                 BluetoothGattDescriptor descriptor,
                 int status)
             {
+                descriptorRead(descriptor, descriptor.getValue(), status);
+            }
+
+
+            @Override
+            public void onDescriptorRead(
+                BluetoothGatt gatt,
+                BluetoothGattDescriptor descriptor,
+                int status,
+                byte[] value)
+            {
+                descriptorRead(descriptor, value, status);
+            }
+
+
+            private void descriptorRead(
+                BluetoothGattDescriptor descriptor,
+                byte[] value,
+                int status)
+            {
                 if (generation.get() != workerGeneration)
                     return;
 
                 LeConnectionEntry entry = getLeConnection(connection);
                 if (entry == null)
                     return;
+
+                if (status == BluetoothGatt.GATT_SUCCESS)
+                    storeDescriptorValue(descriptor, value);
 
                 LePendingOp op = takeCurrentOp(entry);
 
@@ -2202,16 +2350,28 @@ public class GMBluetooth extends GMBluetoothInternal
                 BluetoothGatt gatt,
                 BluetoothGattCharacteristic characteristic)
             {
+                characteristicChanged(characteristic, characteristic.getValue());
+            }
+
+
+            @Override
+            public void onCharacteristicChanged(
+                BluetoothGatt gatt,
+                BluetoothGattCharacteristic characteristic,
+                byte[] value)
+            {
+                characteristicChanged(characteristic, value);
+            }
+
+
+            private void characteristicChanged(
+                BluetoothGattCharacteristic characteristic,
+                byte[] value)
+            {
                 if (generation.get() != workerGeneration)
                     return;
 
-                Long characteristicHandle;
-
-                synchronized (leEntityLock)
-                {
-                    characteristicHandle =
-                        leCharacteristicHandleByObject.get(characteristic);
-                }
+                Long characteristicHandle = storeCharacteristicValue(characteristic, value);
 
                 if (characteristicHandle != null)
                     dispatchLeCharacteristicValueChanged(
@@ -2692,7 +2852,7 @@ public class GMBluetooth extends GMBluetoothInternal
         if (entry == null || entry.gattCharacteristic == null)
             return 0;
 
-        byte[] value = entry.gattCharacteristic.getValue();
+        byte[] value = entry.lastValue;
 
         if (value == null || value.length == 0)
             return 0;
@@ -2899,7 +3059,7 @@ public class GMBluetooth extends GMBluetoothInternal
         if (entry == null || entry.gattDescriptor == null)
             return 0;
 
-        byte[] value = entry.gattDescriptor.getValue();
+        byte[] value = entry.lastValue;
 
         if (value == null || value.length == 0)
             return 0;
@@ -3451,6 +3611,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
                 synchronized (leServerRequestLock)
                 {
+                    expireNoResponseWrites();
                     leServerRequests.put(requestId, request);
                 }
 
@@ -3461,14 +3622,6 @@ public class GMBluetooth extends GMBluetoothInternal
                     serviceUuid,
                     characteristicUuid,
                     "");
-
-                if (!responseNeeded)
-                {
-                    synchronized (leServerRequestLock)
-                    {
-                        leServerRequests.remove(requestId);
-                    }
-                }
             }
 
 
@@ -3618,6 +3771,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
                 synchronized (leServerRequestLock)
                 {
+                    expireNoResponseWrites();
                     leServerRequests.put(requestId, request);
                 }
 
@@ -3628,14 +3782,6 @@ public class GMBluetooth extends GMBluetoothInternal
                     serviceUuid,
                     characteristicUuid,
                     descriptorUuid);
-
-                if (!responseNeeded)
-                {
-                    synchronized (leServerRequestLock)
-                    {
-                        leServerRequests.remove(requestId);
-                    }
-                }
             }
         };
     }
@@ -4037,6 +4183,29 @@ public class GMBluetooth extends GMBluetoothInternal
         catch (Throwable throwable)
         {
             return result(OPERATION_FAILED, throwableMessage(throwable));
+        }
+    }
+
+
+    // Caller holds leServerRequestLock. Runs on each new write request, so the
+    // no-response writes of a streaming central cannot pile up.
+    private void expireNoResponseWrites()
+    {
+        long now = System.nanoTime();
+        Iterator<Map.Entry<Integer, LeServerRequestEntry>> iterator =
+            leServerRequests.entrySet().iterator();
+
+        while (iterator.hasNext())
+        {
+            LeServerRequestEntry request = iterator.next().getValue();
+
+            if (
+                request.isWrite &&
+                !request.responseNeeded &&
+                now - request.receivedAtNanos > NO_RESPONSE_WRITE_TTL_NANOS)
+            {
+                iterator.remove();
+            }
         }
     }
 
@@ -5059,11 +5228,95 @@ public class GMBluetooth extends GMBluetoothInternal
     }
 
 
+    // Sends leave the game thread: bluetooth_classic_send queues and this
+    // thread writes. RFCOMM is credit-based, so write() blocks for as long as
+    // the peer does not read. A failed write closes the socket, and the read
+    // loop reports the end through classic_disconnected as for any socket
+    // error.
+    private void startWriteLoop(
+        final ConnectionEntry entry,
+        final BluetoothSocket socket,
+        final long workerGeneration)
+    {
+        Thread thread = new Thread(
+            () ->
+            {
+                try
+                {
+                    OutputStream output = socket.getOutputStream();
+
+                    while (true)
+                    {
+                        byte[] chunk;
+
+                        synchronized (entry.sendLock)
+                        {
+                            while (
+                                entry.sendQueue.isEmpty() &&
+                                !entry.closeAfterSend &&
+                                !entry.finished &&
+                                initialized &&
+                                generation.get() == workerGeneration)
+                            {
+                                entry.sendLock.wait();
+                            }
+
+                            if (
+                                entry.finished ||
+                                !initialized ||
+                                generation.get() != workerGeneration)
+                            {
+                                entry.sendQueue.clear();
+                                entry.sendQueuedBytes = 0;
+                                return;
+                            }
+
+                            chunk = entry.sendQueue.pollFirst();
+
+                            // Asked to close, and everything queued before
+                            // the ask has been written.
+                            if (chunk == null)
+                                break;
+                        }
+
+                        output.write(chunk);
+
+                        synchronized (entry.sendLock)
+                        {
+                            entry.sendQueuedBytes -= chunk.length;
+                        }
+                    }
+                }
+                catch (IOException | InterruptedException ignored)
+                {
+                    // Reported by the read loop once the close below ends it.
+                }
+
+                try
+                {
+                    socket.close();
+                }
+                catch (Throwable ignored)
+                {
+                }
+            },
+            "GMBluetooth-RFCOMM-Write-" + entry.handle);
+
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+
     private void startReadLoop(
         final long connection,
         final BluetoothSocket socket,
         final long workerGeneration)
     {
+        final ConnectionEntry readEntry = getConnection(connection);
+
+        if (readEntry != null)
+            startWriteLoop(readEntry, socket, workerGeneration);
+
         Thread thread = new Thread(
             () ->
             {
@@ -5148,6 +5401,14 @@ public class GMBluetooth extends GMBluetoothInternal
                     catch (Throwable ignored)
                     {
                     }
+
+                    // Shutdown and a stale generation skip dispatchDisconnected;
+                    // the writer still has to learn the link is gone.
+                    if (readEntry != null)
+                    {
+                        readEntry.finished = true;
+                        wakeWriter(readEntry);
+                    }
                 }
             },
             "GMBluetooth-RFCOMM-Read-" + connection);
@@ -5167,7 +5428,14 @@ public class GMBluetooth extends GMBluetoothInternal
                 INVALID_HANDLE,
                 "Invalid Bluetooth Classic connection handle");
 
-        BluetoothSocket socket = entry.socket;
+        if (entry.finished)
+        {
+            // The peer already hung up; the game is done with its unread bytes.
+            eraseConnection(connection);
+            return result(OK, "");
+        }
+
+        final BluetoothSocket socket = entry.socket;
 
         if (socket == null)
             return result(
@@ -5176,17 +5444,63 @@ public class GMBluetooth extends GMBluetoothInternal
 
         entry.manualClosing = true;
 
-        try
+        if (!entry.connected)
         {
-            socket.close();
-            return result(OK, "");
+            // Still connecting: there is no writer and nothing queued yet, and
+            // closing the socket is what ends the connect attempt.
+            try
+            {
+                socket.close();
+                return result(OK, "");
+            }
+            catch (IOException exception)
+            {
+                return result(
+                    OPERATION_FAILED,
+                    throwableMessage(exception));
+            }
         }
-        catch (IOException exception)
+
+        // Bytes already queued go out first: the writer closes the socket once
+        // its queue is empty. A peer that stopped reading cannot hold the link
+        // open past CLOSE_AFTER_SEND_TIMEOUT_MS.
+        boolean pending;
+
+        synchronized (entry.sendLock)
         {
-            return result(
-                OPERATION_FAILED,
-                throwableMessage(exception));
+            entry.closeAfterSend = true;
+            pending = entry.sendQueuedBytes > 0;
+            entry.sendLock.notifyAll();
         }
+
+        if (pending)
+        {
+            Thread closer = new Thread(
+                () ->
+                {
+                    try
+                    {
+                        Thread.sleep(CLOSE_AFTER_SEND_TIMEOUT_MS);
+                    }
+                    catch (InterruptedException ignored)
+                    {
+                    }
+
+                    try
+                    {
+                        socket.close();
+                    }
+                    catch (Throwable ignored)
+                    {
+                    }
+                },
+                "GMBluetooth-RFCOMM-Close-" + connection);
+
+            closer.setDaemon(true);
+            closer.start();
+        }
+
+        return result(OK, "");
     }
 
 
@@ -5272,7 +5586,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
         BluetoothSocket socket = entry.socket;
 
-        if (socket == null || !entry.connected)
+        if (socket == null || !entry.connected || entry.finished)
             return result(
                 DISCONNECTED,
                 "Classic connection is not connected");
@@ -5282,25 +5596,39 @@ public class GMBluetooth extends GMBluetoothInternal
                 INVALID_ARGUMENT,
                 "Invalid buffer offset/size for bluetooth_classic_send");
 
+        if (size == 0)
+            return result(OK, "");
+
         byte[] chunk = new byte[size];
 
-        if (size > 0)
+        ByteBuffer view = data.duplicate();
+        view.position(offset);
+        view.get(chunk, 0, size);
+
+        synchronized (entry.sendLock)
         {
-            ByteBuffer view = data.duplicate();
-            view.position(offset);
-            view.get(chunk, 0, size);
+            if (entry.closeAfterSend)
+                return result(
+                    DISCONNECTED,
+                    "Classic connection is closing");
+
+            // One send larger than the limit still goes when nothing else is
+            // waiting, or it could never go at all.
+            if (
+                entry.sendQueuedBytes > 0 &&
+                (long) entry.sendQueuedBytes + size > MAX_QUEUED_SEND_BYTES)
+            {
+                return result(
+                    BUSY,
+                    "Too many bytes are waiting to be sent on this Classic connection");
+            }
+
+            entry.sendQueue.addLast(chunk);
+            entry.sendQueuedBytes += size;
+            entry.sendLock.notifyAll();
         }
 
-        try
-        {
-            OutputStream output = socket.getOutputStream();
-            output.write(chunk);
-            return result(OK, "");
-        }
-        catch (IOException exception)
-        {
-            return result(DISCONNECTED, throwableMessage(exception));
-        }
+        return result(OK, "");
     }
 
 
@@ -5328,6 +5656,7 @@ public class GMBluetooth extends GMBluetoothInternal
             return 0;
 
         byte[] copiedBytes;
+        boolean drained;
 
         synchronized (entry.receiveLock)
         {
@@ -5359,7 +5688,13 @@ public class GMBluetooth extends GMBluetoothInternal
             }
 
             entry.receiveAvailable -= copied;
+            drained = entry.finished && entry.receiveAvailable == 0;
         }
+
+        // The last bytes of a connection the peer closed: nothing is left to
+        // keep it for.
+        if (drained)
+            eraseConnection(connection);
 
         ByteBuffer view = out_data.duplicate();
         view.position(offset);

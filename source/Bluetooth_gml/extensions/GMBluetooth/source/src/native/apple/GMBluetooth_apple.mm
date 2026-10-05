@@ -5,7 +5,6 @@
 
 #import <Foundation/Foundation.h>
 #import <CoreBluetooth/CoreBluetooth.h>
-#import <CoreLocation/CoreLocation.h>
 #include <TargetConditionals.h>
 
 #if TARGET_OS_IOS
@@ -105,7 +104,7 @@
 @property (nonatomic, strong) NSMutableArray<GMBTQueuedDescriptorWithData *> *writeDescriptor;
 @end
 
-@interface GMBluetoothAppleTransport:NSObject<CBCentralManagerDelegate,CBPeripheralDelegate,CBPeripheralManagerDelegate,CLLocationManagerDelegate>
+@interface GMBluetoothAppleTransport:NSObject<CBCentralManagerDelegate,CBPeripheralDelegate,CBPeripheralManagerDelegate>
 
 @property(nonatomic, copy) void (^eventSink)(NSString *type, NSDictionary *params);
 
@@ -117,7 +116,6 @@
 // CLIENT
 
 @property(nonatomic, strong) CBCentralManager *centralManager;
-@property(nonatomic, strong) CLLocationManager *locationManager;
 
 @property(nonatomic, strong) NSMutableArray<GMBTQueuedPeripheral *> *openPeripheralQueue;
 @property(nonatomic, strong) NSMutableArray<GMBTQueuedPeripheral *> *closePeripheralQueue;
@@ -485,17 +483,6 @@ static bool _scanPendingPowerOn = false;
     _peripheralManager = [[CBPeripheralManager alloc] initWithDelegate:self queue:nil options:nil];
     #endif
 
-    // iOS 12+ requires CLLocationManager for BLE scanning
-    #if TARGET_OS_IOS
-    _locationManager = [[CLLocationManager alloc] init];
-    _locationManager.delegate = self;
-
-    // Request location permission (required for BLE scanning on iOS 12+)
-    if ([_locationManager respondsToSelector:@selector(requestWhenInUseAuthorization)]) {
-        [_locationManager requestWhenInUseAuthorization];
-    }
-    #endif
-
     // registerForConnectionEventsWithOptions: is deliberately NOT called here.
     // The central is still in the Unknown state at this point, and CoreBluetooth
     // answers with "API MISUSE: ... can only accept this command while in the
@@ -533,7 +520,6 @@ static bool _scanPendingPowerOn = false;
 
     _centralManager = nil;
     _peripheralManager = nil;
-    _locationManager = nil;
 }
 
 
@@ -1929,33 +1915,6 @@ static NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length
     [self notifyOperation:@"bt_le_state_update"
               extraParams:@{ @"success": @((int)central.state), @"state": stateString }];
 }
-
-#if TARGET_OS_IOS
-- (void) locationManagerDidChangeAuthorization:(CLLocationManager *)manager {
-    CLAuthorizationStatus status = [CLLocationManager authorizationStatus];
-    NSString *statusString = @"Unknown";
-    switch (status) {
-        case kCLAuthorizationStatusNotDetermined:
-            statusString = @"NotDetermined";
-            break;
-        case kCLAuthorizationStatusRestricted:
-            statusString = @"Restricted";
-            break;
-        case kCLAuthorizationStatusDenied:
-            statusString = @"Denied";
-            break;
-        case kCLAuthorizationStatusAuthorizedAlways:
-            statusString = @"AuthorizedAlways";
-            break;
-        case kCLAuthorizationStatusAuthorizedWhenInUse:
-            statusString = @"AuthorizedWhenInUse";
-            break;
-    }
-    NSLog(@"[GMBluetooth] Location authorization changed: %@ (%d)", statusString, (int)status);
-    [self notifyOperation:@"bt_location_auth_changed"
-              extraParams:@{ @"status": statusString }];
-}
-#endif
 
 - (void) centralManager:(CBCentralManager *)central willRestoreState:(NSDictionary<NSString *,id> *)dict {
     NSArray *peripherals = dict[CBCentralManagerRestoredStatePeripheralsKey];
