@@ -7,8 +7,10 @@
 #include <atomic>
 #include <cctype>
 #include <cstring>
-#include <deque>
+#include <map>
+#include <mutex>
 #include <optional>
+#include <vector>
 
 using namespace gm::wire;
 using namespace gm_structs;
@@ -142,6 +144,14 @@ namespace
             connections_.erase(handle);
         }
 
+        // next_handle_ keeps counting, so a handle from before the clear
+        // never names a later connection.
+        void clear()
+        {
+            std::scoped_lock lock(mutex_);
+            connections_.clear();
+        }
+
         bool is_valid(std::uint64_t handle) const
         {
             std::scoped_lock lock(mutex_);
@@ -183,6 +193,14 @@ namespace
         {
             std::scoped_lock lock(mutex_);
             connections_.erase(handle);
+        }
+
+        // next_handle_ keeps counting, so a handle from before the clear
+        // never names a later connection.
+        void clear()
+        {
+            std::scoped_lock lock(mutex_);
+            connections_.clear();
         }
 
         bool is_valid(std::uint64_t handle) const
@@ -309,6 +327,12 @@ namespace
             if (handle == 0 || handle > entries_.size())
                 return 0;
             return entries_[handle - 1].connection;
+        }
+
+        void clear()
+        {
+            std::scoped_lock lock(mutex_);
+            entries_.clear();
         }
 
     private:
@@ -438,6 +462,12 @@ namespace
             return static_cast<std::int32_t>(n);
         }
 
+        void clear()
+        {
+            std::scoped_lock lock(mutex_);
+            entries_.clear();
+        }
+
     private:
         mutable std::mutex mutex_;
         std::vector<CharacteristicEntry> entries_;
@@ -549,6 +579,12 @@ namespace
             return static_cast<std::int32_t>(n);
         }
 
+        void clear()
+        {
+            std::scoped_lock lock(mutex_);
+            entries_.clear();
+        }
+
     private:
         mutable std::mutex mutex_;
         std::vector<DescriptorEntry> entries_;
@@ -556,66 +592,221 @@ namespace
 
     DescriptorCache g_descriptor_cache;
 
-    // FIFO correlation for LE async completions. Every call that dispatches to
-    // the backend pushes an entry - even with a null callback - and every
-    // matching completion event pops exactly one, because Apple's (and the
-    // mirrored Windows/Android) backends complete these operations strictly in
-    // call order on a single serial queue per operation type. Skipping the push
-    // when there's no callback would desync this queue against a later call's
-    // completion.
-    struct NoContext {};
-
-    template <typename Context>
-    struct PendingLeOp
+    enum class LeOpKind : std::uint8_t
     {
-        GMFunction callback;
-        Context context{};
+        ServicesDiscover,
+        CharacteristicsDiscover,
+        DescriptorsDiscover,
+        CharacteristicRead,
+        CharacteristicWrite,
+        CharacteristicSubscribe,
+        DescriptorRead,
+        DescriptorWrite,
+        AdvertiseStart,
+        ServerAddService,
     };
 
-    template <typename Context>
-    class LeOpQueue
+    const char* le_op_name(LeOpKind kind)
+    {
+        switch (kind)
+        {
+            case LeOpKind::ServicesDiscover:        return "le_services_discover";
+            case LeOpKind::CharacteristicsDiscover: return "le_characteristics_discover";
+            case LeOpKind::DescriptorsDiscover:     return "le_descriptors_discover";
+            case LeOpKind::CharacteristicRead:      return "le_characteristic_read";
+            case LeOpKind::CharacteristicWrite:     return "le_characteristic_write";
+            case LeOpKind::CharacteristicSubscribe: return "le_characteristic_subscribe";
+            case LeOpKind::DescriptorRead:          return "le_descriptor_read";
+            case LeOpKind::DescriptorWrite:         return "le_descriptor_write";
+            case LeOpKind::AdvertiseStart:          return "le_advertise_start";
+            case LeOpKind::ServerAddService:        return "le_server_add_service";
+        }
+        return "le_op";
+    }
+
+    struct PendingLeOp
+    {
+        LeOpKind kind = LeOpKind::ServicesDiscover;
+        GMFunction callback;
+        // The handle the callback reports: connection, service, characteristic
+        // or descriptor. Unused by advertise start and add_service.
+        std::uint64_t context = 0;
+        // The LE connection the op runs on, so a disconnect can fail it; 0 for
+        // advertise start and add_service, which belong to no connection.
+        std::uint64_t connection = 0;
+    };
+
+    // Every LE call that completes asynchronously is registered here under an
+    // op id the backend echoes on its completion event. Backends finish these
+    // calls in no guaranteed order - across connections, and on Windows not
+    // even within one - so call order cannot stand in for identity. An op leaves
+    // the registry exactly once: by its completion, by a disconnect or shutdown
+    // purge, or by its own call failing synchronously. Whichever comes first
+    // fires the callback; anything that arrives later finds no id.
+    class PendingLeOps
     {
     public:
-        void push(GMFunction callback, Context context)
+        std::uint64_t add(LeOpKind kind, GMFunction callback, std::uint64_t context, std::uint64_t connection)
         {
+            const std::uint64_t op_id = next_id_++;
             std::scoped_lock lock(mutex_);
-            queue_.push_back(PendingLeOp<Context>{ std::move(callback), std::move(context) });
+            ops_.emplace(op_id, PendingLeOp{ kind, std::move(callback), context, connection });
+            return op_id;
         }
 
-        bool pop_front(PendingLeOp<Context>& out)
+        // For a call that failed synchronously: no completion will arrive.
+        void erase(std::uint64_t op_id)
         {
             std::scoped_lock lock(mutex_);
-            if (queue_.empty())
-                return false;
-            out = std::move(queue_.front());
-            queue_.pop_front();
-            return true;
+            ops_.erase(op_id);
         }
 
-        // Rolls back the push() done just before a backend call that then failed
-        // synchronously, since no completion event will ever arrive for it.
-        void cancel_last()
+        std::optional<PendingLeOp> take(std::uint64_t op_id)
         {
             std::scoped_lock lock(mutex_);
-            if (!queue_.empty())
-                queue_.pop_back();
+            const auto it = ops_.find(op_id);
+            if (it == ops_.end())
+                return std::nullopt;
+            PendingLeOp op = std::move(it->second);
+            ops_.erase(it);
+            return op;
+        }
+
+        // In call order, since the map is ordered by id.
+        std::vector<PendingLeOp> take_connection(std::uint64_t connection)
+        {
+            std::vector<PendingLeOp> out;
+            if (connection == 0)
+                return out;
+            std::scoped_lock lock(mutex_);
+            for (auto it = ops_.begin(); it != ops_.end();)
+            {
+                if (it->second.connection == connection)
+                {
+                    out.push_back(std::move(it->second));
+                    it = ops_.erase(it);
+                }
+                else
+                {
+                    ++it;
+                }
+            }
+            return out;
+        }
+
+        std::vector<PendingLeOp> take_all()
+        {
+            std::vector<PendingLeOp> out;
+            std::scoped_lock lock(mutex_);
+            out.reserve(ops_.size());
+            for (auto& [op_id, op] : ops_)
+            {
+                (void)op_id;
+                out.push_back(std::move(op));
+            }
+            ops_.clear();
+            return out;
         }
 
     private:
-        mutable std::mutex mutex_;
-        std::deque<PendingLeOp<Context>> queue_;
+        std::atomic<std::uint64_t> next_id_{ 1 }; // 0 means "no op"
+        std::mutex mutex_;
+        std::map<std::uint64_t, PendingLeOp> ops_;
     };
 
-    LeOpQueue<std::uint64_t> g_services_discover_queue;
-    LeOpQueue<std::uint64_t> g_characteristics_discover_queue;
-    LeOpQueue<std::uint64_t> g_descriptors_discover_queue;
-    LeOpQueue<std::uint64_t> g_characteristic_read_queue;
-    LeOpQueue<std::uint64_t> g_characteristic_write_queue;
-    LeOpQueue<std::uint64_t> g_characteristic_subscribe_queue;
-    LeOpQueue<std::uint64_t> g_descriptor_read_queue;
-    LeOpQueue<std::uint64_t> g_descriptor_write_queue;
-    LeOpQueue<NoContext> g_server_add_service_queue;
-    LeOpQueue<NoContext> g_advertise_start_queue;
+    PendingLeOps g_le_ops;
+
+    // Fires a taken op's callback with its usual arguments. Called with no lock
+    // held, after the op has left the registry.
+    void fire_le_op(const PendingLeOp& op, Error error, const std::string& message = std::string())
+    {
+        if (!op.callback)
+            return;
+
+        try
+        {
+            switch (op.kind)
+            {
+                case LeOpKind::AdvertiseStart:
+                case LeOpKind::ServerAddService:
+                    // callback(error_code, message)
+                    op.callback.call(static_cast<double>(error), message);
+                    break;
+                default:
+                    // callback(error_code, message, handle)
+                    op.callback.call(static_cast<double>(error), message, static_cast<double>(op.context));
+                    break;
+            }
+        }
+        catch (const std::exception& e)
+        {
+            GMBT_LOG("Error dispatching %s callback: %s", le_op_name(op.kind), e.what());
+        }
+    }
+
+    // Settles the op a LeOpCompleted event names: stores what the call
+    // returned under the handle the op reports, then fires its callback. An id
+    // the registry no longer holds - its op was purged on disconnect or
+    // shutdown - is logged and dropped.
+    void complete_le_op(const BackendEvent& event)
+    {
+        const auto op = g_le_ops.take(event.op_id);
+        if (!op)
+        {
+            GMBT_LOG("LE completion for op_id=%llu matches no pending op, dropping",
+                static_cast<unsigned long long>(event.op_id));
+            g_dropped_events++;
+            return;
+        }
+
+        if (event.error == Error::Ok)
+        {
+            const LeOpResult& result = event.result;
+            switch (op->kind)
+            {
+                case LeOpKind::ServicesDiscover:
+                    for (const auto& attribute : result.attributes)
+                        g_service_cache.find_or_insert(op->context, attribute.uuid);
+                    break;
+                case LeOpKind::CharacteristicsDiscover:
+                    for (const auto& attribute : result.attributes)
+                        g_characteristic_cache.find_or_insert(op->context, attribute.uuid, attribute.properties);
+                    break;
+                case LeOpKind::DescriptorsDiscover:
+                    for (const auto& attribute : result.attributes)
+                        g_descriptor_cache.find_or_insert(op->context, attribute.uuid);
+                    break;
+                case LeOpKind::CharacteristicRead:
+                    g_characteristic_cache.set_value(op->context, result.value);
+                    break;
+                case LeOpKind::DescriptorRead:
+                    g_descriptor_cache.set_value(op->context, result.value);
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        fire_le_op(*op, event.error, event.message);
+    }
+
+    void fail_le_ops(std::vector<PendingLeOp> ops, Error error, const std::string& message)
+    {
+        for (const auto& op : ops)
+            fire_le_op(op, error, message);
+    }
+
+    // Fails every op still waiting on this connection. The link is gone, so no
+    // completion will arrive for them; a late one finds no id and is dropped.
+    void purge_le_connection(std::uint64_t connection)
+    {
+        auto ops = g_le_ops.take_connection(connection);
+        if (ops.empty())
+            return;
+        GMBT_LOG("LE connection %llu closed with %zu op(s) pending, failing them",
+            static_cast<unsigned long long>(connection), ops.size());
+        fail_le_ops(std::move(ops), Error::Disconnected, "LE connection closed before the operation completed");
+    }
 
     struct PendingLeServerRequest
     {
@@ -744,15 +935,16 @@ namespace
 
     void dispatch_le_event(const BackendEvent& event)
     {
+        const std::string& type = event.event_type;
+
         auto parsed = json::parse(event.json);
         if (!parsed || !parsed->is_object())
         {
-            GMBT_LOG("LE event '%s' has unparseable JSON payload, dropping", event.event_type.c_str());
+            GMBT_LOG("LE event '%s' has unparseable JSON payload, dropping", type.c_str());
             g_dropped_events++;
             return;
         }
         const json::Value& root = *parsed;
-        const std::string& type = event.event_type;
 
         if (type == "bluetooth_state_changed")
         {
@@ -799,6 +991,12 @@ namespace
             const Error error = !failed ? Error::Ok
                 : (le_event_error_code(root) == 133 ? Error::Timeout : Error::ConnectionFailed);
             const std::uint64_t device = g_le_connection_manager.get_device(connection);
+            if (failed)
+            {
+                // The link never came up: nothing queued on it can complete.
+                purge_le_connection(connection);
+                g_le_connection_manager.remove_connection(connection);
+            }
             try
             {
                 // callback(error_code, message, connection, device)
@@ -811,15 +1009,20 @@ namespace
         }
         else if (type == "bluetooth_le_peripheral_disconnect")
         {
+            // Apple: the backend resolves the peripheral's address to its
+            // connection. 0 only if the peripheral was never connected through
+            // bluetooth_le_connect, and then there is nothing to purge.
+            const std::uint64_t connection = le_event_connection(root);
+            purge_le_connection(connection);
+
             GMFunction callback;
             { std::scoped_lock lock(g_callback_mutex); callback = g_callback_le_disconnected; }
             if (callback)
             {
                 try
                 {
-                    // callback(connection, error_code, message) - Apple never reports
-                    // which connection this is for on this event, so connection is 0.
-                    callback.call(0.0, static_cast<double>(Error::Disconnected), std::string());
+                    // callback(connection, error_code, message)
+                    callback.call(static_cast<double>(connection), static_cast<double>(Error::Disconnected), std::string());
                 }
                 catch (const std::exception& e)
                 {
@@ -842,13 +1045,16 @@ namespace
                 return;
             }
 
+            const std::uint64_t connection = le_event_connection(root);
+            purge_le_connection(connection);
+
             GMFunction callback;
             { std::scoped_lock lock(g_callback_mutex); callback = g_callback_le_disconnected; }
             if (callback)
             {
                 try
                 {
-                    callback.call(static_cast<double>(le_event_connection(root)), static_cast<double>(Error::Disconnected), std::string());
+                    callback.call(static_cast<double>(connection), static_cast<double>(Error::Disconnected), std::string());
                 }
                 catch (const std::exception& e)
                 {
@@ -858,141 +1064,6 @@ namespace
             else
             {
                 g_dropped_events++;
-            }
-        }
-        else if (type == "bluetooth_le_peripheral_get_services")
-        {
-            PendingLeOp<std::uint64_t> op;
-            if (!g_services_discover_queue.pop_front(op))
-            {
-                g_dropped_events++;
-                return;
-            }
-
-            const bool failed = le_event_has_error(root);
-            if (!failed)
-            {
-                if (auto services = le_event_nested(root, "services"); services && services->is_array())
-                {
-                    for (const auto& item : services->array_value)
-                    {
-                        const auto* uuid = item.find("uuid");
-                        if (uuid && uuid->is_string())
-                            g_service_cache.find_or_insert(op.context, uuid->string_value);
-                    }
-                }
-            }
-
-            if (op.callback)
-            {
-                try
-                {
-                    // callback(error_code, message, connection)
-                    op.callback.call(static_cast<double>(failed ? Error::OperationFailed : Error::Ok), std::string(), static_cast<double>(op.context));
-                }
-                catch (const std::exception& e)
-                {
-                    GMBT_LOG("Error dispatching le_services_discover callback: %s", e.what());
-                }
-            }
-        }
-        else if (type == "bluetooth_le_service_get_characteristics")
-        {
-            PendingLeOp<std::uint64_t> op;
-            if (!g_characteristics_discover_queue.pop_front(op))
-            {
-                g_dropped_events++;
-                return;
-            }
-
-            const bool failed = le_event_has_error(root);
-            if (!failed)
-            {
-                if (auto characteristics = le_event_nested(root, "characteristics"); characteristics && characteristics->is_array())
-                {
-                    for (const auto& item : characteristics->array_value)
-                    {
-                        const auto* uuid = item.find("uuid");
-                        if (!uuid || !uuid->is_string())
-                            continue;
-                        const auto* properties = item.find("properties");
-                        g_characteristic_cache.find_or_insert(op.context, uuid->string_value, properties ? properties->as_int(0) : 0);
-                    }
-                }
-            }
-
-            if (op.callback)
-            {
-                try
-                {
-                    // callback(error_code, message, service)
-                    op.callback.call(static_cast<double>(failed ? Error::OperationFailed : Error::Ok), std::string(), static_cast<double>(op.context));
-                }
-                catch (const std::exception& e)
-                {
-                    GMBT_LOG("Error dispatching le_characteristics_discover callback: %s", e.what());
-                }
-            }
-        }
-        else if (type == "bluetooth_le_characteristic_get_descriptors")
-        {
-            PendingLeOp<std::uint64_t> op;
-            if (!g_descriptors_discover_queue.pop_front(op))
-            {
-                g_dropped_events++;
-                return;
-            }
-
-            const bool failed = le_event_has_error(root);
-            if (!failed)
-            {
-                if (auto descriptors = le_event_nested(root, "descriptors"); descriptors && descriptors->is_array())
-                {
-                    for (const auto& item : descriptors->array_value)
-                    {
-                        const auto* uuid = item.find("uuid");
-                        if (uuid && uuid->is_string())
-                            g_descriptor_cache.find_or_insert(op.context, uuid->string_value);
-                    }
-                }
-            }
-
-            if (op.callback)
-            {
-                try
-                {
-                    // callback(error_code, message, characteristic)
-                    op.callback.call(static_cast<double>(failed ? Error::OperationFailed : Error::Ok), std::string(), static_cast<double>(op.context));
-                }
-                catch (const std::exception& e)
-                {
-                    GMBT_LOG("Error dispatching le_descriptors_discover callback: %s", e.what());
-                }
-            }
-        }
-        else if (type == "bluetooth_le_characteristic_unsubscribe" ||
-                 type == "bluetooth_le_characteristic_notify" ||
-                 type == "bluetooth_le_characteristic_indicate")
-        {
-            PendingLeOp<std::uint64_t> op;
-            if (!g_characteristic_subscribe_queue.pop_front(op))
-            {
-                g_dropped_events++;
-                return;
-            }
-
-            const bool failed = le_event_has_error(root);
-            if (op.callback)
-            {
-                try
-                {
-                    // callback(error_code, message, characteristic)
-                    op.callback.call(static_cast<double>(failed ? Error::OperationFailed : Error::Ok), std::string(), static_cast<double>(op.context));
-                }
-                catch (const std::exception& e)
-                {
-                    GMBT_LOG("Error dispatching le_characteristic_subscribe callback: %s", e.what());
-                }
             }
         }
         else if (type == "bluetooth_le_characteristic_value_changed")
@@ -1031,157 +1102,6 @@ namespace
             else
             {
                 g_dropped_events++;
-            }
-        }
-        else if (type == "bluetooth_le_characteristic_read")
-        {
-            PendingLeOp<std::uint64_t> op;
-            if (!g_characteristic_read_queue.pop_front(op))
-            {
-                g_dropped_events++;
-                return;
-            }
-
-            const bool failed = le_event_has_error(root);
-            if (!failed)
-            {
-                if (const auto* value = root.find("value"); value && value->is_string())
-                    g_characteristic_cache.set_value(op.context, json::base64_decode(value->string_value));
-            }
-
-            if (op.callback)
-            {
-                try
-                {
-                    // callback(error_code, message, characteristic)
-                    op.callback.call(static_cast<double>(failed ? Error::OperationFailed : Error::Ok), std::string(), static_cast<double>(op.context));
-                }
-                catch (const std::exception& e)
-                {
-                    GMBT_LOG("Error dispatching le_characteristic_read callback: %s", e.what());
-                }
-            }
-        }
-        else if (type == "bluetooth_le_characteristic_write_request" ||
-                 type == "bluetooth_le_characteristic_write_command")
-        {
-            PendingLeOp<std::uint64_t> op;
-            if (!g_characteristic_write_queue.pop_front(op))
-            {
-                g_dropped_events++;
-                return;
-            }
-
-            const bool failed = le_event_has_error(root);
-            if (op.callback)
-            {
-                try
-                {
-                    // callback(error_code, message, characteristic)
-                    op.callback.call(static_cast<double>(failed ? Error::OperationFailed : Error::Ok), std::string(), static_cast<double>(op.context));
-                }
-                catch (const std::exception& e)
-                {
-                    GMBT_LOG("Error dispatching le_characteristic_write callback: %s", e.what());
-                }
-            }
-        }
-        else if (type == "bluetooth_le_descriptor_read")
-        {
-            PendingLeOp<std::uint64_t> op;
-            if (!g_descriptor_read_queue.pop_front(op))
-            {
-                g_dropped_events++;
-                return;
-            }
-
-            const bool failed = le_event_has_error(root);
-            if (!failed)
-            {
-                if (const auto* value = root.find("value"); value && value->is_string())
-                    g_descriptor_cache.set_value(op.context, json::base64_decode(value->string_value));
-            }
-
-            if (op.callback)
-            {
-                try
-                {
-                    // callback(error_code, message, descriptor)
-                    op.callback.call(static_cast<double>(failed ? Error::OperationFailed : Error::Ok), std::string(), static_cast<double>(op.context));
-                }
-                catch (const std::exception& e)
-                {
-                    GMBT_LOG("Error dispatching le_descriptor_read callback: %s", e.what());
-                }
-            }
-        }
-        else if (type == "bluetooth_le_descriptor_write")
-        {
-            PendingLeOp<std::uint64_t> op;
-            if (!g_descriptor_write_queue.pop_front(op))
-            {
-                g_dropped_events++;
-                return;
-            }
-
-            const bool failed = le_event_has_error(root);
-            if (op.callback)
-            {
-                try
-                {
-                    // callback(error_code, message, descriptor)
-                    op.callback.call(static_cast<double>(failed ? Error::OperationFailed : Error::Ok), std::string(), static_cast<double>(op.context));
-                }
-                catch (const std::exception& e)
-                {
-                    GMBT_LOG("Error dispatching le_descriptor_write callback: %s", e.what());
-                }
-            }
-        }
-        else if (type == "bluetooth_le_advertise_start")
-        {
-            PendingLeOp<NoContext> op;
-            if (!g_advertise_start_queue.pop_front(op))
-            {
-                g_dropped_events++;
-                return;
-            }
-
-            const bool failed = le_event_has_error(root);
-            if (op.callback)
-            {
-                try
-                {
-                    // callback(error_code, message)
-                    op.callback.call(static_cast<double>(failed ? Error::OperationFailed : Error::Ok), std::string());
-                }
-                catch (const std::exception& e)
-                {
-                    GMBT_LOG("Error dispatching le_advertise_start callback: %s", e.what());
-                }
-            }
-        }
-        else if (type == "bluetooth_le_server_add_service")
-        {
-            PendingLeOp<NoContext> op;
-            if (!g_server_add_service_queue.pop_front(op))
-            {
-                g_dropped_events++;
-                return;
-            }
-
-            const bool failed = le_event_has_error(root);
-            if (op.callback)
-            {
-                try
-                {
-                    // callback(error_code, message)
-                    op.callback.call(static_cast<double>(failed ? Error::OperationFailed : Error::Ok), std::string());
-                }
-                catch (const std::exception& e)
-                {
-                    GMBT_LOG("Error dispatching le_server_add_service callback: %s", e.what());
-                }
             }
         }
         else if (type == "bluetooth_le_server_connection_state_changed")
@@ -1440,6 +1360,12 @@ namespace
                 return;
             }
 
+            if (event.type == BackendEventType::LeOpCompleted)
+            {
+                complete_le_op(event);
+                return;
+            }
+
             if (event.type == BackendEventType::LeEvent)
             {
                 dispatch_le_event(event);
@@ -1550,11 +1476,75 @@ void bluetooth_shutdown()
         g_device_manager.get_count(),
         static_cast<unsigned long long>(g_dropped_events.load()));
 
+    // The backend goes first, so no event arrives while the state below is
+    // failed and cleared.
     if (g_backend)
     {
         g_backend->shutdown();
         g_backend.reset();
     }
+
+    // Every one-shot callback still waiting is failed once, with its usual
+    // arguments; the registered event callbacks stay (R1-64).
+    const std::string message = "Bluetooth was shut down before the operation completed";
+    fail_le_ops(g_le_ops.take_all(), Error::NotInitialized, message);
+
+    std::unordered_map<std::uint64_t, GMFunction> connect_callbacks;
+    { std::scoped_lock lock(g_pending_connect_mutex); connect_callbacks.swap(g_pending_connect_callbacks); }
+    for (const auto& [connection, callback] : connect_callbacks)
+    {
+        try
+        {
+            // callback(error_code, message, connection, device)
+            callback.call(static_cast<double>(Error::NotInitialized), message, static_cast<double>(connection),
+                static_cast<double>(g_classic_connection_manager.get_device(connection)));
+        }
+        catch (const std::exception& e)
+        {
+            GMBT_LOG("Error dispatching classic_connect callback: %s", e.what());
+        }
+    }
+
+    std::unordered_map<std::uint64_t, GMFunction> le_connect_callbacks;
+    { std::scoped_lock lock(g_pending_le_connect_mutex); le_connect_callbacks.swap(g_pending_le_connect_callbacks); }
+    for (const auto& [connection, callback] : le_connect_callbacks)
+    {
+        try
+        {
+            // callback(error_code, message, connection, device)
+            callback.call(static_cast<double>(Error::NotInitialized), message, static_cast<double>(connection),
+                static_cast<double>(g_le_connection_manager.get_device(connection)));
+        }
+        catch (const std::exception& e)
+        {
+            GMBT_LOG("Error dispatching le_connect callback: %s", e.what());
+        }
+    }
+
+    std::unordered_map<std::uint64_t, GMFunction> pair_callbacks;
+    { std::scoped_lock lock(g_pending_pair_mutex); pair_callbacks.swap(g_pending_pair_callbacks); }
+    for (const auto& [device, callback] : pair_callbacks)
+    {
+        try
+        {
+            // callback(error_code, message, device)
+            callback.call(static_cast<double>(Error::NotInitialized), message, static_cast<double>(device));
+        }
+        catch (const std::exception& e)
+        {
+            GMBT_LOG("Error dispatching pair callback: %s", e.what());
+        }
+    }
+
+    {
+        std::scoped_lock lock(g_pending_le_server_requests_mutex);
+        g_pending_le_server_requests.clear();
+    }
+    g_descriptor_cache.clear();
+    g_characteristic_cache.clear();
+    g_service_cache.clear();
+    g_le_connection_manager.clear();
+    g_classic_connection_manager.clear();
     g_device_manager.clear();
 }
 
@@ -2223,6 +2213,11 @@ std::int32_t bluetooth_le_disconnect(std::uint64_t connection)
     const Error error = g_backend->le_disconnect(connection, message);
     g_last_error = error;
     g_last_error_message = message;
+
+    // Whatever the backend answered, the game is done with this link: no op
+    // waiting on it may outlive the call.
+    purge_le_connection(connection);
+
     return static_cast<std::int32_t>(error);
 }
 
@@ -2259,15 +2254,15 @@ std::int32_t bluetooth_le_services_discover(std::uint64_t connection, const gm::
         return static_cast<std::int32_t>(Error::InvalidHandle);
     }
 
-    g_services_discover_queue.push(callback, connection);
+    const auto op_id = g_le_ops.add(LeOpKind::ServicesDiscover, callback, connection, connection);
 
     std::string message;
-    const Error error = g_backend->le_services_discover(connection, message);
+    const Error error = g_backend->le_services_discover(op_id, connection, message);
     g_last_error = error;
     g_last_error_message = message;
 
     if (error != Error::Ok)
-        g_services_discover_queue.cancel_last();
+        g_le_ops.erase(op_id);
 
     return static_cast<std::int32_t>(error);
 }
@@ -2306,15 +2301,15 @@ std::int32_t bluetooth_le_characteristics_discover(std::uint64_t service, const 
     const std::uint64_t connection = g_service_cache.get_parent(service);
     const std::string uuid = g_service_cache.get_uuid(service);
 
-    g_characteristics_discover_queue.push(callback, service);
+    const auto op_id = g_le_ops.add(LeOpKind::CharacteristicsDiscover, callback, service, connection);
 
     std::string message;
-    const Error error = g_backend->le_characteristics_discover(connection, uuid, message);
+    const Error error = g_backend->le_characteristics_discover(op_id, connection, uuid, message);
     g_last_error = error;
     g_last_error_message = message;
 
     if (error != Error::Ok)
-        g_characteristics_discover_queue.cancel_last();
+        g_le_ops.erase(op_id);
 
     return static_cast<std::int32_t>(error);
 }
@@ -2360,15 +2355,15 @@ std::int32_t bluetooth_le_descriptors_discover(std::uint64_t characteristic, con
     const std::string service_uuid = g_service_cache.get_uuid(service);
     const std::string characteristic_uuid = g_characteristic_cache.get_uuid(characteristic);
 
-    g_descriptors_discover_queue.push(callback, characteristic);
+    const auto op_id = g_le_ops.add(LeOpKind::DescriptorsDiscover, callback, characteristic, connection);
 
     std::string message;
-    const Error error = g_backend->le_descriptors_discover(connection, service_uuid, characteristic_uuid, message);
+    const Error error = g_backend->le_descriptors_discover(op_id, connection, service_uuid, characteristic_uuid, message);
     g_last_error = error;
     g_last_error_message = message;
 
     if (error != Error::Ok)
-        g_descriptors_discover_queue.cancel_last();
+        g_le_ops.erase(op_id);
 
     return static_cast<std::int32_t>(error);
 }
@@ -2411,15 +2406,15 @@ std::int32_t bluetooth_le_characteristic_read(std::uint64_t characteristic, cons
     const std::string service_uuid = g_service_cache.get_uuid(service);
     const std::string characteristic_uuid = g_characteristic_cache.get_uuid(characteristic);
 
-    g_characteristic_read_queue.push(callback, characteristic);
+    const auto op_id = g_le_ops.add(LeOpKind::CharacteristicRead, callback, characteristic, connection);
 
     std::string message;
-    const Error error = g_backend->le_characteristic_read(connection, service_uuid, characteristic_uuid, message);
+    const Error error = g_backend->le_characteristic_read(op_id, connection, service_uuid, characteristic_uuid, message);
     g_last_error = error;
     g_last_error_message = message;
 
     if (error != Error::Ok)
-        g_characteristic_read_queue.cancel_last();
+        g_le_ops.erase(op_id);
 
     return static_cast<std::int32_t>(error);
 }
@@ -2461,15 +2456,15 @@ std::int32_t bluetooth_le_characteristic_write(std::uint64_t characteristic, str
     const std::string value_base64 = json::base64_encode(buffer, size);
     const bool with_response = (write_type == 0);
 
-    g_characteristic_write_queue.push(callback, characteristic);
+    const auto op_id = g_le_ops.add(LeOpKind::CharacteristicWrite, callback, characteristic, connection);
 
     std::string message;
-    const Error error = g_backend->le_characteristic_write(connection, service_uuid, characteristic_uuid, value_base64, with_response, message);
+    const Error error = g_backend->le_characteristic_write(op_id, connection, service_uuid, characteristic_uuid, value_base64, with_response, message);
     g_last_error = error;
     g_last_error_message = message;
 
     if (error != Error::Ok)
-        g_characteristic_write_queue.cancel_last();
+        g_le_ops.erase(op_id);
 
     return static_cast<std::int32_t>(error);
 }
@@ -2495,15 +2490,15 @@ std::int32_t bluetooth_le_characteristic_subscribe(std::uint64_t characteristic,
     const std::string service_uuid = g_service_cache.get_uuid(service);
     const std::string characteristic_uuid = g_characteristic_cache.get_uuid(characteristic);
 
-    g_characteristic_subscribe_queue.push(callback, characteristic);
+    const auto op_id = g_le_ops.add(LeOpKind::CharacteristicSubscribe, callback, characteristic, connection);
 
     std::string message;
-    const Error error = g_backend->le_characteristic_subscribe(connection, service_uuid, characteristic_uuid, mode, message);
+    const Error error = g_backend->le_characteristic_subscribe(op_id, connection, service_uuid, characteristic_uuid, mode, message);
     g_last_error = error;
     g_last_error_message = message;
 
     if (error != Error::Ok)
-        g_characteristic_subscribe_queue.cancel_last();
+        g_le_ops.erase(op_id);
 
     return static_cast<std::int32_t>(error);
 }
@@ -2531,15 +2526,15 @@ std::int32_t bluetooth_le_descriptor_read(std::uint64_t descriptor, const gm::wi
     const std::string characteristic_uuid = g_characteristic_cache.get_uuid(characteristic);
     const std::string descriptor_uuid = g_descriptor_cache.get_uuid(descriptor);
 
-    g_descriptor_read_queue.push(callback, descriptor);
+    const auto op_id = g_le_ops.add(LeOpKind::DescriptorRead, callback, descriptor, connection);
 
     std::string message;
-    const Error error = g_backend->le_descriptor_read(connection, service_uuid, characteristic_uuid, descriptor_uuid, message);
+    const Error error = g_backend->le_descriptor_read(op_id, connection, service_uuid, characteristic_uuid, descriptor_uuid, message);
     g_last_error = error;
     g_last_error_message = message;
 
     if (error != Error::Ok)
-        g_descriptor_read_queue.cancel_last();
+        g_le_ops.erase(op_id);
 
     return static_cast<std::int32_t>(error);
 }
@@ -2582,15 +2577,15 @@ std::int32_t bluetooth_le_descriptor_write(std::uint64_t descriptor, struct gm::
     const std::uint8_t* buffer = static_cast<const std::uint8_t*>(data.data()) + offset;
     const std::string value_base64 = json::base64_encode(buffer, size);
 
-    g_descriptor_write_queue.push(callback, descriptor);
+    const auto op_id = g_le_ops.add(LeOpKind::DescriptorWrite, callback, descriptor, connection);
 
     std::string message;
-    const Error error = g_backend->le_descriptor_write(connection, service_uuid, characteristic_uuid, descriptor_uuid, value_base64, message);
+    const Error error = g_backend->le_descriptor_write(op_id, connection, service_uuid, characteristic_uuid, descriptor_uuid, value_base64, message);
     g_last_error = error;
     g_last_error_message = message;
 
     if (error != Error::Ok)
-        g_descriptor_write_queue.cancel_last();
+        g_le_ops.erase(op_id);
 
     return static_cast<std::int32_t>(error);
 }
@@ -2606,15 +2601,15 @@ std::int32_t bluetooth_le_advertise_start(std::string_view settings_json, std::s
         return static_cast<std::int32_t>(Error::NotInitialized);
     }
 
-    g_advertise_start_queue.push(callback, NoContext{});
+    const auto op_id = g_le_ops.add(LeOpKind::AdvertiseStart, callback, 0, 0);
 
     std::string message;
-    const Error error = g_backend->le_advertise_start(std::string(settings_json), std::string(data_json), message);
+    const Error error = g_backend->le_advertise_start(op_id, std::string(settings_json), std::string(data_json), message);
     g_last_error = error;
     g_last_error_message = message;
 
     if (error != Error::Ok)
-        g_advertise_start_queue.cancel_last();
+        g_le_ops.erase(op_id);
 
     return static_cast<std::int32_t>(error);
 }
@@ -2695,16 +2690,16 @@ std::int32_t bluetooth_le_server_add_service(const BluetoothLeServiceDefinition&
         return static_cast<std::int32_t>(Error::InvalidArgument);
     }
 
-    g_server_add_service_queue.push(callback, NoContext{});
+    const auto op_id = g_le_ops.add(LeOpKind::ServerAddService, callback, 0, 0);
 
     const std::string service_json = serialize_le_service_definition(service);
     std::string message;
-    const Error error = g_backend->le_server_add_service(service_json, message);
+    const Error error = g_backend->le_server_add_service(op_id, service_json, message);
     g_last_error = error;
     g_last_error_message = message;
 
     if (error != Error::Ok)
-        g_server_add_service_queue.cancel_last();
+        g_le_ops.erase(op_id);
 
     return static_cast<std::int32_t>(error);
 }

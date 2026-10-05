@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace gmbluetooth
 {
@@ -55,6 +56,23 @@ namespace gmbluetooth
         bool rssi_available = false;
     };
 
+    // A service, characteristic or descriptor an LE discovery found.
+    // properties is the characteristic property bitmask; 0 for the others.
+    struct LeAttribute
+    {
+        std::string uuid;
+        std::int32_t properties = 0;
+    };
+
+    // What an LE call returns besides its error. Discovery fills attributes;
+    // a characteristic or descriptor read fills value; the rest leave both
+    // empty.
+    struct LeOpResult
+    {
+        std::vector<LeAttribute> attributes;
+        std::vector<std::uint8_t> value;
+    };
+
     enum class BackendEventType : std::uint8_t
     {
         ScanStopped,
@@ -63,6 +81,11 @@ namespace gmbluetooth
         ClassicDataAvailable,
         ClassicDisconnected,
         LeEvent,
+        // The completion of an LE call that took an op id: op_id names the
+        // call, error is Ok or its failure, message says why, and result holds
+        // what it returned. No event_type and no json: the core knows what
+        // the call was from its op id.
+        LeOpCompleted,
         DevicePaired,
     };
 
@@ -73,6 +96,11 @@ namespace gmbluetooth
 
         std::uint64_t connection = 0;
         std::uint64_t device = 0;
+
+        // LeOpCompleted only: the op id the core passed to the call, and what
+        // the call returned.
+        std::uint64_t op_id = 0;
+        LeOpResult result;
 
         Error error = Error::Ok;
         std::int32_t value = 0;
@@ -307,10 +335,16 @@ namespace gmbluetooth
             return false;
         }
 
+        // The LE operations below complete asynchronously. Each takes the op id
+        // the core minted for the call and completes it with exactly one
+        // LeOpCompleted event carrying that id, unless it fails synchronously.
+        // Completions may arrive in any order; the core matches them by id.
         virtual Error le_services_discover(
+            std::uint64_t op_id,
             std::uint64_t connection,
             std::string& message)
         {
+            (void)op_id;
             (void)connection;
 
             message = "BLE GATT is not supported by this backend";
@@ -318,10 +352,12 @@ namespace gmbluetooth
         }
 
         virtual Error le_characteristics_discover(
+            std::uint64_t op_id,
             std::uint64_t connection,
             const std::string& service_uuid,
             std::string& message)
         {
+            (void)op_id;
             (void)connection;
             (void)service_uuid;
 
@@ -330,11 +366,13 @@ namespace gmbluetooth
         }
 
         virtual Error le_descriptors_discover(
+            std::uint64_t op_id,
             std::uint64_t connection,
             const std::string& service_uuid,
             const std::string& characteristic_uuid,
             std::string& message)
         {
+            (void)op_id;
             (void)connection;
             (void)service_uuid;
             (void)characteristic_uuid;
@@ -344,11 +382,13 @@ namespace gmbluetooth
         }
 
         virtual Error le_characteristic_read(
+            std::uint64_t op_id,
             std::uint64_t connection,
             const std::string& service_uuid,
             const std::string& characteristic_uuid,
             std::string& message)
         {
+            (void)op_id;
             (void)connection;
             (void)service_uuid;
             (void)characteristic_uuid;
@@ -358,6 +398,7 @@ namespace gmbluetooth
         }
 
         virtual Error le_characteristic_write(
+            std::uint64_t op_id,
             std::uint64_t connection,
             const std::string& service_uuid,
             const std::string& characteristic_uuid,
@@ -365,6 +406,7 @@ namespace gmbluetooth
             bool with_response,
             std::string& message)
         {
+            (void)op_id;
             (void)connection;
             (void)service_uuid;
             (void)characteristic_uuid;
@@ -380,12 +422,14 @@ namespace gmbluetooth
         // 1 = notify
         // 2 = indicate
         virtual Error le_characteristic_subscribe(
+            std::uint64_t op_id,
             std::uint64_t connection,
             const std::string& service_uuid,
             const std::string& characteristic_uuid,
             std::int32_t mode,
             std::string& message)
         {
+            (void)op_id;
             (void)connection;
             (void)service_uuid;
             (void)characteristic_uuid;
@@ -396,12 +440,14 @@ namespace gmbluetooth
         }
 
         virtual Error le_descriptor_read(
+            std::uint64_t op_id,
             std::uint64_t connection,
             const std::string& service_uuid,
             const std::string& characteristic_uuid,
             const std::string& descriptor_uuid,
             std::string& message)
         {
+            (void)op_id;
             (void)connection;
             (void)service_uuid;
             (void)characteristic_uuid;
@@ -412,6 +458,7 @@ namespace gmbluetooth
         }
 
         virtual Error le_descriptor_write(
+            std::uint64_t op_id,
             std::uint64_t connection,
             const std::string& service_uuid,
             const std::string& characteristic_uuid,
@@ -419,6 +466,7 @@ namespace gmbluetooth
             const std::string& value_base64,
             std::string& message)
         {
+            (void)op_id;
             (void)connection;
             (void)service_uuid;
             (void)characteristic_uuid;
@@ -430,10 +478,12 @@ namespace gmbluetooth
         }
 
         virtual Error le_advertise_start(
+            std::uint64_t op_id,
             const std::string& settings_json,
             const std::string& data_json,
             std::string& message)
         {
+            (void)op_id;
             (void)settings_json;
             (void)data_json;
 
@@ -470,9 +520,11 @@ namespace gmbluetooth
         }
 
         virtual Error le_server_add_service(
+            std::uint64_t op_id,
             const std::string& service_json,
             std::string& message)
         {
+            (void)op_id;
             (void)service_json;
 
             message = "BLE peripheral/server mode is not supported by this backend";

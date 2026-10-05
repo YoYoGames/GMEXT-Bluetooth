@@ -729,6 +729,32 @@ namespace gmbluetooth
         shared->hooks.push_event(std::move(event));
     }
 
+    // The completion of the LE call the core registered as op_id. Each op
+    // runs on its own thread, so completions arrive in any order; the id is
+    // what the core matches them by.
+    void push_le_op_completion(
+        const std::shared_ptr<SharedLeClientState>& shared,
+        std::uint64_t op_id,
+        Error error,
+        LeOpResult result = {})
+    {
+        if (!shared || !shared->alive->load() || !shared->hooks.push_event)
+            return;
+
+        BackendEvent event;
+        event.type = BackendEventType::LeOpCompleted;
+        event.transport = Transport::LowEnergy;
+        event.op_id = op_id;
+        event.error = error;
+        event.result = std::move(result);
+        shared->hooks.push_event(std::move(event));
+    }
+
+    Error gatt_error(WDBG::GattCommunicationStatus status)
+    {
+        return status == WDBG::GattCommunicationStatus::Success ? Error::Ok : Error::OperationFailed;
+    }
+
     std::string le_error_json(
         std::int32_t error_code,
         std::uint64_t connection = 0)
@@ -904,15 +930,6 @@ namespace gmbluetooth
 
         state->connected.store(false);
     }
-
-    std::string make_nested_json_array_field(
-        const char* field_name,
-        const std::string& array_json)
-    {
-        return "{\"" + std::string(field_name ? field_name : "") +
-            "\":\"" + json_escape(array_json) + "\"}";
-    }
-
 
     class WindowsBackend final : public Backend
     {
@@ -1436,6 +1453,7 @@ namespace gmbluetooth
         }
 
         Error le_services_discover(
+            std::uint64_t op_id,
             std::uint64_t connection,
             std::string& message) override
         {
@@ -1460,7 +1478,7 @@ namespace gmbluetooth
 
             const auto shared = le_client_;
             std::thread(
-                [shared, state, remote]()
+                [shared, op_id, state, remote]()
                 {
                     try
                     {
@@ -1474,18 +1492,17 @@ namespace gmbluetooth
                         if (result.Status() !=
                             WDBG::GattCommunicationStatus::Success)
                         {
-                            push_le_client_event(
+                            push_le_op_completion(
                                 shared,
-                                "bluetooth_le_peripheral_get_services",
-                                le_error_json(1));
+                                op_id,
+                                Error::OperationFailed);
                             return;
                         }
 
                         std::unordered_map<
                             std::string,
                             std::shared_ptr<RemoteGattServiceState>> services;
-                        std::string array = "[";
-                        bool first = true;
+                        LeOpResult found;
 
                         for (const auto& service : result.Services())
                         {
@@ -1496,13 +1513,9 @@ namespace gmbluetooth
                             service_state->service = service;
                             services[service_state->uuid] = service_state;
 
-                            if (!first)
-                                array += ",";
-                            first = false;
-                            array += "{\"uuid\":\"" +
-                                json_escape(service_state->uuid) + "\"}";
+                            found.attributes.push_back(
+                                LeAttribute{ service_state->uuid, 0 });
                         }
-                        array += "]";
 
                         std::unordered_map<
                             std::string,
@@ -1516,17 +1529,18 @@ namespace gmbluetooth
                             close_remote_service_noexcept(pair.second);
 
                         state->connected.store(true);
-                        push_le_client_event(
+                        push_le_op_completion(
                             shared,
-                            "bluetooth_le_peripheral_get_services",
-                            make_nested_json_array_field("services", array));
+                            op_id,
+                            Error::Ok,
+                            std::move(found));
                     }
                     catch (...)
                     {
-                        push_le_client_event(
+                        push_le_op_completion(
                             shared,
-                            "bluetooth_le_peripheral_get_services",
-                            le_error_json(1));
+                            op_id,
+                            Error::OperationFailed);
                     }
                 })
                 .detach();
@@ -1536,6 +1550,7 @@ namespace gmbluetooth
         }
 
         Error le_characteristics_discover(
+            std::uint64_t op_id,
             std::uint64_t connection,
             const std::string& service_uuid,
             std::string& message) override
@@ -1550,7 +1565,7 @@ namespace gmbluetooth
 
             const auto shared = le_client_;
             std::thread(
-                [shared, state, service]()
+                [shared, op_id, state, service]()
                 {
                     try
                     {
@@ -1569,10 +1584,10 @@ namespace gmbluetooth
                                 static_cast<int>(result.Status()),
                                 protocol_error ? static_cast<int>(protocol_error.Value()) : -1);
 
-                            push_le_client_event(
+                            push_le_op_completion(
                                 shared,
-                                "bluetooth_le_service_get_characteristics",
-                                le_error_json(1));
+                                op_id,
+                                Error::OperationFailed);
                             return;
                         }
 
@@ -1581,8 +1596,7 @@ namespace gmbluetooth
                             std::shared_ptr<RemoteGattCharacteristicState>>
                             characteristics;
 
-                        std::string array = "[";
-                        bool first = true;
+                        LeOpResult found;
 
                         for (const auto& characteristic :
                              result.Characteristics())
@@ -1596,18 +1610,11 @@ namespace gmbluetooth
                             characteristics[characteristic_state->uuid] =
                                 characteristic_state;
 
-                            if (!first)
-                                array += ",";
-                            first = false;
-                            array += "{\"uuid\":\"" +
-                                json_escape(characteristic_state->uuid) +
-                                "\",\"properties\":" +
-                                std::to_string(
-                                    static_cast<std::uint32_t>(
-                                        characteristic.CharacteristicProperties())) +
-                                "}";
+                            found.attributes.push_back(LeAttribute{
+                                characteristic_state->uuid,
+                                static_cast<std::int32_t>(
+                                    characteristic.CharacteristicProperties()) });
                         }
-                        array += "]";
 
                         std::unordered_map<
                             std::string,
@@ -1622,19 +1629,18 @@ namespace gmbluetooth
                         for (auto& pair : old_characteristics)
                             close_remote_characteristic_noexcept(pair.second);
 
-                        push_le_client_event(
+                        push_le_op_completion(
                             shared,
-                            "bluetooth_le_service_get_characteristics",
-                            make_nested_json_array_field(
-                                "characteristics",
-                                array));
+                            op_id,
+                            Error::Ok,
+                            std::move(found));
                     }
                     catch (...)
                     {
-                        push_le_client_event(
+                        push_le_op_completion(
                             shared,
-                            "bluetooth_le_service_get_characteristics",
-                            le_error_json(1));
+                            op_id,
+                            Error::OperationFailed);
                     }
                 })
                 .detach();
@@ -1644,6 +1650,7 @@ namespace gmbluetooth
         }
 
         Error le_descriptors_discover(
+            std::uint64_t op_id,
             std::uint64_t connection,
             const std::string& service_uuid,
             const std::string& characteristic_uuid,
@@ -1664,7 +1671,7 @@ namespace gmbluetooth
 
             const auto shared = le_client_;
             std::thread(
-                [shared, state, characteristic]()
+                [shared, op_id, state, characteristic]()
                 {
                     try
                     {
@@ -1677,10 +1684,10 @@ namespace gmbluetooth
                         if (result.Status() !=
                             WDBG::GattCommunicationStatus::Success)
                         {
-                            push_le_client_event(
+                            push_le_op_completion(
                                 shared,
-                                "bluetooth_le_characteristic_get_descriptors",
-                                le_error_json(1));
+                                op_id,
+                                Error::OperationFailed);
                             return;
                         }
 
@@ -1689,8 +1696,7 @@ namespace gmbluetooth
                             std::shared_ptr<RemoteGattDescriptorState>>
                             descriptors;
 
-                        std::string array = "[";
-                        bool first = true;
+                        LeOpResult found;
 
                         for (const auto& descriptor : result.Descriptors())
                         {
@@ -1702,13 +1708,9 @@ namespace gmbluetooth
                             descriptors[descriptor_state->uuid] =
                                 descriptor_state;
 
-                            if (!first)
-                                array += ",";
-                            first = false;
-                            array += "{\"uuid\":\"" +
-                                json_escape(descriptor_state->uuid) + "\"}";
+                            found.attributes.push_back(
+                                LeAttribute{ descriptor_state->uuid, 0 });
                         }
-                        array += "]";
 
                         {
                             std::scoped_lock lock(state->mutex);
@@ -1716,19 +1718,18 @@ namespace gmbluetooth
                                 std::move(descriptors);
                         }
 
-                        push_le_client_event(
+                        push_le_op_completion(
                             shared,
-                            "bluetooth_le_characteristic_get_descriptors",
-                            make_nested_json_array_field(
-                                "descriptors",
-                                array));
+                            op_id,
+                            Error::Ok,
+                            std::move(found));
                     }
                     catch (...)
                     {
-                        push_le_client_event(
+                        push_le_op_completion(
                             shared,
-                            "bluetooth_le_characteristic_get_descriptors",
-                            le_error_json(1));
+                            op_id,
+                            Error::OperationFailed);
                     }
                 })
                 .detach();
@@ -1738,6 +1739,7 @@ namespace gmbluetooth
         }
 
         Error le_characteristic_read(
+            std::uint64_t op_id,
             std::uint64_t connection,
             const std::string& service_uuid,
             const std::string& characteristic_uuid,
@@ -1758,7 +1760,7 @@ namespace gmbluetooth
 
             const auto shared = le_client_;
             std::thread(
-                [shared, state, characteristic]()
+                [shared, op_id, state, characteristic]()
                 {
                     try
                     {
@@ -1777,29 +1779,27 @@ namespace gmbluetooth
                                 static_cast<int>(result.Status()),
                                 protocol_error ? static_cast<int>(protocol_error.Value()) : -1);
 
-                            push_le_client_event(
+                            push_le_op_completion(
                                 shared,
-                                "bluetooth_le_characteristic_read",
-                                le_error_json(1));
+                                op_id,
+                                Error::OperationFailed);
                             return;
                         }
 
-                        const auto bytes = buffer_to_bytes(result.Value());
-                        push_le_client_event(
+                        LeOpResult read;
+                        read.value = buffer_to_bytes(result.Value());
+                        push_le_op_completion(
                             shared,
-                            "bluetooth_le_characteristic_read",
-                            "{\"value\":\"" +
-                                json::base64_encode(
-                                    bytes.data(),
-                                    bytes.size()) +
-                                "\"}");
+                            op_id,
+                            Error::Ok,
+                            std::move(read));
                     }
                     catch (...)
                     {
-                        push_le_client_event(
+                        push_le_op_completion(
                             shared,
-                            "bluetooth_le_characteristic_read",
-                            le_error_json(1));
+                            op_id,
+                            Error::OperationFailed);
                     }
                 })
                 .detach();
@@ -1809,6 +1809,7 @@ namespace gmbluetooth
         }
 
         Error le_characteristic_write(
+            std::uint64_t op_id,
             std::uint64_t connection,
             const std::string& service_uuid,
             const std::string& characteristic_uuid,
@@ -1832,7 +1833,7 @@ namespace gmbluetooth
             const auto payload = json::base64_decode(value_base64);
             const auto shared = le_client_;
             std::thread(
-                [shared, state, characteristic, payload, with_response]()
+                [shared, op_id, state, characteristic, payload, with_response]()
                 {
                     try
                     {
@@ -1859,23 +1860,17 @@ namespace gmbluetooth
                                 payload.size());
                         }
 
-                        push_le_client_event(
+                        push_le_op_completion(
                             shared,
-                            with_response
-                                ? "bluetooth_le_characteristic_write_request"
-                                : "bluetooth_le_characteristic_write_command",
-                            status == WDBG::GattCommunicationStatus::Success
-                                ? "{}"
-                                : le_error_json(1));
+                            op_id,
+                            gatt_error(status));
                     }
                     catch (...)
                     {
-                        push_le_client_event(
+                        push_le_op_completion(
                             shared,
-                            with_response
-                                ? "bluetooth_le_characteristic_write_request"
-                                : "bluetooth_le_characteristic_write_command",
-                            le_error_json(1));
+                            op_id,
+                            Error::OperationFailed);
                     }
                 })
                 .detach();
@@ -1885,6 +1880,7 @@ namespace gmbluetooth
         }
 
         Error le_characteristic_subscribe(
+            std::uint64_t op_id,
             std::uint64_t connection,
             const std::string& service_uuid,
             const std::string& characteristic_uuid,
@@ -1917,7 +1913,7 @@ namespace gmbluetooth
                 normalize_uuid(characteristic_uuid);
 
             std::thread(
-                [shared,
+                [shared, op_id,
                  state,
                  characteristic,
                  normalized_service,
@@ -2009,33 +2005,17 @@ namespace gmbluetooth
                             characteristic->value_changed_token = {};
                         }
 
-                        const char* event_name =
-                            mode == 0
-                                ? "bluetooth_le_characteristic_unsubscribe"
-                            : mode == 1
-                                ? "bluetooth_le_characteristic_notify"
-                                : "bluetooth_le_characteristic_indicate";
-
-                        push_le_client_event(
+                        push_le_op_completion(
                             shared,
-                            event_name,
-                            status == WDBG::GattCommunicationStatus::Success
-                                ? "{}"
-                                : le_error_json(1));
+                            op_id,
+                            gatt_error(status));
                     }
                     catch (...)
                     {
-                        const char* event_name =
-                            mode == 0
-                                ? "bluetooth_le_characteristic_unsubscribe"
-                            : mode == 1
-                                ? "bluetooth_le_characteristic_notify"
-                                : "bluetooth_le_characteristic_indicate";
-
-                        push_le_client_event(
+                        push_le_op_completion(
                             shared,
-                            event_name,
-                            le_error_json(1));
+                            op_id,
+                            Error::OperationFailed);
                     }
                 })
                 .detach();
@@ -2045,6 +2025,7 @@ namespace gmbluetooth
         }
 
         Error le_descriptor_read(
+            std::uint64_t op_id,
             std::uint64_t connection,
             const std::string& service_uuid,
             const std::string& characteristic_uuid,
@@ -2066,7 +2047,7 @@ namespace gmbluetooth
 
             const auto shared = le_client_;
             std::thread(
-                [shared, state, descriptor]()
+                [shared, op_id, state, descriptor]()
                 {
                     try
                     {
@@ -2079,29 +2060,27 @@ namespace gmbluetooth
                         if (result.Status() !=
                             WDBG::GattCommunicationStatus::Success)
                         {
-                            push_le_client_event(
+                            push_le_op_completion(
                                 shared,
-                                "bluetooth_le_descriptor_read",
-                                le_error_json(1));
+                                op_id,
+                                Error::OperationFailed);
                             return;
                         }
 
-                        const auto bytes = buffer_to_bytes(result.Value());
-                        push_le_client_event(
+                        LeOpResult read;
+                        read.value = buffer_to_bytes(result.Value());
+                        push_le_op_completion(
                             shared,
-                            "bluetooth_le_descriptor_read",
-                            "{\"value\":\"" +
-                                json::base64_encode(
-                                    bytes.data(),
-                                    bytes.size()) +
-                                "\"}");
+                            op_id,
+                            Error::Ok,
+                            std::move(read));
                     }
                     catch (...)
                     {
-                        push_le_client_event(
+                        push_le_op_completion(
                             shared,
-                            "bluetooth_le_descriptor_read",
-                            le_error_json(1));
+                            op_id,
+                            Error::OperationFailed);
                     }
                 })
                 .detach();
@@ -2111,6 +2090,7 @@ namespace gmbluetooth
         }
 
         Error le_descriptor_write(
+            std::uint64_t op_id,
             std::uint64_t connection,
             const std::string& service_uuid,
             const std::string& characteristic_uuid,
@@ -2135,7 +2115,7 @@ namespace gmbluetooth
             const auto shared = le_client_;
 
             std::thread(
-                [shared, state, descriptor, payload]()
+                [shared, op_id, state, descriptor, payload]()
                 {
                     try
                     {
@@ -2145,19 +2125,17 @@ namespace gmbluetooth
                             descriptor->descriptor.WriteValueAsync(
                                 bytes_to_buffer(payload)).get();
 
-                        push_le_client_event(
+                        push_le_op_completion(
                             shared,
-                            "bluetooth_le_descriptor_write",
-                            status == WDBG::GattCommunicationStatus::Success
-                                ? "{}"
-                                : le_error_json(1));
+                            op_id,
+                            gatt_error(status));
                     }
                     catch (...)
                     {
-                        push_le_client_event(
+                        push_le_op_completion(
                             shared,
-                            "bluetooth_le_descriptor_write",
-                            le_error_json(1));
+                            op_id,
+                            Error::OperationFailed);
                     }
                 })
                 .detach();
@@ -2166,22 +2144,22 @@ namespace gmbluetooth
             return Error::Ok;
         }
 
-        void push_le_completion_async(const char* event_type)
+        // Completes the call registered as op_id from another thread, after
+        // the call has returned to the core.
+        void push_le_completion_async(std::uint64_t op_id)
         {
             if (!hooks_.push_event)
                 return;
 
             auto push_event = hooks_.push_event;
-            const std::string type = event_type ? event_type : "";
 
             std::thread(
-                [push_event = std::move(push_event), type]() mutable
+                [push_event = std::move(push_event), op_id]() mutable
                 {
                     BackendEvent event;
-                    event.type = BackendEventType::LeEvent;
+                    event.type = BackendEventType::LeOpCompleted;
                     event.transport = Transport::LowEnergy;
-                    event.event_type = type;
-                    event.json = "{}";
+                    event.op_id = op_id;
                     push_event(std::move(event));
                 })
                 .detach();
@@ -2189,7 +2167,7 @@ namespace gmbluetooth
 
         // ===== BLE Advertiser =====
 
-        Error le_advertise_start(const std::string& settings_json, const std::string& data_json, std::string& message) override
+        Error le_advertise_start(std::uint64_t op_id, const std::string& settings_json, const std::string& data_json, std::string& message) override
         {
             if (!initialized_)
             {
@@ -2203,7 +2181,7 @@ namespace gmbluetooth
             }
             if (le_advertising_.exchange(true))
             {
-                push_le_completion_async("bluetooth_le_advertise_start");
+                push_le_completion_async(op_id);
                 message.clear();
                 return Error::Ok;
             }
@@ -2309,7 +2287,7 @@ namespace gmbluetooth
                 for (auto& [_, service] : gatt_services_)
                     start_service_advertising(service);
 
-                push_le_completion_async("bluetooth_le_advertise_start");
+                push_le_completion_async(op_id);
                 message.clear();
                 return Error::Ok;
             }
@@ -2388,7 +2366,7 @@ namespace gmbluetooth
             return le_server_open_.load();
         }
 
-        Error le_server_add_service(const std::string& service_json, std::string& message) override
+        Error le_server_add_service(std::uint64_t op_id, const std::string& service_json, std::string& message) override
         {
             if (!le_server_open_.load())
             {
@@ -2716,7 +2694,7 @@ namespace gmbluetooth
                 if (le_advertising_.load())
                     start_service_advertising(service_state);
 
-                push_le_completion_async("bluetooth_le_server_add_service");
+                push_le_completion_async(op_id);
 
                 message.clear();
                 return Error::Ok;
