@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cstring>
 #include <deque>
 #include <optional>
@@ -19,6 +20,19 @@ namespace
     std::unique_ptr<Backend> g_backend;
     std::string g_last_error_message;
     Error g_last_error = Error::Ok;
+
+    // The generated GML wrapper only checks buffer_exists, so offset and size are
+    // validated here against the buffer's real length - the same rule as
+    // Android's bufferRangeInvalid.
+    bool buffer_range_valid(const GMBuffer& buffer, unsigned int offset, unsigned int size, const char* function_name)
+    {
+        if (static_cast<std::uint64_t>(offset) + size <= buffer.length())
+            return true;
+
+        g_last_error = Error::InvalidArgument;
+        g_last_error_message = std::string("Invalid buffer offset/size for ") + function_name;
+        return false;
+    }
 
     // Callback storage
     std::mutex g_callback_mutex;
@@ -94,12 +108,14 @@ namespace
             return handle > 0 && handle <= static_cast<std::uint64_t>(devices_.size());
         }
 
-        const DiscoveredDevice* get_device(std::uint64_t handle) const
+        // Returns a copy: backend threads upsert concurrently, so neither an
+        // element address nor a reference may outlive the lock.
+        std::optional<DiscoveredDevice> get_device(std::uint64_t handle) const
         {
             std::scoped_lock lock(mutex_);
             if (handle <= 0 || handle > static_cast<std::uint64_t>(devices_.size()))
-                return nullptr;
-            return &devices_[handle - 1];
+                return std::nullopt;
+            return devices_[handle - 1];
         }
 
     private:
@@ -190,6 +206,27 @@ namespace
 
     LeConnectionManager g_le_connection_manager;
 
+    // Backends spell one UUID several ways (Apple caches a SIG service as
+    // "0000180D-0000-1000-8000-00805F9B34FB" but its notifications carry
+    // "180D"), so the caches compare UUIDs in one form: 128-bit, lowercase. The
+    // stored string stays as the backend reported it.
+    std::string canonical_uuid(std::string_view uuid)
+    {
+        static constexpr std::string_view base_suffix = "-0000-1000-8000-00805f9b34fb";
+
+        std::string out;
+        if (uuid.size() == 4)
+            out.append("0000").append(uuid).append(base_suffix);
+        else if (uuid.size() == 8)
+            out.append(uuid).append(base_suffix);
+        else
+            out.assign(uuid);
+
+        std::transform(out.begin(), out.end(), out.begin(),
+            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return out;
+    }
+
     // Parent-scoped handle caches for GATT services/characteristics/descriptors.
     // Handles are 1-based indices into a flat vector, same idiom as DeviceManager;
     // find_or_insert is idempotent so re-running discovery doesn't mint duplicates.
@@ -204,10 +241,11 @@ namespace
     public:
         std::uint64_t find_or_insert(std::uint64_t connection, const std::string& uuid)
         {
+            const std::string key = canonical_uuid(uuid);
             std::scoped_lock lock(mutex_);
             for (std::size_t i = 0; i < entries_.size(); ++i)
             {
-                if (entries_[i].connection == connection && entries_[i].uuid == uuid)
+                if (entries_[i].connection == connection && canonical_uuid(entries_[i].uuid) == key)
                     return i + 1;
             }
             entries_.push_back(ServiceEntry{ connection, uuid });
@@ -216,10 +254,11 @@ namespace
 
         std::uint64_t find_by_uuid(std::uint64_t connection, const std::string& uuid) const
         {
+            const std::string key = canonical_uuid(uuid);
             std::scoped_lock lock(mutex_);
             for (std::size_t i = 0; i < entries_.size(); ++i)
             {
-                if (entries_[i].connection == connection && entries_[i].uuid == uuid)
+                if (entries_[i].connection == connection && canonical_uuid(entries_[i].uuid) == key)
                     return i + 1;
             }
             return 0;
@@ -293,10 +332,11 @@ namespace
     public:
         std::uint64_t find_or_insert(std::uint64_t service, const std::string& uuid, std::int32_t properties)
         {
+            const std::string key = canonical_uuid(uuid);
             std::scoped_lock lock(mutex_);
             for (std::size_t i = 0; i < entries_.size(); ++i)
             {
-                if (entries_[i].service == service && entries_[i].uuid == uuid)
+                if (entries_[i].service == service && canonical_uuid(entries_[i].uuid) == key)
                 {
                     entries_[i].properties = properties;
                     return i + 1;
@@ -312,10 +352,11 @@ namespace
 
         std::uint64_t find_by_uuid(std::uint64_t service, const std::string& uuid) const
         {
+            const std::string key = canonical_uuid(uuid);
             std::scoped_lock lock(mutex_);
             for (std::size_t i = 0; i < entries_.size(); ++i)
             {
-                if (entries_[i].service == service && entries_[i].uuid == uuid)
+                if (entries_[i].service == service && canonical_uuid(entries_[i].uuid) == key)
                     return i + 1;
             }
             return 0;
@@ -417,10 +458,11 @@ namespace
     public:
         std::uint64_t find_or_insert(std::uint64_t characteristic, const std::string& uuid)
         {
+            const std::string key = canonical_uuid(uuid);
             std::scoped_lock lock(mutex_);
             for (std::size_t i = 0; i < entries_.size(); ++i)
             {
-                if (entries_[i].characteristic == characteristic && entries_[i].uuid == uuid)
+                if (entries_[i].characteristic == characteristic && canonical_uuid(entries_[i].uuid) == key)
                     return i + 1;
             }
             entries_.push_back(DescriptorEntry{ characteristic, uuid, {}, false });
@@ -429,10 +471,11 @@ namespace
 
         std::uint64_t find_by_uuid(std::uint64_t characteristic, const std::string& uuid) const
         {
+            const std::string key = canonical_uuid(uuid);
             std::scoped_lock lock(mutex_);
             for (std::size_t i = 0; i < entries_.size(); ++i)
             {
-                if (entries_[i].characteristic == characteristic && entries_[i].uuid == uuid)
+                if (entries_[i].characteristic == characteristic && canonical_uuid(entries_[i].uuid) == key)
                     return i + 1;
             }
             return 0;
@@ -1714,49 +1757,49 @@ bool bluetooth_device_is_valid(std::uint64_t device)
 
 int bluetooth_device_get_transport(std::uint64_t device)
 {
-    const auto* dev = g_device_manager.get_device(device);
+    const auto dev = g_device_manager.get_device(device);
     return dev ? static_cast<int>(dev->transport) : static_cast<int>(Transport::Unknown);
 }
 
 std::string bluetooth_device_get_id(std::uint64_t device)
 {
-    const auto* dev = g_device_manager.get_device(device);
+    const auto dev = g_device_manager.get_device(device);
     return dev ? dev->id : std::string();
 }
 
 std::string bluetooth_device_get_name(std::uint64_t device)
 {
-    const auto* dev = g_device_manager.get_device(device);
+    const auto dev = g_device_manager.get_device(device);
     return dev ? dev->name : std::string();
 }
 
 bool bluetooth_device_has_address(std::uint64_t device)
 {
-    const auto* dev = g_device_manager.get_device(device);
+    const auto dev = g_device_manager.get_device(device);
     return dev ? dev->address_available : false;
 }
 
 std::string bluetooth_device_get_address(std::uint64_t device)
 {
-    const auto* dev = g_device_manager.get_device(device);
+    const auto dev = g_device_manager.get_device(device);
     return dev ? dev->address : std::string();
 }
 
 bool bluetooth_device_has_rssi(std::uint64_t device)
 {
-    const auto* dev = g_device_manager.get_device(device);
+    const auto dev = g_device_manager.get_device(device);
     return dev ? dev->rssi_available : false;
 }
 
 int bluetooth_device_get_rssi(std::uint64_t device)
 {
-    const auto* dev = g_device_manager.get_device(device);
+    const auto dev = g_device_manager.get_device(device);
     return dev ? dev->rssi : 0;
 }
 
 bool bluetooth_device_is_connectable(std::uint64_t device)
 {
-    const auto* dev = g_device_manager.get_device(device);
+    const auto dev = g_device_manager.get_device(device);
     return dev ? dev->connectable : false;
 }
 
@@ -1769,7 +1812,7 @@ std::uint64_t bluetooth_classic_connect(std::uint64_t device, std::string_view s
         return 0;
     }
 
-    const auto* dev = g_device_manager.get_device(device);
+    const auto dev = g_device_manager.get_device(device);
     if (!dev)
     {
         g_last_error = Error::InvalidArgument;
@@ -1810,7 +1853,7 @@ bool bluetooth_pairing_is_supported(std::uint64_t device)
     if (!g_backend)
         return false;
 
-    const auto* dev = g_device_manager.get_device(device);
+    const auto dev = g_device_manager.get_device(device);
     return dev && g_backend->pairing_is_supported(*dev);
 }
 
@@ -1823,7 +1866,7 @@ std::int32_t bluetooth_pair(std::uint64_t device, const gm::wire::GMFunction& ca
         return static_cast<std::int32_t>(Error::NotInitialized);
     }
 
-    const auto* dev = g_device_manager.get_device(device);
+    const auto dev = g_device_manager.get_device(device);
     if (!dev)
     {
         g_last_error = Error::InvalidArgument;
@@ -1855,7 +1898,7 @@ std::int32_t bluetooth_pair(std::uint64_t device, const gm::wire::GMFunction& ca
 
 bool bluetooth_device_is_paired(std::uint64_t device)
 {
-    const auto* dev = g_device_manager.get_device(device);
+    const auto dev = g_device_manager.get_device(device);
     return dev && g_backend && g_backend->is_paired(*dev);
 }
 
@@ -1904,6 +1947,9 @@ std::int32_t bluetooth_classic_send(std::uint64_t connection, struct gm::wire::G
         return static_cast<std::int32_t>(Error::NotInitialized);
     }
 
+    if (!buffer_range_valid(data, offset, size, "bluetooth_classic_send"))
+        return static_cast<std::int32_t>(Error::InvalidArgument);
+
     const std::uint8_t* buffer = static_cast<const std::uint8_t*>(data.data()) + offset;
     std::string message;
     const Error error = g_backend->classic_send_bytes(connection, buffer, size, message);
@@ -1915,6 +1961,9 @@ std::int32_t bluetooth_classic_send(std::uint64_t connection, struct gm::wire::G
 std::int32_t bluetooth_classic_receive(std::uint64_t connection, struct gm::wire::GMBuffer data, unsigned int offset, unsigned int max_size)
 {
     if (!g_backend)
+        return 0;
+
+    if (!buffer_range_valid(data, offset, max_size, "bluetooth_classic_receive"))
         return 0;
 
     std::uint8_t* buffer = static_cast<std::uint8_t*>(data.data()) + offset;
@@ -2125,7 +2174,7 @@ std::uint64_t bluetooth_le_connect(std::uint64_t device, const gm::wire::GMFunct
         return 0;
     }
 
-    const auto* dev = g_device_manager.get_device(device);
+    const auto dev = g_device_manager.get_device(device);
     if (!dev)
     {
         g_last_error = Error::InvalidArgument;
@@ -2377,6 +2426,9 @@ std::int32_t bluetooth_le_characteristic_read(std::uint64_t characteristic, cons
 
 std::int32_t bluetooth_le_characteristic_get_value(std::uint64_t characteristic, struct gm::wire::GMBuffer out_data, unsigned int offset, unsigned int max_size)
 {
+    if (!buffer_range_valid(out_data, offset, max_size, "bluetooth_le_characteristic_get_value"))
+        return 0;
+
     std::uint8_t* buffer = static_cast<std::uint8_t*>(out_data.data()) + offset;
     return g_characteristic_cache.get_value(characteristic, buffer, max_size);
 }
@@ -2401,6 +2453,9 @@ std::int32_t bluetooth_le_characteristic_write(std::uint64_t characteristic, str
     const std::uint64_t connection = g_service_cache.get_parent(service);
     const std::string service_uuid = g_service_cache.get_uuid(service);
     const std::string characteristic_uuid = g_characteristic_cache.get_uuid(characteristic);
+
+    if (!buffer_range_valid(data, offset, size, "bluetooth_le_characteristic_write"))
+        return static_cast<std::int32_t>(Error::InvalidArgument);
 
     const std::uint8_t* buffer = static_cast<const std::uint8_t*>(data.data()) + offset;
     const std::string value_base64 = json::base64_encode(buffer, size);
@@ -2491,6 +2546,9 @@ std::int32_t bluetooth_le_descriptor_read(std::uint64_t descriptor, const gm::wi
 
 std::int32_t bluetooth_le_descriptor_get_value(std::uint64_t descriptor, struct gm::wire::GMBuffer out_data, unsigned int offset, unsigned int max_size)
 {
+    if (!buffer_range_valid(out_data, offset, max_size, "bluetooth_le_descriptor_get_value"))
+        return 0;
+
     std::uint8_t* buffer = static_cast<std::uint8_t*>(out_data.data()) + offset;
     return g_descriptor_cache.get_value(descriptor, buffer, max_size);
 }
@@ -2517,6 +2575,9 @@ std::int32_t bluetooth_le_descriptor_write(std::uint64_t descriptor, struct gm::
     const std::string service_uuid = g_service_cache.get_uuid(service);
     const std::string characteristic_uuid = g_characteristic_cache.get_uuid(characteristic);
     const std::string descriptor_uuid = g_descriptor_cache.get_uuid(descriptor);
+
+    if (!buffer_range_valid(data, offset, size, "bluetooth_le_descriptor_write"))
+        return static_cast<std::int32_t>(Error::InvalidArgument);
 
     const std::uint8_t* buffer = static_cast<const std::uint8_t*>(data.data()) + offset;
     const std::string value_base64 = json::base64_encode(buffer, size);
@@ -2673,6 +2734,12 @@ std::int32_t bluetooth_le_server_respond_read(std::int32_t request_id, std::int3
         return static_cast<std::int32_t>(Error::NotInitialized);
     }
 
+    // Checked before the request is erased, so a call with a bad range can be
+    // retried instead of leaving the remote central to time out.
+    if (error_code == static_cast<std::int32_t>(Error::Ok) && size > 0 &&
+        !buffer_range_valid(data, offset, size, "bluetooth_le_server_respond_read"))
+        return static_cast<std::int32_t>(Error::InvalidArgument);
+
     {
         std::scoped_lock lock(g_pending_le_server_requests_mutex);
         g_pending_le_server_requests.erase(request_id);
@@ -2711,6 +2778,9 @@ std::int32_t bluetooth_le_server_respond_write(std::int32_t request_id, std::int
 
 std::int32_t bluetooth_le_server_write_request_get_value(std::int32_t request_id, struct gm::wire::GMBuffer out_data, unsigned int offset, unsigned int max_size)
 {
+    if (!buffer_range_valid(out_data, offset, max_size, "bluetooth_le_server_write_request_get_value"))
+        return 0;
+
     std::scoped_lock lock(g_pending_le_server_requests_mutex);
     const auto it = g_pending_le_server_requests.find(request_id);
     if (it == g_pending_le_server_requests.end() || !it->second.is_write)
@@ -2739,6 +2809,9 @@ std::int32_t bluetooth_le_server_notify_value(std::string_view service_uuid, std
     // per-connection targeting available below this layer yet, so
     // `connection` is accepted for forward-compatibility but not honored.
     (void)connection;
+
+    if (!buffer_range_valid(data, offset, size, "bluetooth_le_server_notify_value"))
+        return static_cast<std::int32_t>(Error::InvalidArgument);
 
     const std::uint8_t* buffer = static_cast<const std::uint8_t*>(data.data()) + offset;
     const std::string value_base64 = json::base64_encode(buffer, size);

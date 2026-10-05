@@ -989,6 +989,25 @@ static int _pendingScanAsyncId = 0;
     return shortUUID;  // Already a 128-bit UUID or unrecognized format.
 }
 
+// CBDescriptor.value is not always NSData: Extended Properties, CCCD and
+// Server Configuration come back as NSNumber, User Description as NSString.
+- (NSData *)dataFromDescriptorValue:(id)value {
+    if ([value isKindOfClass:[NSData class]]) {
+        return value;
+    }
+    if ([value isKindOfClass:[NSNumber class]]) {
+        // These descriptors are 16-bit little-endian on the air.
+        uint16_t raw = [(NSNumber *)value unsignedShortValue];
+        uint8_t bytes[2] = { (uint8_t)(raw & 0xFF), (uint8_t)(raw >> 8) };
+        return [NSData dataWithBytes:bytes length:sizeof(bytes)];
+    }
+    if ([value isKindOfClass:[NSString class]]) {
+        NSData *utf8 = [(NSString *)value dataUsingEncoding:NSUTF8StringEncoding];
+        return utf8 != nil ? utf8 : [NSData data];
+    }
+    return [NSData data];
+}
+
 - (NSString *) createJSONFromCentral:(CBCentral *)central {
     NSDictionary *centralDictionary = @{
         @"address" : [self convertTo128BitUUID: central.identifier.UUIDString]
@@ -1172,13 +1191,13 @@ static NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length
 }
 
 - (void) handleReadDescriptorQueue {
-    [self handleQueue:_readCharacteristicQueue withBlock:^(GMBTQueuedDescriptor *queuedDescriptor) {
+    [self handleQueue:_readDescriptorQueue withBlock:^(GMBTQueuedDescriptor *queuedDescriptor) {
         [queuedDescriptor.peripheral readValueForDescriptor: queuedDescriptor.descriptor];
     }];
 }
 
 - (void) handleWriteDescriptorQueue {
-    [self handleQueue:_writeCharacteristicQueue withBlock:^(GMBTQueuedDescriptorWithData *queuedDescriptorWithData) {
+    [self handleQueue:_writeDescriptorQueue withBlock:^(GMBTQueuedDescriptorWithData *queuedDescriptorWithData) {
         [queuedDescriptorWithData.peripheral writeValue:queuedDescriptorWithData.data forDescriptor:queuedDescriptorWithData.descriptor];
     }];
 }
@@ -1818,7 +1837,7 @@ static NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length
     
     // Check if there was an error
     if (error) [self notifyAsyncOperationError:type asyncId:asyncId errorCode:(int)error.code extraParams:nil];
-    else [self notifyAsyncOperationSuccess:type asyncId:asyncId extraParams:@{@"value": [descriptor.value base64EncodedStringWithOptions:0]}];
+    else [self notifyAsyncOperationSuccess:type asyncId:asyncId extraParams:@{@"value": [[self dataFromDescriptorValue:descriptor.value] base64EncodedStringWithOptions:0]}];
     
     [self handleReadDescriptorQueue];
 }
