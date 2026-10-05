@@ -230,8 +230,53 @@ public class GMBluetooth extends GMBluetoothInternal
                 return;
 
             invoke(callbackStateChanged, currentBluetoothState());
+
+            int adapterState = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1);
+
+            if (adapterState == BluetoothAdapter.STATE_TURNING_OFF ||
+                adapterState == BluetoothAdapter.STATE_OFF)
+                stopScansForRadioOff();
         }
     };
+
+
+    // The stack drops a running scan when the radio goes off without calling
+    // onScanFailed, so the flags are cleared and each scan reported here.
+    // getAndSet makes each scan report once, whichever of this and
+    // ACTION_DISCOVERY_FINISHED comes first.
+    private void stopScansForRadioOff()
+    {
+        if (leScanning.getAndSet(false))
+        {
+            try
+            {
+                BluetoothLeScanner scanner = leScanner;
+                if (scanner != null && hasScanPermission())
+                    scanner.stopScan(leScanCallback);
+            }
+            catch (Throwable ignored)
+            {
+            }
+
+            leScanner = null;
+            dispatchScanStopped(TRANSPORT_LE, BLUETOOTH_DISABLED, "Bluetooth was turned off");
+        }
+
+        if (classicScanning.getAndSet(false))
+        {
+            try
+            {
+                BluetoothAdapter current = adapter;
+                if (current != null && current.isDiscovering())
+                    current.cancelDiscovery();
+            }
+            catch (Throwable ignored)
+            {
+            }
+
+            dispatchScanStopped(TRANSPORT_CLASSIC, BLUETOOTH_DISABLED, "Bluetooth was turned off");
+        }
+    }
 
     private void ensureStateReceiver()
     {
@@ -316,6 +361,12 @@ public class GMBluetooth extends GMBluetoothInternal
     // BluetoothGatt is an Android platform constraint, not a project
     // convention - operations are queued per-connection and drained serially
     // from BluetoothGattCallback.
+    private interface GattOpStart
+    {
+        // Issues the request; false when the stack refused it.
+        boolean start();
+    }
+
     private static final class LePendingOp
     {
         static final int KIND_DISCOVER_SERVICES = 1;
@@ -329,7 +380,14 @@ public class GMBluetooth extends GMBluetoothInternal
         GMFunction callback;
         long targetHandle;
         int subscribeMode;
+        GattOpStart start;
+        String startFailureMessage = "";
     }
+
+    private static final String LE_OP_DISCONNECTED_MESSAGE =
+        "LE connection closed before the operation completed";
+    private static final String SHUTDOWN_MESSAGE =
+        "Bluetooth was shut down before the operation completed";
 
     private static final class LeConnectionEntry
     {
@@ -343,10 +401,12 @@ public class GMBluetooth extends GMBluetoothInternal
         volatile boolean manualClosing = false;
         volatile GMFunction connectCallback = null;
 
+        // Guarded by opLock. Once closed, the link is gone and new ops fail at once.
         final Object opLock = new Object();
-        final ArrayDeque<Runnable> opQueue = new ArrayDeque<>();
+        final ArrayDeque<LePendingOp> opQueue = new ArrayDeque<>();
         boolean opRunning = false;
-        volatile LePendingOp currentOp = null;
+        boolean closed = false;
+        LePendingOp currentOp = null;
 
         final Object serviceListLock = new Object();
         final ArrayList<Long> serviceHandles = new ArrayList<>();
@@ -421,7 +481,20 @@ public class GMBluetooth extends GMBluetoothInternal
     private volatile BluetoothGattServer gattServer = null;
     private final AtomicBoolean leServerRunning = new AtomicBoolean(false);
     private final Object leServerAddServiceLock = new Object();
-    private final HashMap<String, GMFunction> leServerAddServiceCallbacks = new HashMap<>();
+    // BluetoothGattServer takes one addService at a time, until its
+    // onServiceAdded, so adds wait here in order; only the head is in flight.
+    private final ArrayDeque<LeServerAddEntry> leServerAddQueue = new ArrayDeque<>();
+
+    private static final class LeServerAddEntry
+    {
+        BluetoothGattService service;
+        GMFunction callback;
+        boolean inFlight = false;
+
+        // Failed by clear_services while the stack still had it: its
+        // onServiceAdded fires nothing and removes the service again.
+        boolean cancelled = false;
+    }
 
     private final Object leServerRequestLock = new Object();
     private final HashMap<Integer, LeServerRequestEntry> leServerRequests = new HashMap<>();
@@ -924,6 +997,8 @@ public class GMBluetooth extends GMBluetoothInternal
         if (entry == null)
             return;
 
+        failGattOps(entry, DISCONNECTED, LE_OP_DISCONNECTED_MESSAGE);
+
         ArrayList<Long> services;
 
         synchronized (entry.serviceListLock)
@@ -1099,16 +1174,32 @@ public class GMBluetooth extends GMBluetoothInternal
     // through this queue and drained one at a time from BluetoothGattCallback.
     // =========================================================================
 
-    private void enqueueGattOp(LeConnectionEntry connection, Runnable op)
+    private void enqueueGattOp(LeConnectionEntry connection, LePendingOp op)
     {
-        boolean startNow;
+        boolean closed;
+        boolean startNow = false;
 
         synchronized (connection.opLock)
         {
-            connection.opQueue.addLast(op);
-            startNow = !connection.opRunning;
-            if (startNow)
-                connection.opRunning = true;
+            closed = connection.closed;
+
+            if (!closed)
+            {
+                connection.opQueue.addLast(op);
+                startNow = !connection.opRunning;
+                if (startNow)
+                    connection.opRunning = true;
+            }
+        }
+
+        if (closed)
+        {
+            invoke(
+                op.callback,
+                DISCONNECTED,
+                LE_OP_DISCONNECTED_MESSAGE,
+                (double) op.targetHandle);
+            return;
         }
 
         if (startNow)
@@ -1116,29 +1207,91 @@ public class GMBluetooth extends GMBluetoothInternal
     }
 
 
+    // Starts queued ops until the stack accepts one or the queue is empty. An
+    // op the stack refuses is failed here and the next one tried.
     private void runNextGattOp(LeConnectionEntry connection)
     {
-        Runnable op;
+        while (true)
+        {
+            LePendingOp op;
 
+            synchronized (connection.opLock)
+            {
+                op = connection.opQueue.pollFirst();
+
+                if (op == null)
+                {
+                    connection.opRunning = false;
+                    return;
+                }
+
+                connection.currentOp = op;
+            }
+
+            boolean started;
+
+            try
+            {
+                started = op.start.start();
+            }
+            catch (Throwable throwable)
+            {
+                started = false;
+            }
+
+            if (started)
+                return;
+
+            // A purge may have failed it already.
+            if (takeCurrentOp(connection) == op)
+                invoke(
+                    op.callback,
+                    OPERATION_FAILED,
+                    op.startFailureMessage,
+                    (double) op.targetHandle);
+        }
+    }
+
+
+    // Completions and failGattOps both take the op here, so each fires once.
+    private LePendingOp takeCurrentOp(LeConnectionEntry connection)
+    {
         synchronized (connection.opLock)
         {
-            op = connection.opQueue.pollFirst();
-
-            if (op == null)
-            {
-                connection.opRunning = false;
-                return;
-            }
+            LePendingOp op = connection.currentOp;
+            connection.currentOp = null;
+            return op;
         }
-
-        op.run();
     }
 
 
     private void completeGattOp(LeConnectionEntry connection)
     {
-        connection.currentOp = null;
         runNextGattOp(connection);
+    }
+
+
+    // Fails the current op and every queued one, once each, and refuses any
+    // op queued afterwards: the link is closed, so no completion will come.
+    private void failGattOps(LeConnectionEntry connection, int error, String message)
+    {
+        ArrayList<LePendingOp> failed = new ArrayList<>();
+
+        synchronized (connection.opLock)
+        {
+            connection.closed = true;
+
+            if (connection.currentOp != null)
+                failed.add(connection.currentOp);
+
+            connection.currentOp = null;
+            failed.addAll(connection.opQueue);
+            connection.opQueue.clear();
+            connection.opRunning = false;
+        }
+
+        for (LePendingOp op : failed)
+            invoke(op.callback, error, message, (double) op.targetHandle);
     }
 
 
@@ -1341,7 +1494,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
         stopServerInternal();
         stopLeAdvertiseInternal();
-        stopLeServerInternal();
+        stopLeServerInternal(NOT_INITIALIZED, SHUTDOWN_MESSAGE);
 
         ArrayList<LeConnectionEntry> openLeConnections = new ArrayList<>();
 
@@ -1355,6 +1508,20 @@ public class GMBluetooth extends GMBluetoothInternal
         for (LeConnectionEntry entry : openLeConnections)
         {
             entry.manualClosing = true;
+
+            // The generation bump above silences the GATT callbacks, so every
+            // callback still waiting is failed here, once.
+            GMFunction connectCallback = entry.connectCallback;
+            entry.connectCallback = null;
+
+            invoke(
+                connectCallback,
+                NOT_INITIALIZED,
+                SHUTDOWN_MESSAGE,
+                (double) entry.handle,
+                (double) entry.device);
+
+            failGattOps(entry, NOT_INITIALIZED, SHUTDOWN_MESSAGE);
 
             BluetoothGatt gatt = entry.gatt;
             if (gatt != null)
@@ -1799,6 +1966,9 @@ public class GMBluetooth extends GMBluetoothInternal
                     boolean manual = entry.manualClosing;
                     entry.connected = false;
 
+                    // Before le_disconnected, as the native core orders it.
+                    failGattOps(entry, DISCONNECTED, LE_OP_DISCONNECTED_MESSAGE);
+
                     GMFunction pendingConnectCallback = entry.connectCallback;
                     entry.connectCallback = null;
 
@@ -1844,7 +2014,7 @@ public class GMBluetooth extends GMBluetoothInternal
                 if (entry == null)
                     return;
 
-                LePendingOp op = entry.currentOp;
+                LePendingOp op = takeCurrentOp(entry);
                 GMFunction callback = op != null ? op.callback : null;
 
                 if (status == BluetoothGatt.GATT_SUCCESS)
@@ -1888,7 +2058,7 @@ public class GMBluetooth extends GMBluetoothInternal
                 if (entry == null)
                     return;
 
-                LePendingOp op = entry.currentOp;
+                LePendingOp op = takeCurrentOp(entry);
 
                 if (op != null)
                 {
@@ -1919,7 +2089,7 @@ public class GMBluetooth extends GMBluetoothInternal
                 if (entry == null)
                     return;
 
-                LePendingOp op = entry.currentOp;
+                LePendingOp op = takeCurrentOp(entry);
 
                 if (op != null)
                 {
@@ -1950,7 +2120,7 @@ public class GMBluetooth extends GMBluetoothInternal
                 if (entry == null)
                     return;
 
-                LePendingOp op = entry.currentOp;
+                LePendingOp op = takeCurrentOp(entry);
 
                 if (op != null)
                 {
@@ -1981,7 +2151,7 @@ public class GMBluetooth extends GMBluetoothInternal
                 if (entry == null)
                     return;
 
-                LePendingOp op = entry.currentOp;
+                LePendingOp op = takeCurrentOp(entry);
 
                 if (op == null)
                 {
@@ -2180,6 +2350,9 @@ public class GMBluetooth extends GMBluetoothInternal
 
         entry.manualClosing = true;
 
+        // The game is done with this link: no op waiting on it outlives the call.
+        failGattOps(entry, DISCONNECTED, LE_OP_DISCONNECTED_MESSAGE);
+
         BluetoothGatt gatt = entry.gatt;
 
         if (gatt == null)
@@ -2243,37 +2416,14 @@ public class GMBluetooth extends GMBluetoothInternal
 
         final BluetoothGatt gatt = connEntry.gatt;
 
-        enqueueGattOp(
-            connEntry,
-            () ->
-            {
-                LePendingOp op = new LePendingOp();
-                op.kind = LePendingOp.KIND_DISCOVER_SERVICES;
-                op.callback = callback;
-                op.targetHandle = connection;
-                connEntry.currentOp = op;
+        LePendingOp op = new LePendingOp();
+        op.kind = LePendingOp.KIND_DISCOVER_SERVICES;
+        op.callback = callback;
+        op.targetHandle = connection;
+        op.startFailureMessage = "discoverServices() failed to start";
+        op.start = () -> gatt.discoverServices();
 
-                boolean started;
-
-                try
-                {
-                    started = gatt.discoverServices();
-                }
-                catch (Throwable throwable)
-                {
-                    started = false;
-                }
-
-                if (!started)
-                {
-                    invoke(
-                        callback,
-                        OPERATION_FAILED,
-                        "discoverServices() failed to start",
-                        (double) connection);
-                    completeGattOp(connEntry);
-                }
-            });
+        enqueueGattOp(connEntry, op);
 
         return result(OK, "");
     }
@@ -2517,37 +2667,14 @@ public class GMBluetooth extends GMBluetoothInternal
         final BluetoothGattCharacteristic gattCharacteristic =
             charEntry.gattCharacteristic;
 
-        enqueueGattOp(
-            connEntry,
-            () ->
-            {
-                LePendingOp op = new LePendingOp();
-                op.kind = LePendingOp.KIND_READ_CHARACTERISTIC;
-                op.callback = callback;
-                op.targetHandle = characteristic;
-                connEntry.currentOp = op;
+        LePendingOp op = new LePendingOp();
+        op.kind = LePendingOp.KIND_READ_CHARACTERISTIC;
+        op.callback = callback;
+        op.targetHandle = characteristic;
+        op.startFailureMessage = "readCharacteristic() failed to start";
+        op.start = () -> gatt.readCharacteristic(gattCharacteristic);
 
-                boolean started;
-
-                try
-                {
-                    started = gatt.readCharacteristic(gattCharacteristic);
-                }
-                catch (Throwable throwable)
-                {
-                    started = false;
-                }
-
-                if (!started)
-                {
-                    invoke(
-                        callback,
-                        OPERATION_FAILED,
-                        "readCharacteristic() failed to start",
-                        (double) characteristic);
-                    completeGattOp(connEntry);
-                }
-            });
+        enqueueGattOp(connEntry, op);
 
         return result(OK, "");
     }
@@ -2634,39 +2761,19 @@ public class GMBluetooth extends GMBluetoothInternal
             ? BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
             : BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT;
 
-        enqueueGattOp(
-            connEntry,
-            () ->
-            {
-                LePendingOp op = new LePendingOp();
-                op.kind = LePendingOp.KIND_WRITE_CHARACTERISTIC;
-                op.callback = callback;
-                op.targetHandle = characteristic;
-                connEntry.currentOp = op;
+        LePendingOp op = new LePendingOp();
+        op.kind = LePendingOp.KIND_WRITE_CHARACTERISTIC;
+        op.callback = callback;
+        op.targetHandle = characteristic;
+        op.startFailureMessage = "writeCharacteristic() failed to start";
+        op.start = () ->
+        {
+            gattCharacteristic.setWriteType(androidWriteType);
+            gattCharacteristic.setValue(payload);
+            return gatt.writeCharacteristic(gattCharacteristic);
+        };
 
-                boolean started;
-
-                try
-                {
-                    gattCharacteristic.setWriteType(androidWriteType);
-                    gattCharacteristic.setValue(payload);
-                    started = gatt.writeCharacteristic(gattCharacteristic);
-                }
-                catch (Throwable throwable)
-                {
-                    started = false;
-                }
-
-                if (!started)
-                {
-                    invoke(
-                        callback,
-                        OPERATION_FAILED,
-                        "writeCharacteristic() failed to start",
-                        (double) characteristic);
-                    completeGattOp(connEntry);
-                }
-            });
+        enqueueGattOp(connEntry, op);
 
         return result(OK, "");
     }
@@ -2716,48 +2823,28 @@ public class GMBluetooth extends GMBluetoothInternal
         else
             cccdValue = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE;
 
-        enqueueGattOp(
-            connEntry,
-            () ->
-            {
-                LePendingOp op = new LePendingOp();
-                op.kind = LePendingOp.KIND_SUBSCRIBE;
-                op.callback = callback;
-                op.targetHandle = characteristic;
-                op.subscribeMode = mode;
-                connEntry.currentOp = op;
+        LePendingOp op = new LePendingOp();
+        op.kind = LePendingOp.KIND_SUBSCRIBE;
+        op.callback = callback;
+        op.targetHandle = characteristic;
+        op.subscribeMode = mode;
+        op.startFailureMessage = "CCCD write failed to start";
+        op.start = () ->
+        {
+            // Two-step subscribe unique to Android: toggling local
+            // delivery here does not by itself tell the remote
+            // peripheral anything - only the CCCD descriptor write
+            // below does that, and this operation waits for its
+            // completion via onDescriptorWrite before resolving.
+            gatt.setCharacteristicNotification(
+                gattCharacteristic,
+                mode != SUBSCRIBE_MODE_UNSUBSCRIBE);
 
-                boolean started;
+            cccd.setValue(cccdValue);
+            return gatt.writeDescriptor(cccd);
+        };
 
-                try
-                {
-                    // Two-step subscribe unique to Android: toggling local
-                    // delivery here does not by itself tell the remote
-                    // peripheral anything - only the CCCD descriptor write
-                    // below does that, and this operation waits for its
-                    // completion via onDescriptorWrite before resolving.
-                    gatt.setCharacteristicNotification(
-                        gattCharacteristic,
-                        mode != SUBSCRIBE_MODE_UNSUBSCRIBE);
-
-                    cccd.setValue(cccdValue);
-                    started = gatt.writeDescriptor(cccd);
-                }
-                catch (Throwable throwable)
-                {
-                    started = false;
-                }
-
-                if (!started)
-                {
-                    invoke(
-                        callback,
-                        OPERATION_FAILED,
-                        "CCCD write failed to start",
-                        (double) characteristic);
-                    completeGattOp(connEntry);
-                }
-            });
+        enqueueGattOp(connEntry, op);
 
         return result(OK, "");
     }
@@ -2787,37 +2874,14 @@ public class GMBluetooth extends GMBluetoothInternal
         final BluetoothGatt gatt = connEntry.gatt;
         final BluetoothGattDescriptor gattDescriptor = descEntry.gattDescriptor;
 
-        enqueueGattOp(
-            connEntry,
-            () ->
-            {
-                LePendingOp op = new LePendingOp();
-                op.kind = LePendingOp.KIND_READ_DESCRIPTOR;
-                op.callback = callback;
-                op.targetHandle = descriptor;
-                connEntry.currentOp = op;
+        LePendingOp op = new LePendingOp();
+        op.kind = LePendingOp.KIND_READ_DESCRIPTOR;
+        op.callback = callback;
+        op.targetHandle = descriptor;
+        op.startFailureMessage = "readDescriptor() failed to start";
+        op.start = () -> gatt.readDescriptor(gattDescriptor);
 
-                boolean started;
-
-                try
-                {
-                    started = gatt.readDescriptor(gattDescriptor);
-                }
-                catch (Throwable throwable)
-                {
-                    started = false;
-                }
-
-                if (!started)
-                {
-                    invoke(
-                        callback,
-                        OPERATION_FAILED,
-                        "readDescriptor() failed to start",
-                        (double) descriptor);
-                    completeGattOp(connEntry);
-                }
-            });
+        enqueueGattOp(connEntry, op);
 
         return result(OK, "");
     }
@@ -2910,38 +2974,18 @@ public class GMBluetooth extends GMBluetoothInternal
         final BluetoothGatt gatt = connEntry.gatt;
         final BluetoothGattDescriptor gattDescriptor = descEntry.gattDescriptor;
 
-        enqueueGattOp(
-            connEntry,
-            () ->
-            {
-                LePendingOp op = new LePendingOp();
-                op.kind = LePendingOp.KIND_WRITE_DESCRIPTOR;
-                op.callback = callback;
-                op.targetHandle = descriptor;
-                connEntry.currentOp = op;
+        LePendingOp op = new LePendingOp();
+        op.kind = LePendingOp.KIND_WRITE_DESCRIPTOR;
+        op.callback = callback;
+        op.targetHandle = descriptor;
+        op.startFailureMessage = "writeDescriptor() failed to start";
+        op.start = () ->
+        {
+            gattDescriptor.setValue(payload);
+            return gatt.writeDescriptor(gattDescriptor);
+        };
 
-                boolean started;
-
-                try
-                {
-                    gattDescriptor.setValue(payload);
-                    started = gatt.writeDescriptor(gattDescriptor);
-                }
-                catch (Throwable throwable)
-                {
-                    started = false;
-                }
-
-                if (!started)
-                {
-                    invoke(
-                        callback,
-                        OPERATION_FAILED,
-                        "writeDescriptor() failed to start",
-                        (double) descriptor);
-                    completeGattOp(connEntry);
-                }
-            });
+        enqueueGattOp(connEntry, op);
 
         return result(OK, "");
     }
@@ -3297,24 +3341,45 @@ public class GMBluetooth extends GMBluetoothInternal
                 if (generation.get() != workerGeneration)
                     return;
 
-                String uuid = service != null && service.getUuid() != null
-                    ? service.getUuid().toString()
-                    : "";
-
-                GMFunction callback;
+                LeServerAddEntry head;
 
                 synchronized (leServerAddServiceLock)
                 {
-                    callback = leServerAddServiceCallbacks.remove(uuid);
+                    head = leServerAddQueue.peekFirst();
+
+                    if (head != null && head.inFlight)
+                        leServerAddQueue.pollFirst();
+                    else
+                        head = null;
                 }
 
-                if (status == BluetoothGatt.GATT_SUCCESS)
-                    invoke(callback, OK, "");
-                else
-                    invoke(
-                        callback,
-                        OPERATION_FAILED,
-                        "onServiceAdded status " + status);
+                if (head != null && head.cancelled)
+                {
+                    BluetoothGattServer server = gattServer;
+
+                    if (status == BluetoothGatt.GATT_SUCCESS && server != null && service != null)
+                    {
+                        try
+                        {
+                            server.removeService(service);
+                        }
+                        catch (Throwable ignored)
+                        {
+                        }
+                    }
+                }
+                else if (head != null)
+                {
+                    if (status == BluetoothGatt.GATT_SUCCESS)
+                        invoke(head.callback, OK, "");
+                    else
+                        invoke(
+                            head.callback,
+                            OPERATION_FAILED,
+                            "onServiceAdded status " + status);
+                }
+
+                startNextServiceAdd();
             }
 
 
@@ -3576,7 +3641,7 @@ public class GMBluetooth extends GMBluetoothInternal
     }
 
 
-    private void stopLeServerInternal()
+    private void stopLeServerInternal(int addError, String addMessage)
     {
         leServerRunning.set(false);
 
@@ -3615,10 +3680,92 @@ public class GMBluetooth extends GMBluetoothInternal
             leServerSubscribers.clear();
         }
 
+        // The server is closed, so no onServiceAdded will come for any of them.
+        failServiceAdds(addError, addMessage, true);
+    }
+
+
+    // Hands the head of the add queue to the stack unless one is in flight. An
+    // add the stack refuses is failed here and the next one tried.
+    private void startNextServiceAdd()
+    {
+        while (true)
+        {
+            LeServerAddEntry head;
+
+            synchronized (leServerAddServiceLock)
+            {
+                head = leServerAddQueue.peekFirst();
+
+                if (head == null || head.inFlight)
+                    return;
+
+                head.inFlight = true;
+            }
+
+            BluetoothGattServer server = gattServer;
+            String failure;
+
+            try
+            {
+                failure = server != null && server.addService(head.service)
+                    ? null
+                    : "addService() failed to start";
+            }
+            catch (Throwable throwable)
+            {
+                failure = throwableMessage(throwable);
+            }
+
+            if (failure == null)
+                return;
+
+            boolean fire;
+
+            synchronized (leServerAddServiceLock)
+            {
+                // A stop may have failed and dropped it meanwhile.
+                if (leServerAddQueue.peekFirst() != head)
+                    return;
+
+                leServerAddQueue.pollFirst();
+                fire = !head.cancelled;
+            }
+
+            if (fire)
+                invoke(head.callback, OPERATION_FAILED, failure);
+        }
+    }
+
+
+    // Fails every pending add once. While the server stays open, an add the
+    // stack already holds stays at the head, cancelled, because the stack takes
+    // no other add until its onServiceAdded arrives.
+    private void failServiceAdds(int error, String message, boolean serverClosed)
+    {
+        ArrayList<LeServerAddEntry> failed = new ArrayList<>();
+
         synchronized (leServerAddServiceLock)
         {
-            leServerAddServiceCallbacks.clear();
+            LeServerAddEntry head = leServerAddQueue.peekFirst();
+
+            for (LeServerAddEntry entry : leServerAddQueue)
+            {
+                if (!entry.cancelled)
+                    failed.add(entry);
+            }
+
+            leServerAddQueue.clear();
+
+            if (!serverClosed && head != null && head.inFlight)
+            {
+                head.cancelled = true;
+                leServerAddQueue.addFirst(head);
+            }
         }
+
+        for (LeServerAddEntry entry : failed)
+            invoke(entry.callback, error, message);
     }
 
 
@@ -3687,7 +3834,9 @@ public class GMBluetooth extends GMBluetoothInternal
         if (!initialized)
             return result(NOT_INITIALIZED, "Bluetooth is not initialized");
 
-        stopLeServerInternal();
+        stopLeServerInternal(
+            OPERATION_FAILED,
+            "BLE server stopped before the service was added");
         return result(OK, "");
     }
 
@@ -3713,7 +3862,6 @@ public class GMBluetooth extends GMBluetoothInternal
 
         final BluetoothGattService gattService;
         final String serviceUuid;
-        final String serviceKey;
 
         try
         {
@@ -3722,7 +3870,6 @@ public class GMBluetooth extends GMBluetoothInternal
                 return result(INVALID_ARGUMENT, "service.uuid cannot be empty");
 
             UUID parsedServiceUuid = UUID.fromString(serviceUuid);
-            serviceKey = parsedServiceUuid.toString();
 
             gattService = new BluetoothGattService(
                 parsedServiceUuid,
@@ -3787,34 +3934,18 @@ public class GMBluetooth extends GMBluetoothInternal
                 "Invalid service definition: " + throwableMessage(throwable));
         }
 
+        // A failure from here on, the stack refusing the add included, is
+        // reported through the callback.
+        LeServerAddEntry entry = new LeServerAddEntry();
+        entry.service = gattService;
+        entry.callback = callback;
+
         synchronized (leServerAddServiceLock)
         {
-            leServerAddServiceCallbacks.put(serviceKey, callback);
+            leServerAddQueue.addLast(entry);
         }
 
-        try
-        {
-            boolean started = gattServer.addService(gattService);
-
-            if (!started)
-            {
-                synchronized (leServerAddServiceLock)
-                {
-                    leServerAddServiceCallbacks.remove(serviceKey);
-                }
-
-                return result(OPERATION_FAILED, "addService() failed to start");
-            }
-        }
-        catch (Throwable throwable)
-        {
-            synchronized (leServerAddServiceLock)
-            {
-                leServerAddServiceCallbacks.remove(serviceKey);
-            }
-
-            return result(OPERATION_FAILED, throwableMessage(throwable));
-        }
+        startNextServiceAdd();
 
         return result(OK, "");
     }
@@ -3834,18 +3965,18 @@ public class GMBluetooth extends GMBluetoothInternal
         try
         {
             server.clearServices();
-
-            synchronized (leServerAddServiceLock)
-            {
-                leServerAddServiceCallbacks.clear();
-            }
-
-            return result(OK, "");
         }
         catch (Throwable throwable)
         {
             return result(OPERATION_FAILED, throwableMessage(throwable));
         }
+
+        failServiceAdds(
+            OPERATION_FAILED,
+            "Services were cleared before the service was added",
+            false);
+
+        return result(OK, "");
     }
 
 
@@ -4061,7 +4192,11 @@ public class GMBluetooth extends GMBluetoothInternal
         }
         else
         {
-            String key = subscriberKey(service_uuid, characteristic_uuid);
+            // Keyed as the CCCD interception keys it, from the resolved
+            // objects, so the caller's spelling of the UUIDs does not matter.
+            String key = subscriberKey(
+                characteristicServiceUuid(characteristic),
+                characteristicUuidOf(characteristic));
 
             synchronized (leServerSubscriberLock)
             {
@@ -4386,6 +4521,11 @@ public class GMBluetooth extends GMBluetoothInternal
 
         synchronized (pairLock)
         {
+            // createBond() refuses a second request while bonding, so a second
+            // call would only replace the first callback and then fail.
+            if (pairDeviceHandles.containsKey(address))
+                return result(BUSY, "Pairing is already in progress for this device");
+
             pairDeviceHandles.put(address, device);
 
             if (callback != null)
