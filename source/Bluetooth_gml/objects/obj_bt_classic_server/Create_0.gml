@@ -54,7 +54,7 @@ bluetooth_set_callback_classic_data(function(_connection, _available_bytes)
     var _buf = buffer_create(_available_bytes, buffer_grow, 1);
     var _n = bluetooth_classic_receive(_connection, _buf, 0, _available_bytes);
 
-    if (instance_exists(global.classic_conn_inst))
+    if (_n > 0 && instance_exists(global.classic_conn_inst))
     {
         global.classic_conn_inst.on_receive(_buf, _n);
     }

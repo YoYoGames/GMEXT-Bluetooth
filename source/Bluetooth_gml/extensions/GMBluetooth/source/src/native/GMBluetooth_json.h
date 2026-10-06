@@ -51,15 +51,22 @@ namespace gmbluetooth::json
 
         std::string as_string(std::string_view fallback = {}) const;
         double as_double(double fallback = 0.0) const;
+        // The number as an integer, or fallback when it is not a number, not
+        // finite, has a fraction, or falls outside the target's range
+        // (as_uint64: 0 to 2^53, the integers a double holds exactly).
         std::int32_t as_int(std::int32_t fallback = 0) const;
+        std::uint64_t as_uint64(std::uint64_t fallback = 0) const;
         bool as_bool(bool fallback = false) const;
     };
 
-    // Parses a single JSON value from `text`. Returns std::nullopt on any
-    // malformed input rather than throwing - callers treat a parse failure
-    // the same as "field absent".
+    // Parses `text` as exactly one JSON value (RFC 8259) with nothing but
+    // whitespace around it, nested no deeper than 64. Returns std::nullopt on
+    // any malformed input rather than throwing.
     std::optional<Value> parse(std::string_view text);
 
-    std::vector<std::uint8_t> base64_decode(std::string_view text);
+    // Standard base64 (RFC 4648 section 4) with padding and nothing else: no
+    // whitespace, no base64url, no missing padding. std::nullopt otherwise, so
+    // a bad payload is reported rather than decoded into wrong bytes.
+    std::optional<std::vector<std::uint8_t>> base64_decode(std::string_view text);
     std::string base64_encode(const std::uint8_t* data, std::size_t size);
 }

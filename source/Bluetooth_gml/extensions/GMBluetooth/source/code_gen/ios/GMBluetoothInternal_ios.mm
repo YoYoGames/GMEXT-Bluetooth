@@ -1220,7 +1220,7 @@ static void GMInjectSelectorsIntoSubclass(Class subclass, Class base)
     return 0;
 }
 
-- (double)__EXT_NATIVE__bluetooth_le_value_copy:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length
+- (double)__EXT_NATIVE__bluetooth_le_value_copy:(char*)__arg_buffer arg1:(double)__arg_buffer_length
 {
     gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};
 
@@ -1234,13 +1234,9 @@ static void GMInjectSelectorsIntoSubclass(Class subclass, Class base)
     // field: offset, type: UInt32
     std::uint32_t offset = gm::wire::codec::readValue<std::uint32_t>(__br);
 
-    gm_enums::BluetoothError __result = [__impl bluetooth_le_value_copy:value out_data:out_data offset:offset];
+    std::int32_t __result = [__impl bluetooth_le_value_copy:value out_data:out_data offset:offset];
 
-    gm::byteio::BufferWriter __bw{__ret_buffer, static_cast<size_t>(__ret_buffer_length)};
-
-    // return: __result, type: enum BluetoothError
-    gm::wire::codec::writeValue(__bw, __result);
-    return 0;
+    return static_cast<double>(__result);
 }
 
 - (double)__EXT_NATIVE__bluetooth_le_value_release:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length

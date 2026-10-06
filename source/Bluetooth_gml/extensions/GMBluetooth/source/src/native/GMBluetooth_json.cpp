@@ -2,7 +2,10 @@
 
 #include <array>
 #include <cctype>
-#include <cstdlib>
+#include <cmath>
+#include <limits>
+#include <locale>
+#include <sstream>
 
 namespace gmbluetooth::json
 {
@@ -31,7 +34,22 @@ namespace gmbluetooth::json
 
     std::int32_t Value::as_int(std::int32_t fallback) const
     {
-        return type == Type::Number ? static_cast<std::int32_t>(number_value) : fallback;
+        if (type != Type::Number || !std::isfinite(number_value) || std::trunc(number_value) != number_value)
+            return fallback;
+        if (number_value < static_cast<double>(std::numeric_limits<std::int32_t>::min()) ||
+            number_value > static_cast<double>(std::numeric_limits<std::int32_t>::max()))
+            return fallback;
+        return static_cast<std::int32_t>(number_value);
+    }
+
+    std::uint64_t Value::as_uint64(std::uint64_t fallback) const
+    {
+        constexpr double max_exact = 9007199254740992.0; // 2^53
+        if (type != Type::Number || !std::isfinite(number_value) || std::trunc(number_value) != number_value)
+            return fallback;
+        if (number_value < 0.0 || number_value > max_exact)
+            return fallback;
+        return static_cast<std::uint64_t>(number_value);
     }
 
     bool Value::as_bool(bool fallback) const
@@ -41,6 +59,41 @@ namespace gmbluetooth::json
 
     namespace
     {
+        // Deep enough for every payload a backend sends (three levels at most),
+        // shallow enough that the recursion cannot exhaust a thread's stack.
+        constexpr int k_max_depth = 64;
+
+        bool is_digit(char c) { return c >= '0' && c <= '9'; }
+
+        // JSON whitespace only; std::isspace also takes \v and \f.
+        bool is_json_space(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
+
+        void append_utf8(std::string& out, std::uint32_t code)
+        {
+            if (code < 0x80)
+            {
+                out.push_back(static_cast<char>(code));
+            }
+            else if (code < 0x800)
+            {
+                out.push_back(static_cast<char>(0xC0 | (code >> 6)));
+                out.push_back(static_cast<char>(0x80 | (code & 0x3F)));
+            }
+            else if (code < 0x10000)
+            {
+                out.push_back(static_cast<char>(0xE0 | (code >> 12)));
+                out.push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3F)));
+                out.push_back(static_cast<char>(0x80 | (code & 0x3F)));
+            }
+            else
+            {
+                out.push_back(static_cast<char>(0xF0 | (code >> 18)));
+                out.push_back(static_cast<char>(0x80 | ((code >> 12) & 0x3F)));
+                out.push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3F)));
+                out.push_back(static_cast<char>(0x80 | (code & 0x3F)));
+            }
+        }
+
         class Parser
         {
         public:
@@ -48,26 +101,26 @@ namespace gmbluetooth::json
 
             std::optional<Value> parse_document()
             {
-                skip_ws();
                 auto value = parse_value();
                 if (!value)
                     return std::nullopt;
                 skip_ws();
-                // Trailing garbage is tolerated: backends may embed a JSON
-                // value inside a larger string we don't otherwise care about.
+                if (!eof())
+                    return std::nullopt;
                 return value;
             }
 
         private:
             std::string_view text_;
             std::size_t pos_ = 0;
+            int depth_ = 0;
 
             bool eof() const { return pos_ >= text_.size(); }
             char peek() const { return text_[pos_]; }
 
             void skip_ws()
             {
-                while (!eof() && std::isspace(static_cast<unsigned char>(peek())))
+                while (!eof() && is_json_space(peek()))
                     ++pos_;
             }
 
@@ -79,14 +132,24 @@ namespace gmbluetooth::json
 
                 switch (peek())
                 {
-                case '{': return parse_object();
-                case '[': return parse_array();
+                case '{': return parse_nested(&Parser::parse_object);
+                case '[': return parse_nested(&Parser::parse_array);
                 case '"': return parse_string_value();
                 case 't':
                 case 'f': return parse_bool();
                 case 'n': return parse_null();
                 default:  return parse_number();
                 }
+            }
+
+            std::optional<Value> parse_nested(std::optional<Value> (Parser::*parse)())
+            {
+                if (depth_ >= k_max_depth)
+                    return std::nullopt;
+                ++depth_;
+                auto value = (this->*parse)();
+                --depth_;
+                return value;
             }
 
             bool consume_literal(std::string_view literal)
@@ -115,29 +178,70 @@ namespace gmbluetooth::json
                 return v;
             }
 
+            // The RFC 8259 number grammar, converted in the classic locale so a
+            // game that set a decimal comma cannot change what a payload means.
             std::optional<Value> parse_number()
             {
                 const std::size_t start = pos_;
-                if (!eof() && (peek() == '-' || peek() == '+'))
-                    ++pos_;
-                while (!eof() && (std::isdigit(static_cast<unsigned char>(peek())) ||
-                                   peek() == '.' || peek() == 'e' || peek() == 'E' ||
-                                   peek() == '+' || peek() == '-'))
+                if (!eof() && peek() == '-')
                     ++pos_;
 
-                if (pos_ == start)
+                if (eof() || !is_digit(peek()))
                     return std::nullopt;
+                if (peek() == '0')
+                    ++pos_;
+                else
+                    while (!eof() && is_digit(peek()))
+                        ++pos_;
 
-                const std::string token(text_.substr(start, pos_ - start));
-                char* end = nullptr;
-                const double number = std::strtod(token.c_str(), &end);
-                if (end != token.c_str() + token.size())
+                if (!eof() && peek() == '.')
+                {
+                    ++pos_;
+                    if (eof() || !is_digit(peek()))
+                        return std::nullopt;
+                    while (!eof() && is_digit(peek()))
+                        ++pos_;
+                }
+
+                if (!eof() && (peek() == 'e' || peek() == 'E'))
+                {
+                    ++pos_;
+                    if (!eof() && (peek() == '+' || peek() == '-'))
+                        ++pos_;
+                    if (eof() || !is_digit(peek()))
+                        return std::nullopt;
+                    while (!eof() && is_digit(peek()))
+                        ++pos_;
+                }
+
+                std::istringstream stream(std::string(text_.substr(start, pos_ - start)));
+                stream.imbue(std::locale::classic());
+                double number = 0.0;
+                stream >> number;
+                if (stream.fail())
                     return std::nullopt;
 
                 Value v;
                 v.type = Type::Number;
                 v.number_value = number;
                 return v;
+            }
+
+            std::optional<std::uint32_t> parse_hex4()
+            {
+                if (pos_ + 4 > text_.size())
+                    return std::nullopt;
+                std::uint32_t code = 0;
+                for (int i = 0; i < 4; ++i)
+                {
+                    const char hex = text_[pos_++];
+                    code <<= 4;
+                    if (hex >= '0' && hex <= '9') code |= static_cast<std::uint32_t>(hex - '0');
+                    else if (hex >= 'a' && hex <= 'f') code |= static_cast<std::uint32_t>(hex - 'a' + 10);
+                    else if (hex >= 'A' && hex <= 'F') code |= static_cast<std::uint32_t>(hex - 'A' + 10);
+                    else return std::nullopt;
+                }
+                return code;
             }
 
             std::optional<std::string> parse_raw_string()
@@ -155,6 +259,10 @@ namespace gmbluetooth::json
                     const char c = text_[pos_++];
                     if (c == '"')
                         return out;
+
+                    // Control characters must be escaped.
+                    if (static_cast<unsigned char>(c) < 0x20)
+                        return std::nullopt;
 
                     if (c != '\\')
                     {
@@ -178,35 +286,28 @@ namespace gmbluetooth::json
                     case 't':  out.push_back('\t'); break;
                     case 'u':
                     {
-                        if (pos_ + 4 > text_.size())
+                        auto code = parse_hex4();
+                        if (!code)
                             return std::nullopt;
-                        unsigned int code = 0;
-                        for (int i = 0; i < 4; ++i)
+
+                        // A high surrogate must be followed by an escaped low
+                        // one; the pair is one code point. A lone surrogate is
+                        // not valid UTF-8 in any encoding, so it fails.
+                        if (*code >= 0xD800 && *code <= 0xDBFF)
                         {
-                            const char hex = text_[pos_++];
-                            code <<= 4;
-                            if (hex >= '0' && hex <= '9') code |= static_cast<unsigned int>(hex - '0');
-                            else if (hex >= 'a' && hex <= 'f') code |= static_cast<unsigned int>(hex - 'a' + 10);
-                            else if (hex >= 'A' && hex <= 'F') code |= static_cast<unsigned int>(hex - 'A' + 10);
-                            else return std::nullopt;
+                            if (!consume_literal("\\u"))
+                                return std::nullopt;
+                            const auto low = parse_hex4();
+                            if (!low || *low < 0xDC00 || *low > 0xDFFF)
+                                return std::nullopt;
+                            *code = 0x10000 + ((*code - 0xD800) << 10) + (*low - 0xDC00);
                         }
-                        // Encode as UTF-8. Surrogate pairs are not handled -
-                        // none of the fields we parse (UUIDs, base64) need them.
-                        if (code < 0x80)
+                        else if (*code >= 0xDC00 && *code <= 0xDFFF)
                         {
-                            out.push_back(static_cast<char>(code));
+                            return std::nullopt;
                         }
-                        else if (code < 0x800)
-                        {
-                            out.push_back(static_cast<char>(0xC0 | (code >> 6)));
-                            out.push_back(static_cast<char>(0x80 | (code & 0x3F)));
-                        }
-                        else
-                        {
-                            out.push_back(static_cast<char>(0xE0 | (code >> 12)));
-                            out.push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3F)));
-                            out.push_back(static_cast<char>(0x80 | (code & 0x3F)));
-                        }
+
+                        append_utf8(out, *code);
                         break;
                     }
                     default:
@@ -342,26 +443,31 @@ namespace gmbluetooth::json
         }
     }
 
-    std::vector<std::uint8_t> base64_decode(std::string_view text)
+    std::optional<std::vector<std::uint8_t>> base64_decode(std::string_view text)
     {
         static const std::array<int, 256> decode_table = make_decode_table();
+
+        if (text.size() % 4 != 0)
+            return std::nullopt;
+
+        std::size_t padding = 0;
+        if (!text.empty() && text.back() == '=')
+            padding = (text.size() >= 2 && text[text.size() - 2] == '=') ? 2 : 1;
 
         std::vector<std::uint8_t> out;
         out.reserve((text.size() / 4) * 3);
 
-        int buffer = 0;
+        const std::size_t data_size = text.size() - padding;
+        std::uint32_t buffer = 0;
         int bits_collected = 0;
 
-        for (const char c : text)
+        for (std::size_t i = 0; i < data_size; ++i)
         {
-            if (c == '=' || std::isspace(static_cast<unsigned char>(c)))
-                continue;
-
-            const int value = decode_table[static_cast<unsigned char>(c)];
+            const int value = decode_table[static_cast<unsigned char>(text[i])];
             if (value < 0)
-                continue; // skip unrecognized characters rather than fail outright
+                return std::nullopt; // '=' inside the data lands here too
 
-            buffer = (buffer << 6) | value;
+            buffer = ((buffer << 6) | static_cast<std::uint32_t>(value)) & 0xFFFFFFu;
             bits_collected += 6;
             if (bits_collected >= 8)
             {

@@ -90,7 +90,7 @@ public interface GMBluetoothInterface {
     public BluetoothError bluetooth_le_characteristic_subscribe(long characteristic, BluetoothLeSubscribeMode mode, GMFunction callback);
     public BluetoothError bluetooth_le_descriptor_read(long descriptor, GMFunction callback);
     public BluetoothError bluetooth_le_descriptor_write(long descriptor, java.nio.ByteBuffer data, int offset, int size, GMFunction callback);
-    public BluetoothError bluetooth_le_value_copy(long value, java.nio.ByteBuffer out_data, int offset);
+    public int bluetooth_le_value_copy(long value, java.nio.ByteBuffer out_data, int offset);
     public BluetoothError bluetooth_le_value_release(long value);
     public BluetoothError bluetooth_le_advertise_start(BluetoothLeAdvertiseSettings settings, BluetoothLeAdvertiseData data, GMFunction callback);
     public BluetoothError bluetooth_le_advertise_stop();

@@ -42,3 +42,12 @@ namespace gmbluetooth::log
 // Call sites are on user-driven paths only. Anything reached from Step/Draw
 // every frame must log on state change instead, or it drowns the log at 60 Hz.
 #define GMBT_LOG(fmt, ...) ::gmbluetooth::log::write(__func__, fmt, ##__VA_ARGS__)
+
+// Per-event lines - one per advertisement, notification or server request -
+// go through GMBT_TRACE, which is compiled out unless the build defines
+// GMBLUETOOTH_TRACE (R1-202). Failures still use GMBT_LOG.
+#if defined(GMBLUETOOTH_TRACE)
+#define GMBT_TRACE(fmt, ...) ::gmbluetooth::log::write(__func__, fmt, ##__VA_ARGS__)
+#else
+#define GMBT_TRACE(fmt, ...) ((void)0)
+#endif

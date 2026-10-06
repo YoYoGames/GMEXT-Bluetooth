@@ -162,11 +162,25 @@ namespace gmbluetooth
     };
 
     // A service, characteristic or descriptor an LE discovery found.
-    // properties is the characteristic property bitmask; 0 for the others.
+    // instance is the backend's own name for it: non-zero, and unique among
+    // the attributes of its kind on one LE connection, so two attributes that
+    // share a UUID stay apart (R1-127). properties is the characteristic
+    // property bitmask; 0 for the others.
     struct LeAttribute
     {
         std::string uuid;
+        std::uint64_t instance = 0;
         std::int32_t properties = 0;
+    };
+
+    // The attribute an LE call works on, by the instances its discovery
+    // reported: a characteristic call fills service and characteristic, a
+    // descriptor call all three, a characteristic discovery only service.
+    struct LeAttributeRef
+    {
+        std::uint64_t service = 0;
+        std::uint64_t characteristic = 0;
+        std::uint64_t descriptor = 0;
     };
 
     // BluetoothLeAdvertiseTxPower: Android's AdvertiseSettings levels.
@@ -258,7 +272,10 @@ namespace gmbluetooth
         // central for as long as it stays connected, which the core maps to a
         // server connection handle; connection_state_changed with connected
         // false is that central's disconnect. "address" or Apple's nested
-        // "device" names the device.
+        // "device" names the device. bluetooth_le_characteristic_value_changed
+        // names its characteristic by "service_instance" and
+        // "characteristic_instance", the LeAttribute instances discovery
+        // reported, with "connection" and the base64 "value".
         std::string event_type;
         std::string json;
     };
@@ -589,12 +606,12 @@ namespace gmbluetooth
         virtual Error le_characteristics_discover(
             std::uint64_t op_id,
             std::uint64_t connection,
-            const std::string& service_uuid,
+            const LeAttributeRef& service,
             std::string& message)
         {
             (void)op_id;
             (void)connection;
-            (void)service_uuid;
+            (void)service;
 
             message = "BLE GATT is not supported by this backend";
             return Error::NotSupported;
@@ -603,14 +620,12 @@ namespace gmbluetooth
         virtual Error le_descriptors_discover(
             std::uint64_t op_id,
             std::uint64_t connection,
-            const std::string& service_uuid,
-            const std::string& characteristic_uuid,
+            const LeAttributeRef& characteristic,
             std::string& message)
         {
             (void)op_id;
             (void)connection;
-            (void)service_uuid;
-            (void)characteristic_uuid;
+            (void)characteristic;
 
             message = "BLE GATT is not supported by this backend";
             return Error::NotSupported;
@@ -619,14 +634,12 @@ namespace gmbluetooth
         virtual Error le_characteristic_read(
             std::uint64_t op_id,
             std::uint64_t connection,
-            const std::string& service_uuid,
-            const std::string& characteristic_uuid,
+            const LeAttributeRef& characteristic,
             std::string& message)
         {
             (void)op_id;
             (void)connection;
-            (void)service_uuid;
-            (void)characteristic_uuid;
+            (void)characteristic;
 
             message = "BLE GATT is not supported by this backend";
             return Error::NotSupported;
@@ -635,16 +648,14 @@ namespace gmbluetooth
         virtual Error le_characteristic_write(
             std::uint64_t op_id,
             std::uint64_t connection,
-            const std::string& service_uuid,
-            const std::string& characteristic_uuid,
+            const LeAttributeRef& characteristic,
             const std::string& value_base64,
             bool with_response,
             std::string& message)
         {
             (void)op_id;
             (void)connection;
-            (void)service_uuid;
-            (void)characteristic_uuid;
+            (void)characteristic;
             (void)value_base64;
             (void)with_response;
 
@@ -659,15 +670,13 @@ namespace gmbluetooth
         virtual Error le_characteristic_subscribe(
             std::uint64_t op_id,
             std::uint64_t connection,
-            const std::string& service_uuid,
-            const std::string& characteristic_uuid,
+            const LeAttributeRef& characteristic,
             std::int32_t mode,
             std::string& message)
         {
             (void)op_id;
             (void)connection;
-            (void)service_uuid;
-            (void)characteristic_uuid;
+            (void)characteristic;
             (void)mode;
 
             message = "BLE GATT is not supported by this backend";
@@ -677,16 +686,12 @@ namespace gmbluetooth
         virtual Error le_descriptor_read(
             std::uint64_t op_id,
             std::uint64_t connection,
-            const std::string& service_uuid,
-            const std::string& characteristic_uuid,
-            const std::string& descriptor_uuid,
+            const LeAttributeRef& descriptor,
             std::string& message)
         {
             (void)op_id;
             (void)connection;
-            (void)service_uuid;
-            (void)characteristic_uuid;
-            (void)descriptor_uuid;
+            (void)descriptor;
 
             message = "BLE GATT is not supported by this backend";
             return Error::NotSupported;
@@ -695,17 +700,13 @@ namespace gmbluetooth
         virtual Error le_descriptor_write(
             std::uint64_t op_id,
             std::uint64_t connection,
-            const std::string& service_uuid,
-            const std::string& characteristic_uuid,
-            const std::string& descriptor_uuid,
+            const LeAttributeRef& descriptor,
             const std::string& value_base64,
             std::string& message)
         {
             (void)op_id;
             (void)connection;
-            (void)service_uuid;
-            (void)characteristic_uuid;
-            (void)descriptor_uuid;
+            (void)descriptor;
             (void)value_base64;
 
             message = "BLE GATT is not supported by this backend";

@@ -575,7 +575,7 @@
  * @param {Real} value
  * @param {Buffer} out_data
  * @param {Real} offset
- * @returns {Enum.BluetoothError}
+ * @returns {Real}
  * @function_end
  */
 

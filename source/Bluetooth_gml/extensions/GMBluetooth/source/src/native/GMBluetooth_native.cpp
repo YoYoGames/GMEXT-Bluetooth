@@ -7,13 +7,19 @@
 #include <atomic>
 #include <cctype>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <exception>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 using namespace gm::wire;
@@ -241,6 +247,26 @@ namespace
             merge_advertisement(stored.advertisement, *update.advertisement);
     }
 
+    // Every handle GML holds carries its kind, laid out as Android's makeHandle:
+    // (0x42 << 40) | (kind << 32) | id. It stays below 2^47, so a double holds
+    // it exactly, and a handle of one kind passed where another is expected
+    // names nothing in that kind's table (R1-210). Value ids and server request
+    // ids stay plain counters, as on Android.
+    enum class HandleKind : std::uint64_t
+    {
+        Device            = 1,
+        ClassicConnection = 2,
+        LeConnection      = 3, // client and server connections alike
+        LeService         = 4,
+        LeCharacteristic  = 5,
+        LeDescriptor      = 6,
+    };
+
+    constexpr std::uint64_t make_handle(HandleKind kind, std::uint64_t id)
+    {
+        return (std::uint64_t{ 0x42 } << 40) | (static_cast<std::uint64_t>(kind) << 32) | (id & 0xFFFFFFFFu);
+    }
+
     // Device handles count up and are never reused: clear() forgets every
     // device, and one found again afterwards gets a new handle, so a handle a
     // connection or a pending pair still holds can never name another device.
@@ -260,7 +286,7 @@ namespace
                 return it->second;
             }
 
-            const std::uint64_t handle = next_handle_++;
+            const std::uint64_t handle = make_handle(HandleKind::Device, next_handle_++);
             devices_.emplace(handle, normalized_device(device));
             by_id_.emplace(device.id, handle);
             order_.push_back(handle);
@@ -432,7 +458,7 @@ namespace
         std::uint64_t create_connection(std::uint64_t device)
         {
             std::scoped_lock lock(mutex_);
-            const std::uint64_t handle = next_handle_++;
+            const std::uint64_t handle = make_handle(HandleKind::ClassicConnection, next_handle_++);
             connections_[handle] = Record{ device, false };
             return handle;
         }
@@ -503,7 +529,7 @@ namespace
         std::uint64_t create_connection(std::uint64_t device)
         {
             std::scoped_lock lock(mutex_);
-            const std::uint64_t handle = next_handle_++;
+            const std::uint64_t handle = make_handle(HandleKind::LeConnection, next_handle_++);
             connections_[handle] = device;
             return handle;
         }
@@ -519,7 +545,7 @@ namespace
         std::uint64_t reserve_handle()
         {
             std::scoped_lock lock(mutex_);
-            return next_handle_++;
+            return make_handle(HandleKind::LeConnection, next_handle_++);
         }
 
         // next_handle_ keeps counting, so a handle from before the clear
@@ -679,20 +705,21 @@ namespace
     // Handles count up and are never reused, like device handles; an entry
     // leaves when its LE connection is retired, so a reconnect does not pile
     // fresh entries on top of the old ones. The map is ordered by handle, which
-    // is creation order, so get_at enumerates in discovery order. find_or_insert
-    // is idempotent so re-running discovery doesn't mint duplicates. UUIDs are
-    // stored canonical, the one form GML ever sees (R1-14).
-    template <typename Entry>
+    // is creation order, so get_at enumerates in discovery order. An entry is
+    // keyed by its parent and the instance its backend reported, never by its
+    // UUID, so two attributes that share a UUID get two handles (R1-127);
+    // find_or_insert is idempotent so re-running discovery doesn't mint
+    // duplicates. UUIDs are stored canonical, the one form GML ever sees (R1-14).
+    template <typename Entry, HandleKind Kind>
     class AttributeCache
     {
     public:
-        std::uint64_t find_by_uuid(std::uint64_t parent, const std::string& uuid) const
+        std::uint64_t find_by_instance(std::uint64_t parent, std::uint64_t instance) const
         {
-            const std::string key = canonical_uuid(uuid);
             std::scoped_lock lock(mutex_);
             for (const auto& [handle, entry] : entries_)
             {
-                if (entry.parent == parent && entry.uuid == key)
+                if (entry.parent == parent && entry.instance == instance)
                     return handle;
             }
             return 0;
@@ -746,6 +773,14 @@ namespace
             return it != entries_.end() ? it->second.parent : 0;
         }
 
+        // The backend's instance for the handle; 0 when the handle is unknown.
+        std::uint64_t get_instance(std::uint64_t handle) const
+        {
+            std::scoped_lock lock(mutex_);
+            const auto it = entries_.find(handle);
+            return it != entries_.end() ? it->second.instance : 0;
+        }
+
         // Erases every entry whose parent is in parents; returns the erased
         // handles, the parents of the next level down.
         std::vector<std::uint64_t> erase_children(const std::vector<std::uint64_t>& parents)
@@ -775,22 +810,22 @@ namespace
 
     protected:
         // Caller holds mutex_. Returns the existing entry's handle or a new one.
-        std::uint64_t find_or_insert_locked(std::uint64_t parent, const std::string& uuid, Entry*& entry)
+        std::uint64_t find_or_insert_locked(std::uint64_t parent, const LeAttribute& attribute, Entry*& entry)
         {
-            const std::string key = canonical_uuid(uuid);
             for (auto& [handle, existing] : entries_)
             {
-                if (existing.parent == parent && existing.uuid == key)
+                if (existing.parent == parent && existing.instance == attribute.instance)
                 {
                     entry = &existing;
                     return handle;
                 }
             }
 
-            const std::uint64_t handle = next_handle_++;
+            const std::uint64_t handle = make_handle(Kind, next_handle_++);
             Entry& inserted = entries_[handle];
             inserted.parent = parent;
-            inserted.uuid = key;
+            inserted.instance = attribute.instance;
+            inserted.uuid = canonical_uuid(attribute.uuid);
             entry = &inserted;
             return handle;
         }
@@ -804,17 +839,18 @@ namespace
     struct ServiceEntry
     {
         std::uint64_t parent = 0;
+        std::uint64_t instance = 0;
         std::string uuid;
     };
 
-    class ServiceCache : public AttributeCache<ServiceEntry>
+    class ServiceCache : public AttributeCache<ServiceEntry, HandleKind::LeService>
     {
     public:
-        std::uint64_t find_or_insert(std::uint64_t connection, const std::string& uuid)
+        std::uint64_t find_or_insert(std::uint64_t connection, const LeAttribute& attribute)
         {
             std::scoped_lock lock(mutex_);
             ServiceEntry* entry = nullptr;
-            return find_or_insert_locked(connection, uuid, entry);
+            return find_or_insert_locked(connection, attribute, entry);
         }
     };
 
@@ -824,6 +860,7 @@ namespace
     struct CharacteristicEntry
     {
         std::uint64_t parent = 0;
+        std::uint64_t instance = 0;
         std::string uuid;
         std::int32_t properties = 0;
     };
@@ -832,18 +869,19 @@ namespace
     struct DescriptorEntry
     {
         std::uint64_t parent = 0;
+        std::uint64_t instance = 0;
         std::string uuid;
     };
 
-    class CharacteristicCache : public AttributeCache<CharacteristicEntry>
+    class CharacteristicCache : public AttributeCache<CharacteristicEntry, HandleKind::LeCharacteristic>
     {
     public:
-        std::uint64_t find_or_insert(std::uint64_t service, const std::string& uuid, std::int32_t properties)
+        std::uint64_t find_or_insert(std::uint64_t service, const LeAttribute& attribute)
         {
             std::scoped_lock lock(mutex_);
             CharacteristicEntry* entry = nullptr;
-            const std::uint64_t handle = find_or_insert_locked(service, uuid, entry);
-            entry->properties = properties;
+            const std::uint64_t handle = find_or_insert_locked(service, attribute, entry);
+            entry->properties = attribute.properties & 0xFF;
             return handle;
         }
 
@@ -857,18 +895,41 @@ namespace
 
     CharacteristicCache g_characteristic_cache;
 
-    class DescriptorCache : public AttributeCache<DescriptorEntry>
+    class DescriptorCache : public AttributeCache<DescriptorEntry, HandleKind::LeDescriptor>
     {
     public:
-        std::uint64_t find_or_insert(std::uint64_t characteristic, const std::string& uuid)
+        std::uint64_t find_or_insert(std::uint64_t characteristic, const LeAttribute& attribute)
         {
             std::scoped_lock lock(mutex_);
             DescriptorEntry* entry = nullptr;
-            return find_or_insert_locked(characteristic, uuid, entry);
+            return find_or_insert_locked(characteristic, attribute, entry);
         }
     };
 
     DescriptorCache g_descriptor_cache;
+
+    // An attribute as its backend knows it: the instances its discovery
+    // reported, for the handle and its parents. Assumes a valid handle.
+    LeAttributeRef service_ref(std::uint64_t service)
+    {
+        LeAttributeRef ref;
+        ref.service = g_service_cache.get_instance(service);
+        return ref;
+    }
+
+    LeAttributeRef characteristic_ref(std::uint64_t characteristic)
+    {
+        LeAttributeRef ref = service_ref(g_characteristic_cache.get_parent(characteristic));
+        ref.characteristic = g_characteristic_cache.get_instance(characteristic);
+        return ref;
+    }
+
+    LeAttributeRef descriptor_ref(std::uint64_t descriptor)
+    {
+        LeAttributeRef ref = characteristic_ref(g_descriptor_cache.get_parent(descriptor));
+        ref.descriptor = g_descriptor_cache.get_instance(descriptor);
+        return ref;
+    }
 
     // The bytes a read or a notification delivered, held under a value id until
     // GML copies or releases them (R1-11): each event carries its own value, so
@@ -897,7 +958,7 @@ namespace
 
         // Copies the whole value to out at offset and frees it. Too small a
         // buffer copies nothing and keeps the value, so the call can be retried.
-        Error copy(std::uint64_t id, const GMBuffer& out, unsigned int offset, std::string& message)
+        Error copy(std::uint64_t id, const GMBuffer& out, unsigned int offset, std::size_t& copied, std::string& message)
         {
             std::scoped_lock lock(mutex_);
             const auto it = values_.find(id);
@@ -917,6 +978,7 @@ namespace
 
             if (!bytes.empty())
                 std::memcpy(static_cast<std::uint8_t*>(out.data()) + offset, bytes.data(), bytes.size());
+            copied = bytes.size();
             values_.erase(it);
             return Error::Ok;
         }
@@ -1175,17 +1237,17 @@ namespace
             {
                 case LeOpKind::ServicesDiscover:
                     for (const auto& attribute : result.attributes)
-                        g_service_cache.find_or_insert(op->context, attribute.uuid);
+                        g_service_cache.find_or_insert(op->context, attribute);
                     break;
                 case LeOpKind::CharacteristicsDiscover:
                     // The GATT core properties byte: the bits above it mean
                     // something different on each platform (R1-153).
                     for (const auto& attribute : result.attributes)
-                        g_characteristic_cache.find_or_insert(op->context, attribute.uuid, attribute.properties & 0xFF);
+                        g_characteristic_cache.find_or_insert(op->context, attribute);
                     break;
                 case LeOpKind::DescriptorsDiscover:
                     for (const auto& attribute : result.attributes)
-                        g_descriptor_cache.find_or_insert(op->context, attribute.uuid);
+                        g_descriptor_cache.find_or_insert(op->context, attribute);
                     break;
                 case LeOpKind::CharacteristicRead:
                 case LeOpKind::DescriptorRead:
@@ -1511,7 +1573,7 @@ namespace
     std::uint64_t le_event_connection(const json::Value& root)
     {
         const auto* field = root.find("connection");
-        return field ? static_cast<std::uint64_t>(field->as_double(0)) : 0;
+        return field ? field->as_uint64(0) : 0;
     }
 
     std::string le_event_string(const json::Value& root, const char* key)
@@ -1799,15 +1861,19 @@ namespace
         else if (type == "bluetooth_le_characteristic_value_changed")
         {
             const std::uint64_t connection = le_event_connection(root);
-            const std::string service_uuid = le_event_string(root, "service_uuid");
-            const std::string characteristic_uuid = le_event_string(root, "characteristic_uuid");
+            const auto* service_field = root.find("service_instance");
+            const auto* characteristic_field = root.find("characteristic_instance");
+            const std::uint64_t service_instance = service_field ? service_field->as_uint64(0) : 0;
+            const std::uint64_t characteristic_instance = characteristic_field ? characteristic_field->as_uint64(0) : 0;
 
-            const std::uint64_t service = g_service_cache.find_by_uuid(connection, service_uuid);
-            const std::uint64_t characteristic = service ? g_characteristic_cache.find_by_uuid(service, characteristic_uuid) : 0;
+            const std::uint64_t service = service_instance ? g_service_cache.find_by_instance(connection, service_instance) : 0;
+            const std::uint64_t characteristic = service && characteristic_instance
+                ? g_characteristic_cache.find_by_instance(service, characteristic_instance)
+                : 0;
             if (!characteristic)
             {
-                GMBT_LOG("LE characteristic_value_changed for unknown characteristic '%s' (connection=%llu), dropping",
-                    characteristic_uuid.c_str(), static_cast<unsigned long long>(connection));
+                GMBT_TRACE("LE characteristic_value_changed for unknown characteristic %llu (connection=%llu), dropping",
+                    static_cast<unsigned long long>(characteristic_instance), static_cast<unsigned long long>(connection));
                 g_dropped_events++;
                 return;
             }
@@ -1822,7 +1888,17 @@ namespace
 
             std::vector<std::uint8_t> bytes;
             if (const auto* value = root.find("value"); value && value->is_string())
-                bytes = json::base64_decode(value->string_value);
+            {
+                auto decoded = json::base64_decode(value->string_value);
+                if (!decoded)
+                {
+                    GMBT_LOG("LE characteristic_value_changed with a malformed value (connection=%llu), dropping",
+                        static_cast<unsigned long long>(connection));
+                    g_dropped_events++;
+                    return;
+                }
+                bytes = std::move(*decoded);
+            }
             const std::size_t size = bytes.size();
             const std::uint64_t value = g_values.add(std::move(bytes));
 
@@ -1925,7 +2001,18 @@ namespace
 
             std::vector<std::uint8_t> value;
             if (const auto* value_field = root.find("value"); value_field && value_field->is_string())
-                value = json::base64_decode(value_field->string_value);
+            {
+                auto decoded = json::base64_decode(value_field->string_value);
+                if (!decoded)
+                {
+                    GMBT_LOG("LE server write request %d has a malformed value, answering it", request_id);
+                    if (response_needed)
+                        answer_le_server_request(request_id, true, k_att_unlikely_error);
+                    g_dropped_events++;
+                    return;
+                }
+                value = std::move(*decoded);
+            }
 
             expire_le_server_requests();
             {
@@ -2028,7 +2115,7 @@ namespace
             return connection;
         };
         hooks.push_event = [](BackendEvent event) {
-            GMBT_LOG("event: type=%d transport=%d event_type='%s'",
+            GMBT_TRACE("event: type=%d transport=%d event_type='%s'",
                 static_cast<int>(event.type),
                 static_cast<int>(event.transport),
                 event.event_type.c_str());
@@ -3103,17 +3190,25 @@ BluetoothError bluetooth_classic_send(std::uint64_t connection, struct gm::wire:
     return to_gm(error);
 }
 
+// The bytes copied, or -1 on error (R1-214): 0 means only that none are waiting.
 std::int32_t bluetooth_classic_receive(std::uint64_t connection, struct gm::wire::GMBuffer data, unsigned int offset, unsigned int max_size)
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return 0;
+        return -1;
+    }
+
+    if (!g_classic_connection_manager.is_valid(connection))
+    {
+        g_last_error = Error::InvalidHandle;
+        g_last_error_message = "Invalid Classic connection handle";
+        return -1;
     }
 
     if (!buffer_range_valid(data, offset, max_size, "bluetooth_classic_receive"))
-        return 0;
+        return -1;
 
     std::uint8_t* buffer = static_cast<std::uint8_t*>(data.data()) + offset;
     const std::size_t received = g_backend->classic_receive_bytes(connection, buffer, max_size);
@@ -3631,12 +3726,12 @@ BluetoothError bluetooth_le_characteristics_discover(std::uint64_t service, cons
     }
 
     const std::uint64_t connection = g_service_cache.get_parent(service);
-    const std::string uuid = g_service_cache.get_uuid(service);
+    const LeAttributeRef ref = service_ref(service);
 
     const auto op_id = g_le_ops.add(LeOpKind::CharacteristicsDiscover, callback, service, connection);
 
     std::string message;
-    const Error error = g_backend->le_characteristics_discover(op_id, connection, uuid, message);
+    const Error error = g_backend->le_characteristics_discover(op_id, connection, ref, message);
     set_last_error(error, message);
 
     if (error != Error::Ok)
@@ -3683,13 +3778,12 @@ BluetoothError bluetooth_le_descriptors_discover(std::uint64_t characteristic, c
 
     const std::uint64_t service = g_characteristic_cache.get_parent(characteristic);
     const std::uint64_t connection = g_service_cache.get_parent(service);
-    const std::string service_uuid = g_service_cache.get_uuid(service);
-    const std::string characteristic_uuid = g_characteristic_cache.get_uuid(characteristic);
+    const LeAttributeRef ref = characteristic_ref(characteristic);
 
     const auto op_id = g_le_ops.add(LeOpKind::DescriptorsDiscover, callback, characteristic, connection);
 
     std::string message;
-    const Error error = g_backend->le_descriptors_discover(op_id, connection, service_uuid, characteristic_uuid, message);
+    const Error error = g_backend->le_descriptors_discover(op_id, connection, ref, message);
     set_last_error(error, message);
 
     if (error != Error::Ok)
@@ -3733,13 +3827,12 @@ BluetoothError bluetooth_le_characteristic_read(std::uint64_t characteristic, co
 
     const std::uint64_t service = g_characteristic_cache.get_parent(characteristic);
     const std::uint64_t connection = g_service_cache.get_parent(service);
-    const std::string service_uuid = g_service_cache.get_uuid(service);
-    const std::string characteristic_uuid = g_characteristic_cache.get_uuid(characteristic);
+    const LeAttributeRef ref = characteristic_ref(characteristic);
 
     const auto op_id = g_le_ops.add(LeOpKind::CharacteristicRead, callback, characteristic, connection);
 
     std::string message;
-    const Error error = g_backend->le_characteristic_read(op_id, connection, service_uuid, characteristic_uuid, message);
+    const Error error = g_backend->le_characteristic_read(op_id, connection, ref, message);
     set_last_error(error, message);
 
     if (error != Error::Ok)
@@ -3774,8 +3867,7 @@ BluetoothError bluetooth_le_characteristic_write(std::uint64_t characteristic, s
 
     const std::uint64_t service = g_characteristic_cache.get_parent(characteristic);
     const std::uint64_t connection = g_service_cache.get_parent(service);
-    const std::string service_uuid = g_service_cache.get_uuid(service);
-    const std::string characteristic_uuid = g_characteristic_cache.get_uuid(characteristic);
+    const LeAttributeRef ref = characteristic_ref(characteristic);
 
     if (!buffer_range_valid(data, offset, size, "bluetooth_le_characteristic_write"))
         return to_gm(Error::InvalidArgument);
@@ -3787,7 +3879,7 @@ BluetoothError bluetooth_le_characteristic_write(std::uint64_t characteristic, s
     const auto op_id = g_le_ops.add(LeOpKind::CharacteristicWrite, callback, characteristic, connection);
 
     std::string message;
-    const Error error = g_backend->le_characteristic_write(op_id, connection, service_uuid, characteristic_uuid, value_base64, with_response, message);
+    const Error error = g_backend->le_characteristic_write(op_id, connection, ref, value_base64, with_response, message);
     set_last_error(error, message);
 
     if (error != Error::Ok)
@@ -3822,13 +3914,12 @@ BluetoothError bluetooth_le_characteristic_subscribe(std::uint64_t characteristi
 
     const std::uint64_t service = g_characteristic_cache.get_parent(characteristic);
     const std::uint64_t connection = g_service_cache.get_parent(service);
-    const std::string service_uuid = g_service_cache.get_uuid(service);
-    const std::string characteristic_uuid = g_characteristic_cache.get_uuid(characteristic);
+    const LeAttributeRef ref = characteristic_ref(characteristic);
 
     const auto op_id = g_le_ops.add(LeOpKind::CharacteristicSubscribe, callback, characteristic, connection);
 
     std::string message;
-    const Error error = g_backend->le_characteristic_subscribe(op_id, connection, service_uuid, characteristic_uuid,
+    const Error error = g_backend->le_characteristic_subscribe(op_id, connection, ref,
         static_cast<std::int32_t>(mode), message);
     set_last_error(error, message);
 
@@ -3857,14 +3948,12 @@ BluetoothError bluetooth_le_descriptor_read(std::uint64_t descriptor, const gm::
     const std::uint64_t characteristic = g_descriptor_cache.get_parent(descriptor);
     const std::uint64_t service = g_characteristic_cache.get_parent(characteristic);
     const std::uint64_t connection = g_service_cache.get_parent(service);
-    const std::string service_uuid = g_service_cache.get_uuid(service);
-    const std::string characteristic_uuid = g_characteristic_cache.get_uuid(characteristic);
-    const std::string descriptor_uuid = g_descriptor_cache.get_uuid(descriptor);
+    const LeAttributeRef ref = descriptor_ref(descriptor);
 
     const auto op_id = g_le_ops.add(LeOpKind::DescriptorRead, callback, descriptor, connection);
 
     std::string message;
-    const Error error = g_backend->le_descriptor_read(op_id, connection, service_uuid, characteristic_uuid, descriptor_uuid, message);
+    const Error error = g_backend->le_descriptor_read(op_id, connection, ref, message);
     set_last_error(error, message);
 
     if (error != Error::Ok)
@@ -3892,13 +3981,11 @@ BluetoothError bluetooth_le_descriptor_write(std::uint64_t descriptor, struct gm
     const std::uint64_t characteristic = g_descriptor_cache.get_parent(descriptor);
     const std::uint64_t service = g_characteristic_cache.get_parent(characteristic);
     const std::uint64_t connection = g_service_cache.get_parent(service);
-    const std::string service_uuid = g_service_cache.get_uuid(service);
-    const std::string characteristic_uuid = g_characteristic_cache.get_uuid(characteristic);
-    const std::string descriptor_uuid = g_descriptor_cache.get_uuid(descriptor);
+    const LeAttributeRef ref = descriptor_ref(descriptor);
 
     // The CCCD has one writer on every platform, bluetooth_le_characteristic_subscribe;
     // CoreBluetooth throws on a direct write.
-    if (canonical_uuid(descriptor_uuid) == "00002902-0000-1000-8000-00805f9b34fb")
+    if (g_descriptor_cache.get_uuid(descriptor) == "00002902-0000-1000-8000-00805f9b34fb")
     {
         g_last_error = Error::InvalidArgument;
         g_last_error_message = "The CCCD is written by bluetooth_le_characteristic_subscribe";
@@ -3914,7 +4001,7 @@ BluetoothError bluetooth_le_descriptor_write(std::uint64_t descriptor, struct gm
     const auto op_id = g_le_ops.add(LeOpKind::DescriptorWrite, callback, descriptor, connection);
 
     std::string message;
-    const Error error = g_backend->le_descriptor_write(op_id, connection, service_uuid, characteristic_uuid, descriptor_uuid, value_base64, message);
+    const Error error = g_backend->le_descriptor_write(op_id, connection, ref, value_base64, message);
     set_last_error(error, message);
 
     if (error != Error::Ok)
@@ -3925,12 +4012,14 @@ BluetoothError bluetooth_le_descriptor_write(std::uint64_t descriptor, struct gm
 
 // --- BLE values ---
 
-BluetoothError bluetooth_le_value_copy(std::uint64_t value, struct gm::wire::GMBuffer out_data, unsigned int offset)
+// The bytes copied, or -1 on error (R1-214).
+std::int32_t bluetooth_le_value_copy(std::uint64_t value, struct gm::wire::GMBuffer out_data, unsigned int offset)
 {
     std::string message;
-    const Error error = g_values.copy(value, out_data, offset, message);
+    std::size_t copied = 0;
+    const Error error = g_values.copy(value, out_data, offset, copied, message);
     set_last_error(error, message);
-    return to_gm(error);
+    return error == Error::Ok ? static_cast<std::int32_t>(copied) : -1;
 }
 
 BluetoothError bluetooth_le_value_release(std::uint64_t value)
@@ -4278,10 +4367,11 @@ BluetoothError bluetooth_le_server_respond_write(std::int32_t request_id, Blueto
     return to_gm(error);
 }
 
+// The bytes copied, or -1 on error (R1-214).
 std::int32_t bluetooth_le_server_write_request_get_value(std::int32_t request_id, struct gm::wire::GMBuffer out_data, unsigned int offset, unsigned int max_size)
 {
     if (!buffer_range_valid(out_data, offset, max_size, "bluetooth_le_server_write_request_get_value"))
-        return 0;
+        return -1;
 
     std::scoped_lock lock(g_pending_le_server_requests_mutex);
     const auto it = g_pending_le_server_requests.find(request_id);
@@ -4289,13 +4379,13 @@ std::int32_t bluetooth_le_server_write_request_get_value(std::int32_t request_id
     {
         g_last_error = Error::InvalidHandle;
         g_last_error_message = "Unknown or expired LE server request id " + std::to_string(request_id);
-        return 0;
+        return -1;
     }
     if (!it->second.is_write)
     {
         g_last_error = Error::InvalidArgument;
         g_last_error_message = "LE server request " + std::to_string(request_id) + " is a read request; it has no written value";
-        return 0;
+        return -1;
     }
 
     const auto& value = it->second.write_value;

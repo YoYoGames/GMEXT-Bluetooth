@@ -1121,7 +1121,7 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         return 0;
     }
 
-    public double __EXT_NATIVE__bluetooth_le_value_copy(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
+    public double __EXT_NATIVE__bluetooth_le_value_copy(ByteBuffer __arg_buffer, double __arg_buffer_length)
     {
         GMExtWire.order(__arg_buffer);
 
@@ -1134,14 +1134,8 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         // field: offset, type: UInt32
         int offset = GMExtWire.readI32(__arg_buffer);
 
-        BluetoothError __result = bluetooth_le_value_copy(value, out_data, offset);
-
-        GMExtWire.order(__ret_buffer);
-        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
-        // return: __result, type: enum BluetoothError
-        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
-
-        return 0;
+        int __result = bluetooth_le_value_copy(value, out_data, offset);
+        return (double)__result;
     }
 
     public double __EXT_NATIVE__bluetooth_le_value_release(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)

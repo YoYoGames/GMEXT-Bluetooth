@@ -98,7 +98,7 @@
 - (gm_enums::BluetoothError)bluetooth_le_characteristic_subscribe:(std::uint64_t)characteristic mode:(gm_enums::BluetoothLeSubscribeMode)mode callback:(gm::wire::GMFunction)callback { return ::bluetooth_le_characteristic_subscribe(characteristic, mode, callback); }
 - (gm_enums::BluetoothError)bluetooth_le_descriptor_read:(std::uint64_t)descriptor callback:(gm::wire::GMFunction)callback { return ::bluetooth_le_descriptor_read(descriptor, callback); }
 - (gm_enums::BluetoothError)bluetooth_le_descriptor_write:(std::uint64_t)descriptor data:(gm::wire::GMBuffer)data offset:(std::uint32_t)offset size:(std::uint32_t)size callback:(gm::wire::GMFunction)callback { return ::bluetooth_le_descriptor_write(descriptor, data, offset, size, callback); }
-- (gm_enums::BluetoothError)bluetooth_le_value_copy:(std::uint64_t)value out_data:(gm::wire::GMBuffer)out_data offset:(std::uint32_t)offset { return ::bluetooth_le_value_copy(value, out_data, offset); }
+- (std::int32_t)bluetooth_le_value_copy:(std::uint64_t)value out_data:(gm::wire::GMBuffer)out_data offset:(std::uint32_t)offset { return ::bluetooth_le_value_copy(value, out_data, offset); }
 - (gm_enums::BluetoothError)bluetooth_le_value_release:(std::uint64_t)value { return ::bluetooth_le_value_release(value); }
 - (gm_enums::BluetoothError)bluetooth_le_advertise_start:(const gm_structs::BluetoothLeAdvertiseSettings&)settings data:(const gm_structs::BluetoothLeAdvertiseData&)data callback:(gm::wire::GMFunction)callback { return ::bluetooth_le_advertise_start(settings, data, callback); }
 - (gm_enums::BluetoothError)bluetooth_le_advertise_stop { return ::bluetooth_le_advertise_stop(); }

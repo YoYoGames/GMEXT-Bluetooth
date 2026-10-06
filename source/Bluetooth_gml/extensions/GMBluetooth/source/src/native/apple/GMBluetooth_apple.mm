@@ -36,6 +36,10 @@
 @property (nonatomic, strong) NSMutableDictionary *dictionary;
 // startAdvertising: was sent for it.
 @property (nonatomic) BOOL issued;
+// Advertising was stopped while CoreBluetooth was starting it: its op has
+// already failed, and peripheralManagerDidStartAdvertising: only undoes the
+// start and moves on to the next.
+@property (nonatomic) BOOL abandoned;
 
 - (instancetype)initWithOpId:(NSNumber *)opId dictionary:(NSMutableDictionary *)dictionary;
 @end
@@ -135,6 +139,23 @@
 // RSSI reads, answered by peripheral:didReadRSSI:error:, which names only
 // the peripheral.
 @property (nonatomic, strong) NSMutableArray<GMBTQueuedPeripheral *> *readRssi;
+
+// The ids the core names this peripheral's services, characteristics and
+// descriptors by (R1-127). CoreBluetooth exposes no attribute handle, so
+// each object gets an id the first time a discovery reports it and keeps it
+// when reported again; two attributes sharing a UUID get two ids. One
+// counter serves every kind, from 1. The ids go with this object when the
+// link ends.
+@property (nonatomic, strong) NSMapTable<CBAttribute *, NSNumber *> *attributeIds;
+@property (nonatomic, strong) NSMutableDictionary<NSNumber *, CBAttribute *> *attributesById;
+@property (nonatomic) std::uint64_t nextAttributeId;
+
+// The attribute's id, minted on its first report.
+- (std::uint64_t)idForAttribute:(CBAttribute *)attribute;
+// The attribute's id, 0 when no discovery reported it.
+- (std::uint64_t)knownIdForAttribute:(CBAttribute *)attribute;
+// The attribute an id names, nil for an id never minted.
+- (CBAttribute *)attributeForId:(std::uint64_t)attributeId;
 @end
 
 // One didReceiveWriteRequests array. CoreBluetooth wants it treated as a unit
@@ -174,8 +195,8 @@
 // PoweredOn; its timer bounds the attempt and names it in its userInfo.
 @property(nonatomic, strong) NSMutableArray<GMBTQueuedTimedPeripheral *> *openPeripheralQueue;
 
-// Keyed by the peripheral's identifier. An entry goes when its peripheral's
-// link ends; the core fails the ops it held.
+// Keyed by peripheralKey:. An entry goes when its peripheral's link ends;
+// the core fails the ops it held.
 @property(nonatomic, strong) NSMutableDictionary<NSString *, GMBTPeripheralQueues *> *peripheralQueues;
 
 // What scans found, kept across scans so a device found earlier can still
@@ -248,15 +269,17 @@
 - (CBPeripheral *) bt_le_retrieve_peripheral:(NSUUID *)identifier error:(gmbluetooth::Error &)error message:(std::string &)message;
 - (NSArray<CBPeripheral *> *) bt_le_connected_peripherals:(NSArray<NSString *> *)serviceUuidStrings error:(gmbluetooth::Error &)error message:(std::string &)message;
 
+// The attribute calls name services, characteristics and descriptors by the
+// ids their discovery reported (GMBTPeripheralQueues), never by UUID.
 - (gmbluetooth::Error) bt_le_peripheral_get_services:(NSString *)peripheralUuid opId:(NSNumber *)opId message:(std::string &)message;
-- (gmbluetooth::Error) bt_le_service_get_characteristics:(NSString *)peripheralUuid service:(NSString *)serviceUuid opId:(NSNumber *)opId message:(std::string &)message;
-- (gmbluetooth::Error) bt_le_characteristic_get_descriptors:(NSString *)peripheralUuid service:(NSString *)serviceUuid characteristic:(NSString *)characteristicUuid opId:(NSNumber *)opId message:(std::string &)message;
-- (gmbluetooth::Error) bt_le_characteristic_read:(NSString *)peripheralUuid service:(NSString *)serviceUuid characteristic:(NSString *)characteristicUuid opId:(NSNumber *)opId message:(std::string &)message;
-- (gmbluetooth::Error) bt_le_characteristic_write_request:(NSString *)peripheralUuid service:(NSString *)serviceUuid characteristic:(NSString *)characteristicUuid value:(NSString *)value opId:(NSNumber *)opId message:(std::string &)message;
-- (gmbluetooth::Error) bt_le_characteristic_write_command:(NSString *)peripheralUuid service:(NSString *)serviceUuid characteristic:(NSString *)characteristicUuid value:(NSString *)value opId:(NSNumber *)opId message:(std::string &)message;
-- (gmbluetooth::Error) bt_le_characteristic_subscribe:(NSString *)peripheralUuid service:(NSString *)serviceUuid characteristic:(NSString *)characteristicUuid mode:(NSInteger)mode opId:(NSNumber *)opId message:(std::string &)message;
-- (gmbluetooth::Error) bt_le_descriptor_read:(NSString *)peripheralUuid service:(NSString *)serviceUuid characteristic:(NSString *)characteristicUuid descriptor:(NSString *)descriptorUuid opId:(NSNumber *)opId message:(std::string &)message;
-- (gmbluetooth::Error) bt_le_descriptor_write:(NSString *)peripheralUuid service:(NSString *)serviceUuid characteristic:(NSString *)characteristicUuid descriptor:(NSString *)descriptorUuid value:(NSString *)value opId:(NSNumber *)opId message:(std::string &)message;
+- (gmbluetooth::Error) bt_le_service_get_characteristics:(NSString *)peripheralUuid service:(std::uint64_t)serviceId opId:(NSNumber *)opId message:(std::string &)message;
+- (gmbluetooth::Error) bt_le_characteristic_get_descriptors:(NSString *)peripheralUuid service:(std::uint64_t)serviceId characteristic:(std::uint64_t)characteristicId opId:(NSNumber *)opId message:(std::string &)message;
+- (gmbluetooth::Error) bt_le_characteristic_read:(NSString *)peripheralUuid service:(std::uint64_t)serviceId characteristic:(std::uint64_t)characteristicId opId:(NSNumber *)opId message:(std::string &)message;
+- (gmbluetooth::Error) bt_le_characteristic_write_request:(NSString *)peripheralUuid service:(std::uint64_t)serviceId characteristic:(std::uint64_t)characteristicId value:(NSString *)value opId:(NSNumber *)opId message:(std::string &)message;
+- (gmbluetooth::Error) bt_le_characteristic_write_command:(NSString *)peripheralUuid service:(std::uint64_t)serviceId characteristic:(std::uint64_t)characteristicId value:(NSString *)value opId:(NSNumber *)opId message:(std::string &)message;
+- (gmbluetooth::Error) bt_le_characteristic_subscribe:(NSString *)peripheralUuid service:(std::uint64_t)serviceId characteristic:(std::uint64_t)characteristicId mode:(NSInteger)mode opId:(NSNumber *)opId message:(std::string &)message;
+- (gmbluetooth::Error) bt_le_descriptor_read:(NSString *)peripheralUuid service:(std::uint64_t)serviceId characteristic:(std::uint64_t)characteristicId descriptor:(std::uint64_t)descriptorId opId:(NSNumber *)opId message:(std::string &)message;
+- (gmbluetooth::Error) bt_le_descriptor_write:(NSString *)peripheralUuid service:(std::uint64_t)serviceId characteristic:(std::uint64_t)characteristicId descriptor:(std::uint64_t)descriptorId value:(NSString *)value opId:(NSNumber *)opId message:(std::string &)message;
 
 @end
 
@@ -381,8 +404,34 @@
         _writeDescriptor = [NSMutableArray new];
         _writeWithoutResponse = [NSMutableArray new];
         _readRssi = [NSMutableArray new];
+        _attributeIds = [NSMapTable mapTableWithKeyOptions:NSPointerFunctionsStrongMemory | NSPointerFunctionsObjectPointerPersonality
+                                              valueOptions:NSPointerFunctionsStrongMemory];
+        _attributesById = [NSMutableDictionary new];
+        _nextAttributeId = 1;
     }
     return self;
+}
+
+- (std::uint64_t)idForAttribute:(CBAttribute *)attribute {
+    NSNumber *known = [_attributeIds objectForKey:attribute];
+    if (known) return known.unsignedLongLongValue;
+
+    const std::uint64_t attributeId = _nextAttributeId++;
+    NSNumber *value = @(attributeId);
+    [_attributeIds setObject:value forKey:attribute];
+    _attributesById[value] = attribute;
+    return attributeId;
+}
+
+- (std::uint64_t)knownIdForAttribute:(CBAttribute *)attribute {
+    if (!attribute) return 0;
+    NSNumber *known = [_attributeIds objectForKey:attribute];
+    return known ? known.unsignedLongLongValue : 0;
+}
+
+- (CBAttribute *)attributeForId:(std::uint64_t)attributeId {
+    if (attributeId == 0) return nil;
+    return _attributesById[@(attributeId)];
 }
 @end
 
@@ -400,6 +449,14 @@ static NSString *gmbt_ns(const std::string &text) {
 static std::string gmbt_string(NSString *text) {
     const char *utf8 = text ? text.UTF8String : nullptr;
     return utf8 ? std::string(utf8) : std::string();
+}
+
+// The key a peripheral is known by in every table and event, and the
+// identifier in its "apple:ble:" device id: its identifier, uppercase; ""
+// when it has none.
+static NSString *gmbt_peripheral_key(CBPeripheral *peripheral) {
+    NSString *key = peripheral.identifier.UUIDString;
+    return key ? [key uppercaseString] : @"";
 }
 
 static gmbluetooth::Error gmbt_fail(std::string &message, gmbluetooth::Error error, std::string text) {
@@ -540,10 +597,9 @@ static gmbluetooth::Error gmbt_error_from_nserror(NSError *error, std::string &m
 }
 
 // The key a peripheral is known by in every table here, and the identifier
-// in its "apple:ble:" device id.
+// in its "apple:ble:" device id (gmbt_peripheral_key, the one derivation).
 - (NSString *) peripheralKey:(CBPeripheral *)peripheral {
-    NSString *key = peripheral.identifier.UUIDString;
-    return key ? [key uppercaseString] : @"";
+    return gmbt_peripheral_key(peripheral);
 }
 
 // Completes the call the core registered as opId; Ok with an empty message
@@ -571,32 +627,33 @@ static gmbluetooth::Error gmbt_error_from_nserror(NSError *error, std::string &m
     [self completeOp:opId error:error result:gmbluetooth::LeOpResult{}];
 }
 
-// What a discovery returns: each attribute's UUID, as the cache stores it,
-// and a characteristic's properties.
-- (gmbluetooth::LeOpResult) resultFromServices:(NSArray<CBService *> *)services {
+// What a discovery returns: each attribute's UUID, the id the peripheral's
+// registry names it by (minted here on its first report) and a
+// characteristic's properties.
+- (gmbluetooth::LeOpResult) resultFromServices:(NSArray<CBService *> *)services queues:(GMBTPeripheralQueues *)queues {
     gmbluetooth::LeOpResult result;
     for (CBService *service in services) {
         NSString *uuid = [[self convertTo128BitUUID: service.UUID.UUIDString] uppercaseString];
-        result.attributes.push_back(gmbluetooth::LeAttribute{ gmbt_string(uuid), 0 });
+        result.attributes.push_back(gmbluetooth::LeAttribute{ gmbt_string(uuid), [queues idForAttribute:service], 0 });
     }
     return result;
 }
 
-- (gmbluetooth::LeOpResult) resultFromCharacteristics:(NSArray<CBCharacteristic *> *)characteristics {
+- (gmbluetooth::LeOpResult) resultFromCharacteristics:(NSArray<CBCharacteristic *> *)characteristics queues:(GMBTPeripheralQueues *)queues {
     gmbluetooth::LeOpResult result;
     for (CBCharacteristic *characteristic in characteristics) {
         NSString *uuid = [characteristic.UUID.UUIDString uppercaseString];
         result.attributes.push_back(gmbluetooth::LeAttribute{
-            gmbt_string(uuid), static_cast<std::int32_t>(characteristic.properties) });
+            gmbt_string(uuid), [queues idForAttribute:characteristic], static_cast<std::int32_t>(characteristic.properties) });
     }
     return result;
 }
 
-- (gmbluetooth::LeOpResult) resultFromDescriptors:(NSArray<CBDescriptor *> *)descriptors {
+- (gmbluetooth::LeOpResult) resultFromDescriptors:(NSArray<CBDescriptor *> *)descriptors queues:(GMBTPeripheralQueues *)queues {
     gmbluetooth::LeOpResult result;
     for (CBDescriptor *descriptor in descriptors) {
         NSString *uuid = [[self convertTo128BitUUID: descriptor.UUID.UUIDString] uppercaseString];
-        result.attributes.push_back(gmbluetooth::LeAttribute{ gmbt_string(uuid), 0 });
+        result.attributes.push_back(gmbluetooth::LeAttribute{ gmbt_string(uuid), [queues idForAttribute:descriptor], 0 });
     }
     return result;
 }
@@ -634,8 +691,8 @@ static gmbluetooth::Error gmbt_error_from_nserror(NSError *error, std::string &m
 }
 
 - (GMBTPeripheralQueues *) queuesForPeripheral:(CBPeripheral *)peripheral create:(BOOL)create {
-    NSString *key = peripheral.identifier.UUIDString;
-    if (!key) return nil;
+    NSString *key = [self peripheralKey:peripheral];
+    if (key.length == 0) return nil;
     GMBTPeripheralQueues *queues = _peripheralQueues[key];
     if (!queues && create) {
         queues = [GMBTPeripheralQueues new];
@@ -658,10 +715,11 @@ static gmbluetooth::Error gmbt_error_from_nserror(NSError *error, std::string &m
 }
 
 // Drops the peripheral's queued GATT requests without reporting them: the
-// core fails their ops when it learns the link ended.
+// core fails their ops when it learns the link ended. Its attribute ids go
+// with them.
 - (void) dropQueuesForPeripheral:(CBPeripheral *)peripheral {
-    NSString *key = peripheral.identifier.UUIDString;
-    if (key) [_peripheralQueues removeObjectForKey:key];
+    NSString *key = [self peripheralKey:peripheral];
+    if (key.length > 0) [_peripheralQueues removeObjectForKey:key];
 }
 
 // Fails, in queue order, every request on a service the peripheral just
@@ -974,11 +1032,27 @@ static bool _scanPendingPowerOn = false;
 }
 
 // Fails every start still waiting for peripheralManagerDidStartAdvertising:.
-- (void) failAdvertiseStarts:(gmbluetooth::Error)error message:(const std::string &)message {
-    while (_startAdvertisementQueue.count > 0) {
-        GMBTQueuedMutableDictionary *queued = [self queueDequeue:_startAdvertisementQueue];
-        [self failOp:queued.opId error:error message:message];
+// With keepIssuedHead (a stop or a server close, the manager still on) a
+// start CoreBluetooth is working on stays at the head, abandoned, so its late
+// answer cannot complete a newer start; otherwise (the manager left PoweredOn)
+// no answer will come and every entry goes. An entry already abandoned was
+// failed then and is not failed again.
+- (void) failAdvertiseStarts:(gmbluetooth::Error)error message:(const std::string &)message keepIssuedHead:(BOOL)keepIssuedHead {
+    GMBTQueuedMutableDictionary *head = [self queuePeek:_startAdvertisementQueue];
+    const BOOL keepHead = keepIssuedHead && head.issued;
+
+    NSMutableArray<GMBTQueuedMutableDictionary *> *failed = [NSMutableArray array];
+    for (GMBTQueuedMutableDictionary *queued in _startAdvertisementQueue) {
+        if (!queued.abandoned) [failed addObject:queued];
     }
+    [_startAdvertisementQueue removeAllObjects];
+    if (keepHead) {
+        head.abandoned = YES;
+        [_startAdvertisementQueue addObject:head];
+    }
+
+    for (GMBTQueuedMutableDictionary *queued in failed)
+        [self failOp:queued.opId error:error message:message];
 }
 
 // CBPeripheralManager.startAdvertising takes only LocalName and ServiceUUIDs;
@@ -1025,22 +1099,42 @@ static bool _scanPendingPowerOn = false;
 - (gmbluetooth::Error) bt_le_advertise_stop:(std::string &)message {
     if (![self bt_le_advertise_is_active] && !_peripheralManager.isAdvertising) return gmbt_ok(message);
 
-    [self failAdvertiseStarts:gmbluetooth::Error::OperationFailed message:"Advertising stopped before it started"];
-    if (_peripheralManager.state == CBManagerStatePoweredOn) [_peripheralManager stopAdvertising];
+    [self failAdvertiseStarts:gmbluetooth::Error::OperationFailed message:"Advertising stopped before it started" keepIssuedHead:YES];
+    // A start CoreBluetooth is still working on is left to finish: its answer
+    // is what unblocks the queue, and the abandoned branch of
+    // peripheralManagerDidStartAdvertising: stops it then. Stopping here could
+    // cancel the start without an answer and leave the queue blocked for good.
+    GMBTQueuedMutableDictionary *head = [self queuePeek:_startAdvertisementQueue];
+    const BOOL startInFlight = head != nil && head.abandoned && head.issued;
+    if (!startInFlight && _peripheralManager.state == CBManagerStatePoweredOn) [_peripheralManager stopAdvertising];
     _isAdvertising = false;
     return gmbt_ok(message);
 }
 
 // Running from the call that starts it, so a second start is Busy while the
-// first is still waiting for CoreBluetooth.
+// first is still waiting for CoreBluetooth. An abandoned start does not
+// count: a new start queues behind it and is issued once it is answered.
 - (BOOL) bt_le_advertise_is_active {
-    return _isAdvertising || _startAdvertisementQueue.count > 0;
+    if (_isAdvertising) return YES;
+    for (GMBTQueuedMutableDictionary *queued in _startAdvertisementQueue) {
+        if (!queued.abandoned) return YES;
+    }
+    return NO;
 }
 
 - (void) peripheralManagerDidStartAdvertising:(CBPeripheralManager *)peripheral error:(NSError *)error {
     GMBTQueuedMutableDictionary *queuedAdvertisementData = [self queuePeek:_startAdvertisementQueue];
     if (!queuedAdvertisementData || !queuedAdvertisementData.issued) return;
     [self queueDequeue:_startAdvertisementQueue];
+
+    // Stopped while starting: its op already failed, so a start that took is
+    // undone and the next one goes.
+    if (queuedAdvertisementData.abandoned) {
+        if (!error && peripheral.state == CBManagerStatePoweredOn) [peripheral stopAdvertising];
+        _isAdvertising = false;
+        [self handleStartAdvertisementQueue];
+        return;
+    }
 
     _isAdvertising = (error == nil && peripheral.isAdvertising);
     [self completeOp:queuedAdvertisementData.opId error:error];
@@ -1257,8 +1351,12 @@ static bool _scanPendingPowerOn = false;
                    message:"The GATT server stopped before the service was added"
               failInFlight:NO];
 
-    [self failAdvertiseStarts:gmbluetooth::Error::OperationFailed message:"Advertising stopped before it started"];
-    if ([_peripheralManager isAdvertising]) {
+    [self failAdvertiseStarts:gmbluetooth::Error::OperationFailed message:"Advertising stopped before it started" keepIssuedHead:YES];
+    // As in bt_le_advertise_stop: a start still in flight is stopped by its
+    // own answer, never cancelled here.
+    GMBTQueuedMutableDictionary *advertiseHead = [self queuePeek:_startAdvertisementQueue];
+    const BOOL startInFlight = advertiseHead != nil && advertiseHead.abandoned && advertiseHead.issued;
+    if (!startInFlight && [_peripheralManager isAdvertising]) {
         [_peripheralManager stopAdvertising];
     }
     _isAdvertising = false;
@@ -1432,7 +1530,7 @@ static bool _scanPendingPowerOn = false;
     const gmbluetooth::Error error = gmbt_unavailable_error(peripheral.state, message);
 
     _isAdvertising = false;
-    [self failAdvertiseStarts:error message:message];
+    [self failAdvertiseStarts:error message:message keepIssuedHead:NO];
 
     // The radio is gone and every central with it; no unsubscribe follows.
     NSArray<CBCentral *> *centrals = _subscribedCentrals.allValues;
@@ -1674,8 +1772,17 @@ static gmbluetooth::Error gmbt_not_open(std::string &message) {
     return gmbt_fail(message, gmbluetooth::Error::OperationFailed, "The LE connection is not open");
 }
 
-static gmbluetooth::Error gmbt_not_found(const char *what, NSString *uuid, std::string &message) {
-    return gmbt_fail(message, gmbluetooth::Error::NotFound, std::string(what) + " " + gmbt_string(uuid) + " not found");
+// The attribute is named by the id its discovery reported; CoreBluetooth
+// has no handle to show instead.
+static gmbluetooth::Error gmbt_not_found(const char *what, std::uint64_t attributeId, std::string &message) {
+    return gmbt_fail(message, gmbluetooth::Error::NotFound,
+                     std::string(what) + " not found (instance " + std::to_string(attributeId) + ")");
+}
+
+// Whether array holds this very object. nil-safe: a nil array would
+// otherwise answer 0, a valid index.
+static BOOL gmbt_contains_identical(NSArray *array, id object) {
+    return array != nil && object != nil && [array indexOfObjectIdenticalTo:object] != NSNotFound;
 }
 
 static gmbluetooth::Error gmbt_bad_base64(std::string &message) {
@@ -1940,25 +2047,27 @@ static gmbluetooth::Error gmbt_bad_base64(std::string &message) {
     return gmbt_ok(message);
 }
 
-- (CBService *) findServiceInPeripheral:(CBPeripheral *)peripheral withUUID:(NSString *)serviceUuid {
-
-    // Convert the service UUID string to a CBUUID
-    CBUUID *targetUuid = [CBUUID UUIDWithString:serviceUuid];
-    for (CBService *service in peripheral.services) {
-        if ([service.UUID isEqual:targetUuid]) {
-            return service;
-        }
-    }
-
-    return nil;
+// The attribute an id names on the peripheral when it is of class kind; nil
+// for an id its discovery never reported, or one of another kind.
+- (id) attributeOf:(CBPeripheral *)peripheral withId:(std::uint64_t)attributeId kind:(Class)kind {
+    CBAttribute *attribute = [[self queuesForPeripheral:peripheral create:NO] attributeForId:attributeId];
+    return [attribute isKindOfClass:kind] ? attribute : nil;
 }
 
-- (gmbluetooth::Error) bt_le_service_get_characteristics:(NSString*) peripheralUuid service:(NSString*) serviceUuid opId:(NSNumber *)opId message:(std::string &)message {
+// The lookups by id answer only while the object is still under its parent:
+// one the peripheral has since dropped or replaced (didModifyServices) is
+// not found, as an unknown UUID was.
+- (CBService *) findServiceInPeripheral:(CBPeripheral *)peripheral withId:(std::uint64_t)serviceId {
+    CBService *service = [self attributeOf:peripheral withId:serviceId kind:[CBService class]];
+    return gmbt_contains_identical(peripheral.services, service) ? service : nil;
+}
+
+- (gmbluetooth::Error) bt_le_service_get_characteristics:(NSString*) peripheralUuid service:(std::uint64_t) serviceId opId:(NSNumber *)opId message:(std::string &)message {
     CBPeripheral *peripheral = [self peripheralForUuid:peripheralUuid];
     if (!peripheral) return gmbt_not_open(message);
 
-    CBService *service = [self findServiceInPeripheral:peripheral withUUID:serviceUuid];
-    if (!service) return gmbt_not_found("Service", serviceUuid, message);
+    CBService *service = [self findServiceInPeripheral:peripheral withId:serviceId];
+    if (!service) return gmbt_not_found("Service", serviceId, message);
 
     GMBTQueuedService *queuedService = [[GMBTQueuedService alloc] initWithOpId:opId peripheral:peripheral service:service];
 
@@ -1968,45 +2077,36 @@ static gmbluetooth::Error gmbt_bad_base64(std::string &message) {
     return gmbt_ok(message);
 }
 
-- (CBCharacteristic *) findCharacteristicInService:(CBService *)service withUUID:(NSString *)characteristicUuid {
-
-    // Convert the characteristic UUID string to a CBUUID
-    CBUUID *targetUuid = [CBUUID UUIDWithString:characteristicUuid];
-
-    for (CBCharacteristic *characteristic in service.characteristics) {
-        if ([characteristic.UUID isEqual:targetUuid]) {
-            return characteristic;
-        }
-    }
-
-    return nil;
+- (CBCharacteristic *) findCharacteristicInService:(CBService *)service ofPeripheral:(CBPeripheral *)peripheral withId:(std::uint64_t)characteristicId {
+    CBCharacteristic *characteristic = [self attributeOf:peripheral withId:characteristicId kind:[CBCharacteristic class]];
+    return gmbt_contains_identical(service.characteristics, characteristic) ? characteristic : nil;
 }
 
 // The characteristic a GATT call names on an open peripheral, or nil with
 // the call's error and message set.
-- (CBCharacteristic *) characteristicFor:(NSString *)peripheralUuid service:(NSString *)serviceUuid characteristic:(NSString *)characteristicUuid error:(gmbluetooth::Error &)error message:(std::string &)message {
+- (CBCharacteristic *) characteristicFor:(NSString *)peripheralUuid service:(std::uint64_t)serviceId characteristic:(std::uint64_t)characteristicId error:(gmbluetooth::Error &)error message:(std::string &)message {
     CBPeripheral *peripheral = [self peripheralForUuid:peripheralUuid];
     if (!peripheral) {
         error = gmbt_not_open(message);
         return nil;
     }
-    CBService *service = [self findServiceInPeripheral:peripheral withUUID:serviceUuid];
+    CBService *service = [self findServiceInPeripheral:peripheral withId:serviceId];
     if (!service) {
-        error = gmbt_not_found("Service", serviceUuid, message);
+        error = gmbt_not_found("Service", serviceId, message);
         return nil;
     }
-    CBCharacteristic *characteristic = [self findCharacteristicInService:service withUUID:characteristicUuid];
+    CBCharacteristic *characteristic = [self findCharacteristicInService:service ofPeripheral:peripheral withId:characteristicId];
     if (!characteristic) {
-        error = gmbt_not_found("Characteristic", characteristicUuid, message);
+        error = gmbt_not_found("Characteristic", characteristicId, message);
         return nil;
     }
     error = gmbt_ok(message);
     return characteristic;
 }
 
-- (gmbluetooth::Error) bt_le_characteristic_get_descriptors:(NSString*) peripheralUuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid opId:(NSNumber *)opId message:(std::string &)message {
+- (gmbluetooth::Error) bt_le_characteristic_get_descriptors:(NSString*) peripheralUuid service:(std::uint64_t) serviceId characteristic:(std::uint64_t) characteristicId opId:(NSNumber *)opId message:(std::string &)message {
     gmbluetooth::Error error = gmbluetooth::Error::Ok;
-    CBCharacteristic *characteristic = [self characteristicFor:peripheralUuid service:serviceUuid characteristic:characteristicUuid error:error message:message];
+    CBCharacteristic *characteristic = [self characteristicFor:peripheralUuid service:serviceId characteristic:characteristicId error:error message:message];
     if (!characteristic) return error;
     CBPeripheral *peripheral = characteristic.service.peripheral;
 
@@ -2018,9 +2118,9 @@ static gmbluetooth::Error gmbt_bad_base64(std::string &message) {
     return gmbt_ok(message);
 }
 
-- (gmbluetooth::Error) bt_le_characteristic_read:(NSString*) peripheralUuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid opId:(NSNumber *)opId message:(std::string &)message {
+- (gmbluetooth::Error) bt_le_characteristic_read:(NSString*) peripheralUuid service:(std::uint64_t) serviceId characteristic:(std::uint64_t) characteristicId opId:(NSNumber *)opId message:(std::string &)message {
     gmbluetooth::Error error = gmbluetooth::Error::Ok;
-    CBCharacteristic *characteristic = [self characteristicFor:peripheralUuid service:serviceUuid characteristic:characteristicUuid error:error message:message];
+    CBCharacteristic *characteristic = [self characteristicFor:peripheralUuid service:serviceId characteristic:characteristicId error:error message:message];
     if (!characteristic) return error;
     CBPeripheral *peripheral = characteristic.service.peripheral;
 
@@ -2032,9 +2132,9 @@ static gmbluetooth::Error gmbt_bad_base64(std::string &message) {
     return gmbt_ok(message);
 }
 
-- (gmbluetooth::Error) bt_le_characteristic_write_request:(NSString*) peripheralUuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid value:(NSString*) value opId:(NSNumber *)opId message:(std::string &)message {
+- (gmbluetooth::Error) bt_le_characteristic_write_request:(NSString*) peripheralUuid service:(std::uint64_t) serviceId characteristic:(std::uint64_t) characteristicId value:(NSString*) value opId:(NSNumber *)opId message:(std::string &)message {
     gmbluetooth::Error error = gmbluetooth::Error::Ok;
-    CBCharacteristic *characteristic = [self characteristicFor:peripheralUuid service:serviceUuid characteristic:characteristicUuid error:error message:message];
+    CBCharacteristic *characteristic = [self characteristicFor:peripheralUuid service:serviceId characteristic:characteristicId error:error message:message];
     if (!characteristic) return error;
     CBPeripheral *peripheral = characteristic.service.peripheral;
 
@@ -2052,9 +2152,9 @@ static gmbluetooth::Error gmbt_bad_base64(std::string &message) {
 // CoreBluetooth sends no delegate call for a write without response, so each
 // completes when it is handed over: now, or from the queue once the link
 // can take it.
-- (gmbluetooth::Error) bt_le_characteristic_write_command:(NSString*) peripheralUuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid value:(NSString*) value opId:(NSNumber *)opId message:(std::string &)message {
+- (gmbluetooth::Error) bt_le_characteristic_write_command:(NSString*) peripheralUuid service:(std::uint64_t) serviceId characteristic:(std::uint64_t) characteristicId value:(NSString*) value opId:(NSNumber *)opId message:(std::string &)message {
     gmbluetooth::Error error = gmbluetooth::Error::Ok;
-    CBCharacteristic *characteristic = [self characteristicFor:peripheralUuid service:serviceUuid characteristic:characteristicUuid error:error message:message];
+    CBCharacteristic *characteristic = [self characteristicFor:peripheralUuid service:serviceId characteristic:characteristicId error:error message:message];
     if (!characteristic) return error;
     CBPeripheral *peripheral = characteristic.service.peripheral;
 
@@ -2087,9 +2187,9 @@ static gmbluetooth::Error gmbt_bad_base64(std::string &message) {
     [self sendWritesWithoutResponse:peripheral];
 }
 
-- (gmbluetooth::Error) bt_le_characteristic_subscribe:(NSString*) peripheralUuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid mode:(NSInteger)mode opId:(NSNumber *)opId message:(std::string &)message {
+- (gmbluetooth::Error) bt_le_characteristic_subscribe:(NSString*) peripheralUuid service:(std::uint64_t) serviceId characteristic:(std::uint64_t) characteristicId mode:(NSInteger)mode opId:(NSNumber *)opId message:(std::string &)message {
     gmbluetooth::Error error = gmbluetooth::Error::Ok;
-    CBCharacteristic *characteristic = [self characteristicFor:peripheralUuid service:serviceUuid characteristic:characteristicUuid error:error message:message];
+    CBCharacteristic *characteristic = [self characteristicFor:peripheralUuid service:serviceId characteristic:characteristicId error:error message:message];
     if (!characteristic) return error;
     CBPeripheral *peripheral = characteristic.service.peripheral;
 
@@ -2101,28 +2201,19 @@ static gmbluetooth::Error gmbt_bad_base64(std::string &message) {
     return gmbt_ok(message);
 }
 
-- (CBDescriptor *) findDescriptorInCharacteristic:(CBCharacteristic *)characteristic withUUID:(NSString *)descriptorUuid {
-
-    // Convert the descriptor UUID string to a CBUUID
-    CBUUID *targetUuid = [CBUUID UUIDWithString:descriptorUuid];
-
-    for (CBDescriptor *descriptor in characteristic.descriptors) {
-        if ([descriptor.UUID isEqual:targetUuid]) {
-            return descriptor;
-        }
-    }
-
-    return nil;
+- (CBDescriptor *) findDescriptorInCharacteristic:(CBCharacteristic *)characteristic ofPeripheral:(CBPeripheral *)peripheral withId:(std::uint64_t)descriptorId {
+    CBDescriptor *descriptor = [self attributeOf:peripheral withId:descriptorId kind:[CBDescriptor class]];
+    return gmbt_contains_identical(characteristic.descriptors, descriptor) ? descriptor : nil;
 }
 
-- (gmbluetooth::Error) bt_le_descriptor_read:(NSString*) peripheralUuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid descriptor:(NSString*) descriptorUuid opId:(NSNumber *)opId message:(std::string &)message {
+- (gmbluetooth::Error) bt_le_descriptor_read:(NSString*) peripheralUuid service:(std::uint64_t) serviceId characteristic:(std::uint64_t) characteristicId descriptor:(std::uint64_t) descriptorId opId:(NSNumber *)opId message:(std::string &)message {
     gmbluetooth::Error error = gmbluetooth::Error::Ok;
-    CBCharacteristic *characteristic = [self characteristicFor:peripheralUuid service:serviceUuid characteristic:characteristicUuid error:error message:message];
+    CBCharacteristic *characteristic = [self characteristicFor:peripheralUuid service:serviceId characteristic:characteristicId error:error message:message];
     if (!characteristic) return error;
     CBPeripheral *peripheral = characteristic.service.peripheral;
 
-    CBDescriptor *descriptor = [self findDescriptorInCharacteristic:characteristic withUUID:descriptorUuid];
-    if (!descriptor) return gmbt_not_found("Descriptor", descriptorUuid, message);
+    CBDescriptor *descriptor = [self findDescriptorInCharacteristic:characteristic ofPeripheral:peripheral withId:descriptorId];
+    if (!descriptor) return gmbt_not_found("Descriptor", descriptorId, message);
 
     GMBTQueuedDescriptor *queuedDescriptor = [[GMBTQueuedDescriptor alloc] initWithOpId:opId peripheral:peripheral descriptor:descriptor];
 
@@ -2132,14 +2223,14 @@ static gmbluetooth::Error gmbt_bad_base64(std::string &message) {
     return gmbt_ok(message);
 }
 
-- (gmbluetooth::Error) bt_le_descriptor_write:(NSString*) peripheralUuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid descriptor:(NSString*) descriptorUuid value:(NSString*) value opId:(NSNumber *)opId message:(std::string &)message {
+- (gmbluetooth::Error) bt_le_descriptor_write:(NSString*) peripheralUuid service:(std::uint64_t) serviceId characteristic:(std::uint64_t) characteristicId descriptor:(std::uint64_t) descriptorId value:(NSString*) value opId:(NSNumber *)opId message:(std::string &)message {
     gmbluetooth::Error error = gmbluetooth::Error::Ok;
-    CBCharacteristic *characteristic = [self characteristicFor:peripheralUuid service:serviceUuid characteristic:characteristicUuid error:error message:message];
+    CBCharacteristic *characteristic = [self characteristicFor:peripheralUuid service:serviceId characteristic:characteristicId error:error message:message];
     if (!characteristic) return error;
     CBPeripheral *peripheral = characteristic.service.peripheral;
 
-    CBDescriptor *descriptor = [self findDescriptorInCharacteristic:characteristic withUUID:descriptorUuid];
-    if (!descriptor) return gmbt_not_found("Descriptor", descriptorUuid, message);
+    CBDescriptor *descriptor = [self findDescriptorInCharacteristic:characteristic ofPeripheral:peripheral withId:descriptorId];
+    if (!descriptor) return gmbt_not_found("Descriptor", descriptorId, message);
 
     NSData *data = [self dataFromBase64:value];
     if (!data) return gmbt_bad_base64(message);
@@ -2231,14 +2322,15 @@ static gmbluetooth::Error gmbt_bad_base64(std::string &message) {
 
 - (void) peripheral:(CBPeripheral *)peripheral didDiscoverServices:(NSError *)error {
 	
-    NSMutableArray *queue = [self queuesForPeripheral:peripheral create:NO].fetchServices;
+    GMBTPeripheralQueues *queues = [self queuesForPeripheral:peripheral create:NO];
+    NSMutableArray *queue = queues.fetchServices;
     GMBTQueuedPeripheral *queuedPeripheral = [self takeHeadOf:queue answering:@"didDiscoverServices" matching:^BOOL(id head) {
         return ((GMBTQueuedPeripheral *)head).peripheral == peripheral;
     }];
     if (!queuedPeripheral) return;
 
     if (error) [self completeOp:queuedPeripheral.opId error:error];
-    else [self completeOp:queuedPeripheral.opId error:nil result:[self resultFromServices:peripheral.services]];
+    else [self completeOp:queuedPeripheral.opId error:nil result:[self resultFromServices:peripheral.services queues:queues]];
     [self handleFetchServicesQueue:queue];
 }
  
@@ -2248,14 +2340,15 @@ static gmbluetooth::Error gmbt_bad_base64(std::string &message) {
 
 - (void) peripheral:(CBPeripheral *)peripheral didDiscoverCharacteristicsForService:(CBService *)service error:(NSError *)error {
     
-    NSMutableArray *queue = [self queuesForPeripheral:peripheral create:NO].fetchCharacteristics;
+    GMBTPeripheralQueues *queues = [self queuesForPeripheral:peripheral create:NO];
+    NSMutableArray *queue = queues.fetchCharacteristics;
     GMBTQueuedService *queuedService = [self takeHeadOf:queue answering:@"didDiscoverCharacteristicsForService" matching:^BOOL(id head) {
         return ((GMBTQueuedService *)head).service == service;
     }];
     if (!queuedService) return;
 
     if (error) [self completeOp:queuedService.opId error:error];
-    else [self completeOp:queuedService.opId error:nil result:[self resultFromCharacteristics:service.characteristics]];
+    else [self completeOp:queuedService.opId error:nil result:[self resultFromCharacteristics:service.characteristics queues:queues]];
 
     // Handle next task in queue if there is one
     [self handleFetchCharacteristicsQueue:queue];
@@ -2263,14 +2356,15 @@ static gmbluetooth::Error gmbt_bad_base64(std::string &message) {
  
 - (void) peripheral:(CBPeripheral *)peripheral didDiscoverDescriptorsForCharacteristic:(CBCharacteristic *)characteristic error:(NSError *)error {
 	
-    NSMutableArray *queue = [self queuesForPeripheral:peripheral create:NO].fetchDescriptors;
+    GMBTPeripheralQueues *queues = [self queuesForPeripheral:peripheral create:NO];
+    NSMutableArray *queue = queues.fetchDescriptors;
     GMBTQueuedCharacteristic *queuedCharacteristic = [self takeHeadOf:queue answering:@"didDiscoverDescriptorsForCharacteristic" matching:^BOOL(id head) {
         return ((GMBTQueuedCharacteristic *)head).characteristic == characteristic;
     }];
     if (!queuedCharacteristic) return;
 
     if (error) [self completeOp:queuedCharacteristic.opId error:error];
-    else [self completeOp:queuedCharacteristic.opId error:nil result:[self resultFromDescriptors:characteristic.descriptors]];
+    else [self completeOp:queuedCharacteristic.opId error:nil result:[self resultFromDescriptors:characteristic.descriptors queues:queues]];
     [self handleFetchDescriptorsQueue:queue];
 }
 
@@ -2292,7 +2386,8 @@ static gmbluetooth::Error gmbt_bad_base64(std::string &message) {
     // Convert the value to a base64 string
     NSString *valueString = [characteristic.value base64EncodedStringWithOptions:0];
     
-    NSMutableArray *queue = [self queuesForPeripheral:peripheral create:NO].readCharacteristic;
+    GMBTPeripheralQueues *queues = [self queuesForPeripheral:peripheral create:NO];
+    NSMutableArray *queue = queues.readCharacteristic;
     GMBTQueuedCharacteristic *queuedCharacteristic = [self queuePeek:queue];
 
     if (queuedCharacteristic.characteristic != characteristic) {
@@ -2302,13 +2397,24 @@ static gmbluetooth::Error gmbt_bad_base64(std::string &message) {
 
     // There was not queued read request that matches the characteristic so it's a notification
     if (queuedCharacteristic == nil) {
+        // Named by the ids its discovery reported. A characteristic no
+        // discovery on this link reported has no handle in the core and is
+        // dropped, as an unknown one always was.
+        const std::uint64_t serviceId = [queues knownIdForAttribute:characteristic.service];
+        const std::uint64_t characteristicId = [queues knownIdForAttribute:characteristic];
+        if (serviceId == 0 || characteristicId == 0) {
+            GMBT_TRACE("value change on a characteristic no discovery reported - dropped");
+            return;
+        }
+
         NSMutableDictionary *params = [[NSMutableDictionary alloc] init];
-        params[@"characteristic_uuid"] = [characteristic.UUID.UUIDString uppercaseString];
-        params[@"service_uuid"] = [characteristic.service.UUID.UUIDString uppercaseString];
-        params[@"address"] = [peripheral.identifier.UUIDString uppercaseString];
+        params[@"service_instance"] = @(serviceId);
+        params[@"characteristic_instance"] = @(characteristicId);
+        params[@"address"] = [self peripheralKey:peripheral];
         params[@"value"] = valueString;
-        
-        return [self notifyOperation:@"bt_le_characteristic_value_changed" extraParams:params];
+
+        [self notifyOperation:@"bt_le_characteristic_value_changed" extraParams:params];
+        return;
     }
 
     if (error) [self completeOp:queuedCharacteristic.opId error:error];
@@ -3015,20 +3121,21 @@ namespace
         // The GATT calls, advertise start and add_service hand the core's op
         // id to the transport, which reports it on the completion.
         Error le_services_discover(std::uint64_t op,std::uint64_t c,std::string& m) override { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return [transport_ bt_le_peripheral_get_services:gmbt_ns(id) opId:@(op) message:m]; }
-        Error le_characteristics_discover(std::uint64_t op,std::uint64_t c,const std::string&s,std::string&m) override { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return [transport_ bt_le_service_get_characteristics:gmbt_ns(id) service:gmbt_ns(s) opId:@(op) message:m]; }
-        Error le_descriptors_discover(std::uint64_t op,std::uint64_t c,const std::string&s,const std::string&ch,std::string&m) override { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return [transport_ bt_le_characteristic_get_descriptors:gmbt_ns(id) service:gmbt_ns(s) characteristic:gmbt_ns(ch) opId:@(op) message:m]; }
-        Error le_characteristic_read(std::uint64_t op,std::uint64_t c,const std::string&s,const std::string&ch,std::string&m) override { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return [transport_ bt_le_characteristic_read:gmbt_ns(id) service:gmbt_ns(s) characteristic:gmbt_ns(ch) opId:@(op) message:m]; }
-        Error le_characteristic_write(std::uint64_t op,std::uint64_t c,const std::string&s,const std::string&ch,const std::string&v,bool with_response,std::string&m) override
+        // Attributes go by the instances the transport's discoveries reported.
+        Error le_characteristics_discover(std::uint64_t op,std::uint64_t c,const LeAttributeRef&a,std::string&m) override { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return [transport_ bt_le_service_get_characteristics:gmbt_ns(id) service:a.service opId:@(op) message:m]; }
+        Error le_descriptors_discover(std::uint64_t op,std::uint64_t c,const LeAttributeRef&a,std::string&m) override { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return [transport_ bt_le_characteristic_get_descriptors:gmbt_ns(id) service:a.service characteristic:a.characteristic opId:@(op) message:m]; }
+        Error le_characteristic_read(std::uint64_t op,std::uint64_t c,const LeAttributeRef&a,std::string&m) override { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return [transport_ bt_le_characteristic_read:gmbt_ns(id) service:a.service characteristic:a.characteristic opId:@(op) message:m]; }
+        Error le_characteristic_write(std::uint64_t op,std::uint64_t c,const LeAttributeRef&a,const std::string&v,bool with_response,std::string&m) override
         {
             auto id=id_for_connection(c); if(id.empty())return invalid_connection(m);
             if (with_response)
-                return [transport_ bt_le_characteristic_write_request:gmbt_ns(id) service:gmbt_ns(s) characteristic:gmbt_ns(ch) value:gmbt_ns(v) opId:@(op) message:m];
-            return [transport_ bt_le_characteristic_write_command:gmbt_ns(id) service:gmbt_ns(s) characteristic:gmbt_ns(ch) value:gmbt_ns(v) opId:@(op) message:m];
+                return [transport_ bt_le_characteristic_write_request:gmbt_ns(id) service:a.service characteristic:a.characteristic value:gmbt_ns(v) opId:@(op) message:m];
+            return [transport_ bt_le_characteristic_write_command:gmbt_ns(id) service:a.service characteristic:a.characteristic value:gmbt_ns(v) opId:@(op) message:m];
         }
-        Error le_characteristic_subscribe(std::uint64_t op,std::uint64_t c,const std::string&s,const std::string&ch,std::int32_t mode,std::string&m) override
-        { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return [transport_ bt_le_characteristic_subscribe:gmbt_ns(id) service:gmbt_ns(s) characteristic:gmbt_ns(ch) mode:mode opId:@(op) message:m]; }
-        Error le_descriptor_read(std::uint64_t op,std::uint64_t c,const std::string&s,const std::string&ch,const std::string&d,std::string&m) override { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return [transport_ bt_le_descriptor_read:gmbt_ns(id) service:gmbt_ns(s) characteristic:gmbt_ns(ch) descriptor:gmbt_ns(d) opId:@(op) message:m]; }
-        Error le_descriptor_write(std::uint64_t op,std::uint64_t c,const std::string&s,const std::string&ch,const std::string&d,const std::string&v,std::string&m) override { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return [transport_ bt_le_descriptor_write:gmbt_ns(id) service:gmbt_ns(s) characteristic:gmbt_ns(ch) descriptor:gmbt_ns(d) value:gmbt_ns(v) opId:@(op) message:m]; }
+        Error le_characteristic_subscribe(std::uint64_t op,std::uint64_t c,const LeAttributeRef&a,std::int32_t mode,std::string&m) override
+        { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return [transport_ bt_le_characteristic_subscribe:gmbt_ns(id) service:a.service characteristic:a.characteristic mode:mode opId:@(op) message:m]; }
+        Error le_descriptor_read(std::uint64_t op,std::uint64_t c,const LeAttributeRef&a,std::string&m) override { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return [transport_ bt_le_descriptor_read:gmbt_ns(id) service:a.service characteristic:a.characteristic descriptor:a.descriptor opId:@(op) message:m]; }
+        Error le_descriptor_write(std::uint64_t op,std::uint64_t c,const LeAttributeRef&a,const std::string&v,std::string&m) override { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return [transport_ bt_le_descriptor_write:gmbt_ns(id) service:a.service characteristic:a.characteristic descriptor:a.descriptor value:gmbt_ns(v) opId:@(op) message:m]; }
 
         // CoreBluetooth advertises the local name and service UUIDs only, and
         // always connectable: anything else asked for is NotSupported here,
@@ -3658,7 +3765,7 @@ namespace
         {
             DiscoveredDevice d;
             d.transport = Transport::LowEnergy;
-            d.id = "apple:ble:" + gmbt_string([peripheral.identifier.UUIDString uppercaseString]);
+            d.id = "apple:ble:" + gmbt_string(gmbt_peripheral_key(peripheral));
             d.name = gmbt_string(peripheral.name);
             d.address_available = false;
             d.connectable = true;

@@ -89,7 +89,7 @@ GMEXPORT double __EXT_NATIVE__bluetooth_le_characteristic_write(char* __arg_buff
 GMEXPORT double __EXT_NATIVE__bluetooth_le_characteristic_subscribe(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_le_descriptor_read(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_le_descriptor_write(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length);
-GMEXPORT double __EXT_NATIVE__bluetooth_le_value_copy(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length);
+GMEXPORT double __EXT_NATIVE__bluetooth_le_value_copy(char* __arg_buffer, double __arg_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_le_value_release(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_le_advertise_start(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_le_advertise_stop(char* __ret_buffer, double __ret_buffer_length);

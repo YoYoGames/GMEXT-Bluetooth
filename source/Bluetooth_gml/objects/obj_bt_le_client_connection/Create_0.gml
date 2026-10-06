@@ -261,7 +261,7 @@ on_value_changed = function(_characteristic, _connection, _value, _size)
     var _buf = buffer_create(max(_size, 1), buffer_fixed, 1);
     var _copy = bluetooth_le_value_copy(_value, _buf, 0);
 
-    if (_copy == BluetoothError.Ok && _size > 0)
+    if (_copy > 0)
     {
         var _text = ble_bytes_to_string(_buf, _size);
         log_msg("notification: " + _text);

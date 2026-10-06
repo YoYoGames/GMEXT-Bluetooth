@@ -617,7 +617,12 @@ function bluetooth_classic_send(
     size: uint32
 ): gmval;
 
-/// Copies available RFCOMM bytes into a GameMaker buffer.
+/// Copies up to max_size available RFCOMM bytes into out_data at offset and returns
+/// how many it copied (0 when none are waiting), or -1 on error with the reason in
+/// bluetooth_last_error_code() / bluetooth_last_error_message(). The bytes are
+/// written straight into the buffer's memory, so its used size does not change: use
+/// the returned count, and buffer_set_used_size() before buffer_copy() or
+/// buffer_save().
 [global, bind = typed_gml]
 function bluetooth_classic_receive(
     [type_hint=`uint64`] connection: gmval,
@@ -928,15 +933,20 @@ function bluetooth_le_descriptor_write(
 // =============================================================================
 
 /// Copies a value delivered by a read or a notification callback into out_data at
-/// offset - all size bytes the callback reported - and frees the value. A buffer
-/// too small for it is InvalidArgument and keeps the value. At most 256 values are
-/// held; past that the oldest is dropped, and shutdown frees them all.
-[global, bind = typed_gml, type_hint=`BluetoothError`]
+/// offset - all size bytes the callback reported - frees the value, and returns how
+/// many bytes it copied. -1 on error, with the reason in bluetooth_last_error_code()
+/// / bluetooth_last_error_message(): InvalidHandle for an unknown or already copied
+/// value, InvalidArgument for a buffer too small for it, which keeps the value. The
+/// bytes are written straight into the buffer's memory, so its used size does not
+/// change: use the returned count, and buffer_set_used_size() before buffer_copy()
+/// or buffer_save(). At most 256 values are held; past that the oldest is dropped,
+/// and shutdown frees them all.
+[global, bind = typed_gml]
 function bluetooth_le_value_copy(
     [type_hint=`uint64`] value: gmval,
     [type_hint=buffer] out_data: gmval,
     offset: uint32
-): gmval;
+): int32;
 
 /// Frees a value without copying it.
 [global, bind = typed_gml, type_hint=`BluetoothError`]
@@ -1015,7 +1025,12 @@ function bluetooth_le_server_respond_write(
     [type_hint=`BluetoothAttError`] error_code: gmval
 ): gmval;
 
-/// Copies the bytes a remote central wrote in a pending write request into out_data.
+/// Copies up to max_size bytes a remote central wrote in a pending write request into
+/// out_data at offset and returns how many it copied, or -1 on error with the reason
+/// in bluetooth_last_error_code() / bluetooth_last_error_message(). The bytes are
+/// written straight into the buffer's memory, so its used size does not change: use
+/// the returned count, and buffer_set_used_size() before buffer_copy() or
+/// buffer_save().
 [global, bind = typed_gml]
 function bluetooth_le_server_write_request_get_value(
     request_id: int32,

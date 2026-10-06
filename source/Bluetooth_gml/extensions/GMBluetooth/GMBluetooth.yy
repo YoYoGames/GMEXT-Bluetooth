@@ -1485,14 +1485,12 @@
         {
           "$GMExtensionFunction": "",
           "%Name": "__bluetooth_le_value_copy",
-          "argCount": 4,
+          "argCount": 2,
           "args": [
-            1,
-            2,
             1,
             2
           ],
-          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
+          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@returns {Real}",
           "externalName": "__EXT_NATIVE__bluetooth_le_value_copy",
           "help": "",
           "hidden": true,

@@ -558,7 +558,7 @@ namespace gm::wire::details
 - (gm_enums::BluetoothError)bluetooth_le_characteristic_subscribe:(std::uint64_t)characteristic mode:(gm_enums::BluetoothLeSubscribeMode)mode callback:(gm::wire::GMFunction)callback;
 - (gm_enums::BluetoothError)bluetooth_le_descriptor_read:(std::uint64_t)descriptor callback:(gm::wire::GMFunction)callback;
 - (gm_enums::BluetoothError)bluetooth_le_descriptor_write:(std::uint64_t)descriptor data:(gm::wire::GMBuffer)data offset:(std::uint32_t)offset size:(std::uint32_t)size callback:(gm::wire::GMFunction)callback;
-- (gm_enums::BluetoothError)bluetooth_le_value_copy:(std::uint64_t)value out_data:(gm::wire::GMBuffer)out_data offset:(std::uint32_t)offset;
+- (std::int32_t)bluetooth_le_value_copy:(std::uint64_t)value out_data:(gm::wire::GMBuffer)out_data offset:(std::uint32_t)offset;
 - (gm_enums::BluetoothError)bluetooth_le_value_release:(std::uint64_t)value;
 - (gm_enums::BluetoothError)bluetooth_le_advertise_start:(const gm_structs::BluetoothLeAdvertiseSettings&)settings data:(const gm_structs::BluetoothLeAdvertiseData&)data callback:(gm::wire::GMFunction)callback;
 - (gm_enums::BluetoothError)bluetooth_le_advertise_stop;
@@ -678,7 +678,7 @@ namespace gm::wire::details
 - (double)__EXT_NATIVE__bluetooth_le_characteristic_subscribe:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_le_descriptor_read:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_le_descriptor_write:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
-- (double)__EXT_NATIVE__bluetooth_le_value_copy:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
+- (double)__EXT_NATIVE__bluetooth_le_value_copy:(char*)__arg_buffer arg1:(double)__arg_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_le_value_release:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_le_advertise_start:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_le_advertise_stop:(char*)__ret_buffer arg1:(double)__ret_buffer_length;

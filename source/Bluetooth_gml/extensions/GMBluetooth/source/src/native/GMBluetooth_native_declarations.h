@@ -113,7 +113,7 @@ gm_enums::BluetoothError bluetooth_le_characteristic_write(std::uint64_t charact
 gm_enums::BluetoothError bluetooth_le_characteristic_subscribe(std::uint64_t characteristic, gm_enums::BluetoothLeSubscribeMode mode, const gm::wire::GMFunction& callback);
 gm_enums::BluetoothError bluetooth_le_descriptor_read(std::uint64_t descriptor, const gm::wire::GMFunction& callback);
 gm_enums::BluetoothError bluetooth_le_descriptor_write(std::uint64_t descriptor, gm::wire::GMBuffer data, std::uint32_t offset, std::uint32_t size, const gm::wire::GMFunction& callback);
-gm_enums::BluetoothError bluetooth_le_value_copy(std::uint64_t value, gm::wire::GMBuffer out_data, std::uint32_t offset);
+std::int32_t bluetooth_le_value_copy(std::uint64_t value, gm::wire::GMBuffer out_data, std::uint32_t offset);
 gm_enums::BluetoothError bluetooth_le_value_release(std::uint64_t value);
 gm_enums::BluetoothError bluetooth_le_advertise_start(const gm_structs::BluetoothLeAdvertiseSettings& settings, const gm_structs::BluetoothLeAdvertiseData& data, const gm::wire::GMFunction& callback);
 gm_enums::BluetoothError bluetooth_le_advertise_stop();

@@ -2713,7 +2713,7 @@ function bluetooth_le_descriptor_write(_descriptor, _data, _offset, _size, _call
  * @param {Real} _value
  * @param {Id.Buffer} _out_data
  * @param {Real} _offset
- * @returns {Enum.BluetoothError}
+ * @returns {Real}
  */
 function bluetooth_le_value_copy(_value, _out_data, _offset)
 {
@@ -2734,13 +2734,9 @@ function bluetooth_le_value_copy(_value, _out_data, _offset)
     if (!is_numeric(_offset)) show_error($"{_GMFUNCTION_} :: _offset expected number", true);
     buffer_write(__args_buffer__, buffer_u32, _offset);
 
-    var __ret_buffer__ = __ext_core_get_ret_buffer();
+    var __return_value__ = __bluetooth_le_value_copy(buffer_get_address(__args_buffer__), buffer_tell(__args_buffer__));
 
-    var __return_value__ = __bluetooth_le_value_copy(buffer_get_address(__args_buffer__), buffer_tell(__args_buffer__), buffer_get_address(__ret_buffer__), buffer_get_size(__ret_buffer__));
-
-    var __result__ = undefined;
-    __result__ = buffer_read(__ret_buffer__, buffer_s32);
-    return __result__;
+    return __return_value__;
 }
 
 /**
