@@ -13,6 +13,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 using namespace gm::wire;
@@ -68,6 +69,11 @@ namespace
     GMFunction g_callback_le_server_read_request;
     GMFunction g_callback_le_server_write_request;
 
+    // Held across reading a state and queueing it, by the registration's initial
+    // delivery and by every state event, so GML never ends on a stale state
+    // (R1-159). The backend updates its state before it pushes the event.
+    std::mutex g_state_dispatch_mutex;
+
     // Connect callbacks are one-shot and tied to a specific connection handle,
     // not a persistently-registered callback like the others.
     std::mutex g_pending_connect_mutex;
@@ -113,12 +119,16 @@ namespace
     class DeviceManager
     {
     public:
-        std::uint64_t upsert_device(const DiscoveredDevice& device)
+        // created says whether this call added the device: device_found fires
+        // once per device, not once per advertisement (R1-43).
+        std::uint64_t upsert_device(const DiscoveredDevice& device, bool* created = nullptr)
         {
             std::scoped_lock lock(mutex_);
             if (const auto it = by_id_.find(device.id); it != by_id_.end())
             {
                 merge(devices_.at(it->second), device);
+                if (created)
+                    *created = false;
                 return it->second;
             }
 
@@ -126,6 +136,8 @@ namespace
             devices_.emplace(handle, device);
             by_id_.emplace(device.id, handle);
             order_.push_back(handle);
+            if (created)
+                *created = true;
             return handle;
         }
 
@@ -319,6 +331,18 @@ namespace
             return it != connections_.end() ? it->second : 0;
         }
 
+        // A device has at most one client connection, connecting or connected.
+        bool has_device(std::uint64_t device) const
+        {
+            std::scoped_lock lock(mutex_);
+            for (const auto& [handle, connected_device] : connections_)
+            {
+                if (connected_device == device)
+                    return true;
+            }
+            return false;
+        }
+
     private:
         mutable std::mutex mutex_;
         std::unordered_map<std::uint64_t, std::uint64_t> connections_;
@@ -380,6 +404,63 @@ namespace
         g_last_error = Error::InvalidArgument;
         g_last_error_message = "Invalid UUID: " + std::string(uuid);
         return false;
+    }
+
+    // The radio and permission pre-flight every call that starts radio work
+    // makes, so the same condition fails the same way, synchronously, on every
+    // platform (R1-66, R1-68). Unknown and Resetting pass: a backend may still
+    // be waiting for its first state, and starts the work once it has one.
+    // Assumes g_backend.
+    bool check_radio()
+    {
+        if (g_backend->permission_status() == PermissionStatus::Denied)
+        {
+            g_last_error = Error::PermissionDenied;
+            g_last_error_message = "Bluetooth permission was denied";
+            return false;
+        }
+
+        // BluetoothState raw values from spec.gmidl.
+        switch (g_backend->current_bluetooth_state())
+        {
+            case 2: // Unsupported
+                g_last_error = Error::NotSupported;
+                g_last_error_message = "Bluetooth is not supported on this device";
+                return false;
+            case 3: // Unauthorized
+                g_last_error = Error::PermissionDenied;
+                g_last_error_message = "Bluetooth permission has not been granted";
+                return false;
+            case 4: // PoweredOff
+                g_last_error = Error::BluetoothDisabled;
+                g_last_error_message = "Bluetooth is turned off";
+                return false;
+            default:
+                return true;
+        }
+    }
+
+    // The device pre-flight of the connect and pair calls: InvalidHandle for a
+    // handle that names no device, InvalidArgument for a device of the other
+    // transport (R1-67). Transport::Unknown is let through: the backend decides.
+    std::optional<DiscoveredDevice> check_device(std::uint64_t device, Transport transport)
+    {
+        auto dev = g_device_manager.get_device(device);
+        if (!dev)
+        {
+            g_last_error = Error::InvalidHandle;
+            g_last_error_message = "Invalid device handle";
+            return std::nullopt;
+        }
+        if (transport != Transport::Unknown && dev->transport != Transport::Unknown && dev->transport != transport)
+        {
+            g_last_error = Error::InvalidArgument;
+            g_last_error_message = transport == Transport::LowEnergy
+                ? "The device is not a Bluetooth LE device"
+                : "The device is not a Bluetooth Classic device";
+            return std::nullopt;
+        }
+        return dev;
     }
 
     // Parent-scoped handle caches for GATT services/characteristics/descriptors.
@@ -825,6 +906,31 @@ namespace
     // callback. An id
     // the registry no longer holds - its op was purged on disconnect or
     // shutdown - is logged and dropped.
+    // The service UUIDs the LE server holds or is adding, so the same condition
+    // fails the same way everywhere: a second add of one is Busy (R1-223). An
+    // add that fails gives its UUID back; clear, stop and shutdown empty it.
+    std::mutex g_le_server_services_mutex;
+    std::unordered_set<std::string> g_le_server_services;
+    std::unordered_map<std::uint64_t, std::string> g_le_server_service_ops;
+
+    void forget_le_server_services()
+    {
+        std::scoped_lock lock(g_le_server_services_mutex);
+        g_le_server_services.clear();
+        g_le_server_service_ops.clear();
+    }
+
+    void settle_le_server_service_op(std::uint64_t op_id, bool added)
+    {
+        std::scoped_lock lock(g_le_server_services_mutex);
+        const auto it = g_le_server_service_ops.find(op_id);
+        if (it == g_le_server_service_ops.end())
+            return;
+        if (!added)
+            g_le_server_services.erase(it->second);
+        g_le_server_service_ops.erase(it);
+    }
+
     void complete_le_op(const BackendEvent& event)
     {
         const auto op = g_le_ops.take(event.op_id);
@@ -835,6 +941,9 @@ namespace
             g_dropped_events++;
             return;
         }
+
+        if (op->kind == LeOpKind::ServerAddService)
+            settle_le_server_service_op(event.op_id, event.error == Error::Ok);
 
         std::uint64_t value = 0;
         std::size_t size = 0;
@@ -848,8 +957,10 @@ namespace
                         g_service_cache.find_or_insert(op->context, attribute.uuid);
                     break;
                 case LeOpKind::CharacteristicsDiscover:
+                    // The GATT core properties byte: the bits above it mean
+                    // something different on each platform (R1-153).
                     for (const auto& attribute : result.attributes)
-                        g_characteristic_cache.find_or_insert(op->context, attribute.uuid, attribute.properties);
+                        g_characteristic_cache.find_or_insert(op->context, attribute.uuid, attribute.properties & 0xFF);
                     break;
                 case LeOpKind::DescriptorsDiscover:
                     for (const auto& attribute : result.attributes)
@@ -1197,25 +1308,35 @@ namespace
     }
 
     // The device a server event's central is, from the "device" object Apple
-    // nests as a string or the "address" Windows sends; 0 when neither is there.
+    // nests as a string or the fields Windows sends at the root: "device_id" in
+    // the backend's own id scheme, so the central and a scan result for the
+    // same peer are one device, and "address" only where the platform has one.
+    // Added without device_found (R1-155); 0 when the event names no central.
     std::uint64_t le_server_event_device(const json::Value& root)
     {
+        std::string device_id;
         std::string address;
         if (auto nested = le_event_nested(root, "device"); nested && nested->is_object())
         {
+            if (const auto* field = nested->find("device_id"); field && field->is_string())
+                device_id = field->string_value;
             if (const auto* field = nested->find("address"); field && field->is_string())
                 address = field->string_value;
         }
+        if (device_id.empty())
+            device_id = le_event_string(root, "device_id");
         if (address.empty())
             address = le_event_string(root, "address");
-        if (address.empty())
+        if (device_id.empty())
+            device_id = address;
+        if (device_id.empty())
             return 0;
 
         DiscoveredDevice d;
         d.transport = Transport::LowEnergy;
-        d.id = address;
+        d.id = device_id;
         d.address = address;
-        d.address_available = true;
+        d.address_available = !address.empty();
         return g_device_manager.upsert_device(d);
     }
 
@@ -1313,6 +1434,7 @@ namespace
             const auto* state_field = root.find("state");
             const std::int32_t state = state_field ? state_field->as_int(0) : 0;
 
+            std::scoped_lock dispatch_lock(g_state_dispatch_mutex);
             GMFunction callback;
             { std::scoped_lock lock(g_callback_mutex); callback = g_callback_state_changed; }
             if (callback)
@@ -1330,6 +1452,12 @@ namespace
             {
                 g_dropped_events++;
             }
+        }
+        else if (type == "bluetooth_le_server_services_reset")
+        {
+            // The platform dropped the server's services (Apple, on a power-off)
+            // and the game adds them again, so none of them is a duplicate now.
+            forget_le_server_services();
         }
         else if (type == "bluetooth_le_peripheral_open")
         {
@@ -1616,8 +1744,12 @@ namespace
     {
         CoreHooks hooks;
         hooks.upsert_device = [](const DiscoveredDevice& device) {
-            const std::uint64_t handle = g_device_manager.upsert_device(device);
-            GMBT_LOG("device upserted: handle=%llu transport=%d id='%s' name='%s' rssi=%d (available=%d) connectable=%d",
+            bool created = false;
+            const std::uint64_t handle = g_device_manager.upsert_device(device, &created);
+            if (!created)
+                return handle;
+
+            GMBT_LOG("device added: handle=%llu transport=%d id='%s' name='%s' rssi=%d (available=%d) connectable=%d",
                 static_cast<unsigned long long>(handle),
                 static_cast<int>(device.transport),
                 device.id.c_str(),
@@ -1670,6 +1802,12 @@ namespace
             // not one of the persistently-registered callbacks below.
             if (event.type == BackendEventType::ClassicConnected)
             {
+                // The core knows which device the handle was made for; a backend
+                // that leaves the event's device 0 still reports it (R1-75).
+                const std::uint64_t device = event.device
+                    ? event.device
+                    : g_classic_connection_manager.get_device(event.connection);
+
                 // A connect that failed leaves nothing behind its handle.
                 if (event.error != Error::Ok)
                     g_classic_connection_manager.remove_connection(event.connection);
@@ -1694,7 +1832,7 @@ namespace
                             static_cast<double>(event.error),
                             event.message,
                             static_cast<double>(event.connection),
-                            static_cast<double>(event.device)
+                            static_cast<double>(device)
                         );
                     }
                     catch (const std::exception& e)
@@ -1757,6 +1895,16 @@ namespace
                 return;
             }
 
+            // A handle bluetooth_classic_disconnect already retired has had its
+            // end: the backend's late report of that close fires nothing, the
+            // same as for LE (R1-77).
+            if ((event.type == BackendEventType::ClassicDisconnected || event.type == BackendEventType::ClassicDataAvailable)
+                && !g_classic_connection_manager.is_valid(event.connection))
+            {
+                g_dropped_events++;
+                return;
+            }
+
             // Retired by the game-thread calls once the backend holds no unread
             // bytes for it; nothing is asked of the backend from its own thread.
             if (event.type == BackendEventType::ClassicDisconnected)
@@ -1786,7 +1934,7 @@ namespace
             }
 
             // Dispatch callback if found, using the signature spec.gmidl documents
-            // for this event type — these differ per callback, they are not
+            // for this event type - these differ per callback, they are not
             // interchangeable.
             if (callback)
             {
@@ -1947,6 +2095,7 @@ void bluetooth_shutdown()
         std::scoped_lock lock(g_server_centrals_mutex);
         g_server_centrals.clear();
     }
+    forget_le_server_services();
     g_values.clear();
     g_descriptor_cache.clear();
     g_characteristic_cache.clear();
@@ -1994,6 +2143,24 @@ bool bluetooth_classic_is_supported()
 bool bluetooth_classic_server_is_supported()
 {
     return g_backend && g_backend->supports_classic_server();
+}
+
+bool bluetooth_feature_is_supported(BluetoothFeature feature)
+{
+    if (!g_backend)
+        return false;
+
+    // The five with their own query answer the same here; the backend knows
+    // the rest (R1-79).
+    switch (feature)
+    {
+        case BluetoothFeature::LeCentral: return g_backend->supports_ble();
+        case BluetoothFeature::LeAdvertise: return g_backend->supports_le_advertise();
+        case BluetoothFeature::LeServer: return g_backend->supports_le_server();
+        case BluetoothFeature::Classic: return g_backend->supports_classic();
+        case BluetoothFeature::ClassicServer: return g_backend->supports_classic_server();
+        default: return g_backend->feature_supported(static_cast<std::int32_t>(feature));
+    }
 }
 
 BluetoothPermissionStatus bluetooth_permission_get_status()
@@ -2059,6 +2226,9 @@ BluetoothError bluetooth_le_scan_start(bool active)
         return to_gm(Error::NotInitialized);
     }
 
+    if (!check_radio())
+        return to_gm(g_last_error);
+
     std::string message;
     const Error error = g_backend->le_scan_start(active, message);
     set_last_error(error, message);
@@ -2114,6 +2284,9 @@ BluetoothError bluetooth_classic_scan_start()
         g_last_error_message = "Bluetooth backend is not initialized";
         return to_gm(Error::NotInitialized);
     }
+
+    if (!check_radio())
+        return to_gm(g_last_error);
 
     std::string message;
     const Error error = g_backend->classic_scan_start(message);
@@ -2219,15 +2392,8 @@ std::uint64_t bluetooth_classic_connect(std::uint64_t device, std::string_view s
         return 0;
     }
 
-    const auto dev = g_device_manager.get_device(device);
-    if (!dev)
-    {
-        g_last_error = Error::InvalidArgument;
-        g_last_error_message = "Invalid device handle";
-        return 0;
-    }
-
-    if (!check_uuid(service_uuid))
+    const auto dev = check_device(device, Transport::Classic);
+    if (!dev || !check_uuid(service_uuid) || !check_radio())
         return 0;
 
     const std::uint64_t connection = g_classic_connection_manager.create_connection(device);
@@ -2275,13 +2441,9 @@ BluetoothError bluetooth_pair(std::uint64_t device, const gm::wire::GMFunction& 
         return to_gm(Error::NotInitialized);
     }
 
-    const auto dev = g_device_manager.get_device(device);
-    if (!dev)
-    {
-        g_last_error = Error::InvalidArgument;
-        g_last_error_message = "Invalid device handle";
-        return to_gm(Error::InvalidArgument);
-    }
+    const auto dev = check_device(device, Transport::Unknown);
+    if (!dev || !check_radio())
+        return to_gm(g_last_error);
 
     // Registered before calling the backend: pairing runs asynchronously and may
     // push its DevicePaired completion event before this call even returns.
@@ -2324,6 +2486,13 @@ BluetoothError bluetooth_classic_disconnect(std::uint64_t connection)
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
         return to_gm(Error::NotInitialized);
+    }
+
+    if (!g_classic_connection_manager.is_valid(connection))
+    {
+        g_last_error = Error::InvalidHandle;
+        g_last_error_message = "Invalid Bluetooth Classic connection handle";
+        return to_gm(Error::InvalidHandle);
     }
 
     const bool remote_closed = g_classic_connection_manager.is_closed(connection);
@@ -2548,6 +2717,7 @@ bool bluetooth_set_callback_state_changed(const gm::wire::GMFunction& callback)
     // registration. GMFunction::call queues safely into GameMaker's dispatcher.
     if (callback)
     {
+        std::scoped_lock dispatch_lock(g_state_dispatch_mutex);
         const std::int32_t state = g_backend
             ? g_backend->current_bluetooth_state()
             : 0; // BluetoothState.Unknown
@@ -2663,11 +2833,15 @@ std::uint64_t bluetooth_le_connect(std::uint64_t device, const gm::wire::GMFunct
         return 0;
     }
 
-    const auto dev = g_device_manager.get_device(device);
-    if (!dev)
+    const auto dev = check_device(device, Transport::LowEnergy);
+    if (!dev || !check_radio())
+        return 0;
+
+    // One client connection per device, connecting or connected (R1-197).
+    if (g_le_connection_manager.has_device(device))
     {
-        g_last_error = Error::InvalidArgument;
-        g_last_error_message = "Invalid device handle";
+        g_last_error = Error::Busy;
+        g_last_error_message = "The device already has a connection";
         return 0;
     }
 
@@ -2705,6 +2879,16 @@ BluetoothError bluetooth_le_disconnect(std::uint64_t connection)
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
         return to_gm(Error::NotInitialized);
+    }
+
+    // A handle already retired - by an earlier disconnect, a drop or a failed
+    // open - may share its peripheral with a newer link; the backend is never
+    // asked to close it (R1-225). A connect still in flight is a valid handle.
+    if (!g_le_connection_manager.is_valid(connection))
+    {
+        g_last_error = Error::InvalidHandle;
+        g_last_error_message = "Invalid BLE connection handle";
+        return to_gm(Error::InvalidHandle);
     }
 
     std::string message;
@@ -3197,6 +3381,18 @@ BluetoothError bluetooth_le_advertise_start(const BluetoothLeAdvertiseSettings& 
         advertise_data.manufacturer_data.push_back({ static_cast<std::uint16_t>(entry.company_id), entry.data });
     }
 
+    if (!check_radio())
+        return to_gm(g_last_error);
+
+    // A start or a running advertisement is stopped first: the new settings,
+    // data and callback would otherwise be dropped (R1-72).
+    if (g_backend->le_advertise_is_running())
+    {
+        g_last_error = Error::Busy;
+        g_last_error_message = "Bluetooth LE advertising is already running; stop it first";
+        return to_gm(Error::Busy);
+    }
+
     const auto op_id = g_le_ops.add(LeOpKind::AdvertiseStart, callback, 0, 0);
 
     std::string message;
@@ -3240,6 +3436,13 @@ BluetoothError bluetooth_le_server_start()
         return to_gm(Error::NotInitialized);
     }
 
+    // Starting a running server starts nothing new (R1-72, R1-223).
+    if (g_backend->le_server_is_running())
+        return to_gm(Error::Ok);
+
+    if (!check_radio())
+        return to_gm(g_last_error);
+
     std::string message;
     const Error error = g_backend->le_server_start(message);
     set_last_error(error, message);
@@ -3255,6 +3458,10 @@ BluetoothError bluetooth_le_server_stop()
         return to_gm(Error::NotInitialized);
     }
 
+    // Stopping a stopped server is Ok and fires nothing.
+    if (!g_backend->le_server_is_running())
+        return to_gm(Error::Ok);
+
     // Answered while the backend still holds them; it forgets them on stop.
     answer_pending_le_server_requests();
 
@@ -3262,7 +3469,10 @@ BluetoothError bluetooth_le_server_stop()
     const Error error = g_backend->le_server_stop(message);
     set_last_error(error, message);
     if (error == Error::Ok)
+    {
         retire_server_centrals();
+        forget_le_server_services();
+    }
     return to_gm(error);
 }
 
@@ -3286,6 +3496,13 @@ BluetoothError bluetooth_le_server_add_service(const BluetoothLeServiceDefinitio
     {
         if (!check_uuid(characteristic.uuid))
             return to_gm(Error::InvalidArgument);
+        if ((characteristic.properties & ~0xFF) != 0)
+        {
+            g_last_error = Error::InvalidArgument;
+            g_last_error_message = "Characteristic " + characteristic.uuid + ": properties " +
+                std::to_string(characteristic.properties) + " has bits that are not BluetoothLeCharacteristicProperty flags";
+            return to_gm(Error::InvalidArgument);
+        }
         if ((characteristic.permissions & ~kPermissionAll) != 0)
         {
             g_last_error = Error::InvalidArgument;
@@ -3308,7 +3525,27 @@ BluetoothError bluetooth_le_server_add_service(const BluetoothLeServiceDefinitio
         }
     }
 
+    // The server pre-flight every platform shares (R1-223).
+    if (!g_backend->le_server_is_running())
+    {
+        g_last_error = Error::OperationFailed;
+        g_last_error_message = "The LE server is not running; call bluetooth_le_server_start first";
+        return to_gm(Error::OperationFailed);
+    }
+
+    const std::string service_uuid = canonical_uuid(service.uuid);
     const auto op_id = g_le_ops.add(LeOpKind::ServerAddService, callback, 0, 0);
+    {
+        std::scoped_lock lock(g_le_server_services_mutex);
+        if (!g_le_server_services.insert(service_uuid).second)
+        {
+            g_le_ops.erase(op_id);
+            g_last_error = Error::Busy;
+            g_last_error_message = "Service " + service_uuid + " has already been added";
+            return to_gm(Error::Busy);
+        }
+        g_le_server_service_ops[op_id] = service_uuid;
+    }
 
     const std::string service_json = serialize_le_service_definition(service);
     std::string message;
@@ -3316,7 +3553,10 @@ BluetoothError bluetooth_le_server_add_service(const BluetoothLeServiceDefinitio
     set_last_error(error, message);
 
     if (error != Error::Ok)
+    {
+        settle_le_server_service_op(op_id, false);
         g_le_ops.erase(op_id);
+    }
 
     return to_gm(error);
 }
@@ -3330,12 +3570,18 @@ BluetoothError bluetooth_le_server_clear_services()
         return to_gm(Error::NotInitialized);
     }
 
+    // A stopped server holds no services: clearing it is Ok (R1-223).
+    if (!g_backend->le_server_is_running())
+        return to_gm(Error::Ok);
+
     // The services the requests name are going away.
     answer_pending_le_server_requests();
 
     std::string message;
     const Error error = g_backend->le_server_clear_services(message);
     set_last_error(error, message);
+    if (error == Error::Ok)
+        forget_le_server_services();
     return to_gm(error);
 }
 

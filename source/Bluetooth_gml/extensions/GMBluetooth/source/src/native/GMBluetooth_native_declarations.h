@@ -19,6 +19,7 @@ namespace gm_enums
     enum class BluetoothLeSubscribeMode : std::int32_t;
     enum class BluetoothLeWriteType : std::int32_t;
     enum class BluetoothAttError : std::int32_t;
+    enum class BluetoothFeature : std::int32_t;
 }
 
 namespace gm_structs
@@ -38,6 +39,7 @@ bool bluetooth_le_advertise_is_supported();
 bool bluetooth_le_server_is_supported();
 bool bluetooth_classic_is_supported();
 bool bluetooth_classic_server_is_supported();
+bool bluetooth_feature_is_supported(gm_enums::BluetoothFeature feature);
 gm_enums::BluetoothPermissionStatus bluetooth_permission_get_status();
 gm_enums::BluetoothError bluetooth_permission_request(const gm::wire::GMFunction& callback);
 gm_enums::BluetoothError bluetooth_le_scan_start(bool active);

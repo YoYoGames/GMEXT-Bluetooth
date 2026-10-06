@@ -31,7 +31,7 @@ public enum BluetoothLeAdvertiseTxPower
             case 3:
                 return BluetoothLeAdvertiseTxPower.High;
             default:
-                throw new IllegalArgumentException("Unknown BluetoothLeAdvertiseTxPower value: " + v);
+                return null;
         }
     }
 }

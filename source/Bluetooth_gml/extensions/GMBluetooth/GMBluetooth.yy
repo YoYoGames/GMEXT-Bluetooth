@@ -3,7 +3,7 @@
   "%Name": "GMBluetooth",
   "androidactivityinject": null,
   "androidclassname": "GMBluetooth",
-  "androidcodeinjection": "\r\n\u003CYYAndroidManifestManifestInject\u003E\r\n    \u003C!-- Android 11 and below: the legacy Bluetooth permissions, and the location a scan needed then. --\u003E\r\n    \u003Cuses-permission android:name=\u0022android.permission.BLUETOOTH\u0022 android:maxSdkVersion=\u002230\u0022 /\u003E\r\n    \u003Cuses-permission android:name=\u0022android.permission.BLUETOOTH_ADMIN\u0022 android:maxSdkVersion=\u002230\u0022 /\u003E\r\n    \u003Cuses-permission android:name=\u0022android.permission.ACCESS_FINE_LOCATION\u0022 android:maxSdkVersion=\u002230\u0022 /\u003E\r\n    \u003Cuses-permission android:name=\u0022android.permission.ACCESS_COARSE_LOCATION\u0022 android:maxSdkVersion=\u002230\u0022 /\u003E\r\n    \u003C!-- Android 12\u002B: scans never derive location, so no location permission is needed. --\u003E\r\n    \u003Cuses-permission android:name=\u0022android.permission.BLUETOOTH_SCAN\u0022 android:usesPermissionFlags=\u0022neverForLocation\u0022 /\u003E\r\n    \u003Cuses-permission android:name=\u0022android.permission.BLUETOOTH_CONNECT\u0022 /\u003E\r\n    \u003Cuses-permission android:name=\u0022android.permission.BLUETOOTH_ADVERTISE\u0022 /\u003E\r\n\u003C/YYAndroidManifestManifestInject\u003E\r\n",
+  "androidcodeinjection": "\r\n\u003CYYAndroidManifestManifestInject\u003E\r\n    \u003C!-- Android 11 and below: the legacy Bluetooth permissions, and the location a scan needed then. --\u003E\r\n    \u003Cuses-permission android:name=\u0022android.permission.BLUETOOTH\u0022 android:maxSdkVersion=\u002230\u0022 /\u003E\r\n    \u003Cuses-permission android:name=\u0022android.permission.BLUETOOTH_ADMIN\u0022 android:maxSdkVersion=\u002230\u0022 /\u003E\r\n    \u003Cuses-permission android:name=\u0022android.permission.ACCESS_FINE_LOCATION\u0022 android:maxSdkVersion=\u002230\u0022 /\u003E\r\n    \u003Cuses-permission android:name=\u0022android.permission.ACCESS_COARSE_LOCATION\u0022 android:maxSdkVersion=\u002230\u0022 /\u003E\r\n    \u003C!-- Android 12\u002B: scans never derive location, so no location permission is needed. --\u003E\r\n    \u003Cuses-permission android:name=\u0022android.permission.BLUETOOTH_SCAN\u0022 android:usesPermissionFlags=\u0022neverForLocation\u0022 /\u003E\r\n    \u003Cuses-permission android:name=\u0022android.permission.BLUETOOTH_CONNECT\u0022 /\u003E\r\n    \u003Cuses-permission android:name=\u0022android.permission.BLUETOOTH_ADVERTISE\u0022 /\u003E\r\n    \u003C!-- Bluetooth is optional: Play keeps the game on devices without it. --\u003E\r\n    \u003Cuses-feature android:name=\u0022android.hardware.bluetooth\u0022 android:required=\u0022false\u0022 /\u003E\r\n    \u003Cuses-feature android:name=\u0022android.hardware.bluetooth_le\u0022 android:required=\u0022false\u0022 /\u003E\r\n\u003C/YYAndroidManifestManifestInject\u003E\r\n",
   "androidinject": null,
   "androidmanifestinject": null,
   "androidPermissions": [],
@@ -11,7 +11,7 @@
   "androidsourcedir": "AndroidSource",
   "author": "",
   "classname": "GMBluetooth",
-  "copyToTargets": -1,
+  "copyToTargets": 78,
   "description": "",
   "exportToGame": true,
   "extensionVersion": "0.0.1",
@@ -20,7 +20,7 @@
       "$GMExtensionFile": "v1",
       "%Name": "",
       "constants": [],
-      "copyToTargets": -1,
+      "copyToTargets": 78,
       "filename": "GMBluetooth.ext",
       "final": "",
       "functions": [
@@ -173,6 +173,24 @@
           "hidden": false,
           "kind": 4,
           "name": "bluetooth_classic_server_is_supported",
+          "resourceType": "GMExtensionFunction",
+          "resourceVersion": "2.0",
+          "returnType": 2
+        },
+        {
+          "$GMExtensionFunction": "",
+          "%Name": "__bluetooth_feature_is_supported",
+          "argCount": 2,
+          "args": [
+            1,
+            2
+          ],
+          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@returns {Real}",
+          "externalName": "__EXT_NATIVE__bluetooth_feature_is_supported",
+          "help": "",
+          "hidden": true,
+          "kind": 4,
+          "name": "__bluetooth_feature_is_supported",
           "resourceType": "GMExtensionFunction",
           "resourceVersion": "2.0",
           "returnType": 2
@@ -1983,9 +2001,9 @@
   "installdir": "",
   "iosCocoaPodDependencies": "",
   "iosCocoaPods": "",
-  "ioscodeinjection": "\u003CYYIosPlist\u003E\n    \u003C!-- Bluetooth access - iOS 13\u002B --\u003E\n    \u003Ckey\u003ENSBluetoothAlwaysUsageDescription\u003C/key\u003E\n    \u003Cstring\u003EThis app uses Bluetooth to discover, connect to, and communicate with nearby devices.\u003C/string\u003E\n\n    \u003C!-- Bluetooth access - required for deployment targets earlier than iOS 13 --\u003E\n    \u003Ckey\u003ENSBluetoothPeripheralUsageDescription\u003C/key\u003E\n    \u003Cstring\u003EThis app uses Bluetooth to discover, connect to, and communicate with nearby devices.\u003C/string\u003E\n\n    \u003C!-- Bluetooth background execution / CBCentralManager state restoration --\u003E\n    \u003Ckey\u003EUIBackgroundModes\u003C/key\u003E\n    \u003Carray\u003E\n        \u003Cstring\u003Ebluetooth-central\u003C/string\u003E\n        \u003Cstring\u003Ebluetooth-peripheral\u003C/string\u003E\n    \u003C/array\u003E\n\u003C/YYIosPlist\u003E",
+  "ioscodeinjection": "\u003CYYIosPlist\u003E\n    \u003C!-- Bluetooth access: iOS 13\u002B, and the key earlier deployment targets read. --\u003E\n    \u003Ckey\u003ENSBluetoothAlwaysUsageDescription\u003C/key\u003E\n    \u003Cstring\u003E${YYEXTOPT_GMBluetooth_iosBluetoothUsageDescription}\u003C/string\u003E\n    \u003Ckey\u003ENSBluetoothPeripheralUsageDescription\u003C/key\u003E\n    \u003Cstring\u003E${YYEXTOPT_GMBluetooth_iosBluetoothUsageDescription}\u003C/string\u003E\n\n    \u003C!-- Bluetooth in the background, only for a game that uses it: App Review rejects an unused mode. --\u003E\n    \u003CtoExpand condition=\u0027${YYEXTOPT_GMBluetooth_iosBackgroundModes}\u0027 match=\u0027Central\u0027\u003E\n        \u003Ckey\u003EUIBackgroundModes\u003C/key\u003E\n        \u003Carray\u003E\n            \u003Cstring\u003Ebluetooth-central\u003C/string\u003E\n        \u003C/array\u003E\n    \u003C/toExpand\u003E\n    \u003CtoExpand condition=\u0027${YYEXTOPT_GMBluetooth_iosBackgroundModes}\u0027 match=\u0027Peripheral\u0027\u003E\n        \u003Ckey\u003EUIBackgroundModes\u003C/key\u003E\n        \u003Carray\u003E\n            \u003Cstring\u003Ebluetooth-peripheral\u003C/string\u003E\n        \u003C/array\u003E\n    \u003C/toExpand\u003E\n    \u003CtoExpand condition=\u0027${YYEXTOPT_GMBluetooth_iosBackgroundModes}\u0027 match=\u0027Both\u0027\u003E\n        \u003Ckey\u003EUIBackgroundModes\u003C/key\u003E\n        \u003Carray\u003E\n            \u003Cstring\u003Ebluetooth-central\u003C/string\u003E\n            \u003Cstring\u003Ebluetooth-peripheral\u003C/string\u003E\n        \u003C/array\u003E\n    \u003C/toExpand\u003E\n\u003C/YYIosPlist\u003E",
   "iosdelegatename": "",
-  "iosplistinject": "\n\u003Ckey\u003ENSBluetoothPeripheralUsageDescription\u003C/key\u003E\u003Cstring\u003EAdvertisement would like to use bluetooth.\u003C/string\u003E\n\u003Ckey\u003ENSBluetoothAlwaysUsageDescription\u003C/key\u003E\u003Cstring\u003EThis app uses Bluetooth for multiplayer features or electronic devices communication\u003C/string\u003E\n",
+  "iosplistinject": "",
   "iosProps": true,
   "iosSystemFrameworkEntries": [
     {
@@ -2014,7 +2032,61 @@
   "maclinkerflags": "-ObjC",
   "macsourcedir": "",
   "name": "GMBluetooth",
-  "options": [],
+  "options": [
+    {
+      "$GMExtensionOption": "",
+      "%Name": "__extOptLabel",
+      "defaultValue": "iOS CONFIGURATION:",
+      "description": "",
+      "displayName": "",
+      "exportToINI": false,
+      "extensionId": null,
+      "guid": "c7df21f2-e1c7-4589-8d7c-4a429dce2abd",
+      "hidden": false,
+      "listItems": [],
+      "name": "__extOptLabel",
+      "optType": 5,
+      "resourceType": "GMExtensionOption",
+      "resourceVersion": "2.0"
+    },
+    {
+      "$GMExtensionOption": "",
+      "%Name": "iosBluetoothUsageDescription",
+      "defaultValue": "This app uses Bluetooth to discover, connect to, and communicate with nearby devices.",
+      "description": "The text iOS shows when it asks the player for Bluetooth access.",
+      "displayName": "Bluetooth usage description",
+      "exportToINI": false,
+      "extensionId": null,
+      "guid": "a768f4cb-a800-4586-a7dc-cce37135e50a",
+      "hidden": false,
+      "listItems": [],
+      "name": "iosBluetoothUsageDescription",
+      "optType": 2,
+      "resourceType": "GMExtensionOption",
+      "resourceVersion": "2.0"
+    },
+    {
+      "$GMExtensionOption": "",
+      "%Name": "iosBackgroundModes",
+      "defaultValue": "None",
+      "description": "The UIBackgroundModes the game declares: Central keeps scanning and connections alive in the background, Peripheral keeps advertising and the GATT server. Declare only what the game uses.",
+      "displayName": "Bluetooth background modes",
+      "exportToINI": false,
+      "extensionId": null,
+      "guid": "bd2484dd-87da-497e-b91d-8952c65ec025",
+      "hidden": false,
+      "listItems": [
+        "None",
+        "Central",
+        "Peripheral",
+        "Both"
+      ],
+      "name": "iosBackgroundModes",
+      "optType": 6,
+      "resourceType": "GMExtensionOption",
+      "resourceVersion": "2.0"
+    }
+  ],
   "optionsFile": "options.json",
   "packageId": "",
   "parent": {

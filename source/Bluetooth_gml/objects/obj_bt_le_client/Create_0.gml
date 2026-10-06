@@ -12,6 +12,10 @@ global.ble_conn_inst = noone;
 devices = [];
 device_instances = [];
 
+// device_found fires once per device, so one first seen without a name waits
+// here until a later advertisement or scan response names it (see Step).
+unnamed_devices = [];
+
 if (!bt_ready)
 {
     show_debug_message("[GML] Bluetooth is not initialized");
@@ -58,6 +62,7 @@ bluetooth_start_le_scan = function()
 
     bluetooth_device_clear();
     devices = [];
+    unnamed_devices = [];
 
     // Remove buttons from a previous scan before rebuilding the list.
     with (obj_bt_le_device)
@@ -81,11 +86,19 @@ bluetooth_set_callback_device_found(function(_device)
     if (bluetooth_device_get_transport(_device) != BluetoothTransport.LowEnergy) return;
 
     // Keep the demo scan focused: only show BLE devices with a visible name.
-    // An unnamed advertisement may be reported again later with its scan-response
-    // name, at which point it will be accepted.
-    var _name = bluetooth_device_get_name(_device);
-    if (_name == "") return;
+    // An unnamed one is kept aside; Step adds it once its scan response names it.
+    if (bluetooth_device_get_name(_device) == "")
+    {
+        array_push(unnamed_devices, _device);
+        return;
+    }
 
+    add_device_button(_device);
+});
+
+add_device_button = function(_device)
+{
+    var _name = bluetooth_device_get_name(_device);
     var _device_id = bluetooth_device_get_id(_device);
 
     // Avoid duplicate buttons when the same peripheral advertises repeatedly.
@@ -115,7 +128,7 @@ bluetooth_set_callback_device_found(function(_device)
     });
 
     list_y += 60;
-});
+};
 
 bluetooth_set_callback_scan_stopped(function(_error, _message, _transport)
 {

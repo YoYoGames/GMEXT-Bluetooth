@@ -92,6 +92,17 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         return __result ? 1.0 : 0.0;
     }
 
+    public double __EXT_NATIVE__bluetooth_feature_is_supported(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: feature, type: enum BluetoothFeature
+        BluetoothFeature feature = BluetoothFeature.from(GMExtWire.readI32(__arg_buffer));
+
+        boolean __result = bluetooth_feature_is_supported(feature);
+        return __result ? 1.0 : 0.0;
+    }
+
     public double __EXT_NATIVE__bluetooth_permission_get_status(ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
         BluetoothPermissionStatus __result = bluetooth_permission_get_status();

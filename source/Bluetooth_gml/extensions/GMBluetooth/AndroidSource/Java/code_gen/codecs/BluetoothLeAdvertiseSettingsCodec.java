@@ -22,7 +22,7 @@ public final class BluetoothLeAdvertiseSettingsCodec {
         if (GMExtWire.readBool(b))
         {
             BluetoothLeAdvertiseTxPower __opt_tx_power = BluetoothLeAdvertiseTxPower.from(GMExtWire.readI32(b));
-            tx_power = java.util.Optional.of(__opt_tx_power);
+            tx_power = java.util.Optional.ofNullable(__opt_tx_power);
         }
 
         return new BluetoothLeAdvertiseSettings(connectable, tx_power);

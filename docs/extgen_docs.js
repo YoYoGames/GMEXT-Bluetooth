@@ -58,6 +58,13 @@
  */
 
 /**
+ * @function_partial bluetooth_feature_is_supported
+ * @param {Enum.BluetoothFeature} feature
+ * @returns {Bool}
+ * @function_end
+ */
+
+/**
  * @function_partial bluetooth_permission_get_status
  * @returns {Enum.BluetoothPermissionStatus}
  * @function_end
@@ -921,6 +928,32 @@
  * @member Unauthorized
  * @member PoweredOff
  * @member PoweredOn
+ * @enum_end
+ */
+
+/**
+ * @enum_partial BluetoothFeature
+ * @member LeCentral
+ * @member LePassiveScan
+ * @member LeAdvertise
+ * @member LeAdvertiseName
+ * @member LeAdvertiseServiceUuids
+ * @member LeAdvertiseServiceData
+ * @member LeAdvertiseManufacturerData
+ * @member LeAdvertiseTxPower
+ * @member LeAdvertiseIncludeTxPower
+ * @member LeAdvertiseNonConnectable
+ * @member LeServer
+ * @member LeServerDescriptorRequests
+ * @member LeServerSignedWrite
+ * @member LeServerConnectionEvents
+ * @member LePairing
+ * @member Classic
+ * @member ClassicServer
+ * @member ClassicPairing
+ * @member ClassicDiscoverable
+ * @member ClassicDiscoverableStop
+ * @member PermissionRequest
  * @enum_end
  */
 

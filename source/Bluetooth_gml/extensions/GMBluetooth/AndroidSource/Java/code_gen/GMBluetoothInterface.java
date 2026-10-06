@@ -20,6 +20,7 @@ public interface GMBluetoothInterface {
     public boolean bluetooth_le_server_is_supported();
     public boolean bluetooth_classic_is_supported();
     public boolean bluetooth_classic_server_is_supported();
+    public boolean bluetooth_feature_is_supported(BluetoothFeature feature);
     public BluetoothPermissionStatus bluetooth_permission_get_status();
     public BluetoothError bluetooth_permission_request(GMFunction callback);
     public BluetoothError bluetooth_le_scan_start(boolean active);

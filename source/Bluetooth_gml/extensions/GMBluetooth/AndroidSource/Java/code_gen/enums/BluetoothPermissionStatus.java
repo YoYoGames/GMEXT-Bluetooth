@@ -28,7 +28,7 @@ public enum BluetoothPermissionStatus
             case 2:
                 return BluetoothPermissionStatus.Denied;
             default:
-                throw new IllegalArgumentException("Unknown BluetoothPermissionStatus value: " + v);
+                return null;
         }
     }
 }

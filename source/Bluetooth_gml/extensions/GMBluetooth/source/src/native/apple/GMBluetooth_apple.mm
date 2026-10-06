@@ -7,10 +7,11 @@
 #import <CoreBluetooth/CoreBluetooth.h>
 #include <TargetConditionals.h>
 
-#if TARGET_OS_IOS
+#if TARGET_OS_IOS || TARGET_OS_TV
 #import <UIKit/UIKit.h>
-#else
-// macOS only - NSHost is part of Foundation (already imported above)
+#endif
+#if TARGET_OS_OSX
+// NSHost, used for the advertised name, is part of Foundation.
 #import <IOBluetooth/IOBluetooth.h>
 #endif
 
@@ -33,6 +34,8 @@
 @interface GMBTQueuedMutableDictionary : NSObject
 @property (nonatomic, strong) NSNumber *opId;
 @property (nonatomic, strong) NSMutableDictionary *dictionary;
+// startAdvertising: was sent for it.
+@property (nonatomic) BOOL issued;
 
 - (instancetype)initWithOpId:(NSNumber *)opId dictionary:(NSMutableDictionary *)dictionary;
 @end
@@ -40,8 +43,24 @@
 @interface GMBTQueuedMutableService : NSObject
 @property (nonatomic, strong) NSNumber *opId;
 @property (nonatomic, strong) CBMutableService *service;
+// addService: was sent for it.
+@property (nonatomic) BOOL issued;
+// The server was stopped or cleared while CoreBluetooth was adding it:
+// didAddService fails its op and removes the service again.
+@property (nonatomic) BOOL abandoned;
 
 - (instancetype)initWithOpId:(NSNumber *)opId service:(CBMutableService *)service;
+@end
+
+// A notification waiting for the peripheral manager's transmit queue.
+// centrals is nil for every subscriber; centralKey names the one central a
+// targeted notification is for, so it can be dropped once that central
+// unsubscribes.
+@interface GMBTQueuedNotification : NSObject
+@property (nonatomic, strong) CBMutableCharacteristic *characteristic;
+@property (nonatomic, strong) NSData *value;
+@property (nonatomic, strong) NSArray<CBCentral *> *centrals;
+@property (nonatomic, copy) NSString *centralKey;
 @end
 
 @interface GMBTQueuedPeripheral : NSObject
@@ -76,6 +95,14 @@
 - (instancetype)initWithOpId:(NSNumber *)opId peripheral:(CBPeripheral *)peripheral characteristic:(CBCharacteristic *) characteristic data:(NSData*) data;
 @end
 
+// mode is le_characteristic_subscribe's: 0 unsubscribes, 1 and 2 subscribe.
+// CoreBluetooth picks notify or indicate from the characteristic itself.
+@interface GMBTQueuedSubscription : GMBTQueuedCharacteristic
+@property (nonatomic) NSInteger mode;
+
+- (instancetype)initWithOpId:(NSNumber *)opId peripheral:(CBPeripheral *)peripheral characteristic:(CBCharacteristic *) characteristic mode:(NSInteger) mode;
+@end
+
 @interface GMBTQueuedDescriptor : GMBTQueuedPeripheral
 @property (nonatomic, strong) CBDescriptor *descriptor;
 
@@ -99,9 +126,12 @@
 @property (nonatomic, strong) NSMutableArray<GMBTQueuedCharacteristic *> *fetchDescriptors;
 @property (nonatomic, strong) NSMutableArray<GMBTQueuedCharacteristic *> *readCharacteristic;
 @property (nonatomic, strong) NSMutableArray<GMBTQueuedCharacteristicWithData *> *writeCharacteristic;
-@property (nonatomic, strong) NSMutableArray<GMBTQueuedCharacteristicWithData *> *notifyCharacteristic;
+@property (nonatomic, strong) NSMutableArray<GMBTQueuedSubscription *> *notifyCharacteristic;
 @property (nonatomic, strong) NSMutableArray<GMBTQueuedDescriptor *> *readDescriptor;
 @property (nonatomic, strong) NSMutableArray<GMBTQueuedDescriptorWithData *> *writeDescriptor;
+// Writes without response waiting for canSendWriteWithoutResponse. They
+// get no delegate call: each completes as it is handed to CoreBluetooth.
+@property (nonatomic, strong) NSMutableArray<GMBTQueuedCharacteristicWithData *> *writeWithoutResponse;
 @end
 
 // One didReceiveWriteRequests array. CoreBluetooth wants it treated as a unit
@@ -132,14 +162,24 @@
 
 @property(nonatomic, strong) CBCentralManager *centralManager;
 
-@property(nonatomic, strong) NSMutableArray<GMBTQueuedPeripheral *> *openPeripheralQueue;
-@property(nonatomic, strong) NSMutableArray<GMBTQueuedPeripheral *> *closePeripheralQueue;
+// The state each manager last reported, so a change can tell leaving
+// PoweredOn from never having reached it.
+@property(nonatomic) CBManagerState centralState;
+@property(nonatomic) CBManagerState peripheralState;
+
+// Connects in request order. Only the head is issued, once the central is
+// PoweredOn; its timer bounds the attempt and names it in its userInfo.
+@property(nonatomic, strong) NSMutableArray<GMBTQueuedTimedPeripheral *> *openPeripheralQueue;
 
 // Keyed by the peripheral's identifier. An entry goes when its peripheral's
 // link ends; the core fails the ops it held.
 @property(nonatomic, strong) NSMutableDictionary<NSString *, GMBTPeripheralQueues *> *peripheralQueues;
 
+// What scans found, kept across scans so a device found earlier can still
+// be connected. discoveredOrder holds the same keys, least recently seen
+// first, for the cap.
 @property(nonatomic, strong) NSMutableDictionary <NSString *, CBPeripheral *> *discoveredPeripherals;
+@property(nonatomic, strong) NSMutableOrderedSet<NSString *> *discoveredOrder;
 @property(nonatomic, strong) NSMutableDictionary <NSString *, CBPeripheral *> *openedPeripherals;
 @property(nonatomic, strong) NSMutableDictionary <NSString *, CBPeripheral *> *connectedPeripherals;
 
@@ -151,6 +191,10 @@
 @property(nonatomic, strong) NSMutableArray <GMBTQueuedMutableDictionary *> *startAdvertisementQueue;
 
 @property(nonatomic, strong) NSMutableDictionary <NSString *, CBMutableService *> *addedServices;
+
+// Notifications updateValue refused, sent in order from
+// peripheralManagerIsReadyToUpdateSubscribers:.
+@property(nonatomic, strong) NSMutableArray<GMBTQueuedNotification *> *notifyQueue;
 
 // Initial values CoreBluetooth cannot cache, keyed by their characteristic
 // object: it caches a value only on a read-only characteristic and throws for
@@ -166,6 +210,41 @@
 // last unsubscribe is reported as its disconnect.
 @property(nonatomic, strong) NSMutableDictionary <NSString *, NSMutableSet<NSString *> *> *centralSubscriptions;
 @property(nonatomic, strong) NSMutableDictionary <NSString *, CBCentral *> *subscribedCentrals;
+
+// The calls AppleBackend makes. Each returns Ok or why it failed, with
+// message set; the asynchronous ones complete through opSink or eventSink.
+- (void) bt_init;
+- (void) bt_end;
+
+- (gmbluetooth::Error) bt_le_scan_start:(std::string &)message;
+- (gmbluetooth::Error) bt_le_scan_stop:(std::string &)message;
+- (BOOL) bt_le_scan_is_active;
+
+- (gmbluetooth::Error) bt_le_advertise_start:(BOOL)includeName serviceUUIDs:(NSArray<NSString *> *)serviceUuidStrings opId:(NSNumber *)opId message:(std::string &)message;
+- (gmbluetooth::Error) bt_le_advertise_stop:(std::string &)message;
+- (BOOL) bt_le_advertise_is_active;
+
+- (gmbluetooth::Error) bt_le_server_open:(std::string &)message;
+- (gmbluetooth::Error) bt_le_server_close:(std::string &)message;
+- (gmbluetooth::Error) bt_le_server_add_service:(NSString *)serviceDataString opId:(NSNumber *)opId message:(std::string &)message;
+- (gmbluetooth::Error) bt_le_server_clear_services:(std::string &)message;
+- (gmbluetooth::Error) bt_le_server_respond_read:(double)requestId status:(double)status value:(NSString *)value message:(std::string &)message;
+- (gmbluetooth::Error) bt_le_server_respond_write:(double)requestId status:(double)status message:(std::string &)message;
+- (gmbluetooth::Error) bt_le_server_notify_value:(NSString *)serviceUuid characteristicUuid:(NSString *)characteristicUuid central:(NSString *)centralKey value:(NSString *)value message:(std::string &)message;
+
+- (gmbluetooth::Error) bt_le_peripheral_open:(NSString *)peripheralUuid message:(std::string &)message;
+- (gmbluetooth::Error) bt_le_peripheral_close:(NSString *)peripheralUuid message:(std::string &)message;
+- (BOOL) bt_le_peripheral_is_connected:(NSString *)peripheralUuid;
+
+- (gmbluetooth::Error) bt_le_peripheral_get_services:(NSString *)peripheralUuid opId:(NSNumber *)opId message:(std::string &)message;
+- (gmbluetooth::Error) bt_le_service_get_characteristics:(NSString *)peripheralUuid service:(NSString *)serviceUuid opId:(NSNumber *)opId message:(std::string &)message;
+- (gmbluetooth::Error) bt_le_characteristic_get_descriptors:(NSString *)peripheralUuid service:(NSString *)serviceUuid characteristic:(NSString *)characteristicUuid opId:(NSNumber *)opId message:(std::string &)message;
+- (gmbluetooth::Error) bt_le_characteristic_read:(NSString *)peripheralUuid service:(NSString *)serviceUuid characteristic:(NSString *)characteristicUuid opId:(NSNumber *)opId message:(std::string &)message;
+- (gmbluetooth::Error) bt_le_characteristic_write_request:(NSString *)peripheralUuid service:(NSString *)serviceUuid characteristic:(NSString *)characteristicUuid value:(NSString *)value opId:(NSNumber *)opId message:(std::string &)message;
+- (gmbluetooth::Error) bt_le_characteristic_write_command:(NSString *)peripheralUuid service:(NSString *)serviceUuid characteristic:(NSString *)characteristicUuid value:(NSString *)value opId:(NSNumber *)opId message:(std::string &)message;
+- (gmbluetooth::Error) bt_le_characteristic_subscribe:(NSString *)peripheralUuid service:(NSString *)serviceUuid characteristic:(NSString *)characteristicUuid mode:(NSInteger)mode opId:(NSNumber *)opId message:(std::string &)message;
+- (gmbluetooth::Error) bt_le_descriptor_read:(NSString *)peripheralUuid service:(NSString *)serviceUuid characteristic:(NSString *)characteristicUuid descriptor:(NSString *)descriptorUuid opId:(NSNumber *)opId message:(std::string &)message;
+- (gmbluetooth::Error) bt_le_descriptor_write:(NSString *)peripheralUuid service:(NSString *)serviceUuid characteristic:(NSString *)characteristicUuid descriptor:(NSString *)descriptorUuid value:(NSString *)value opId:(NSNumber *)opId message:(std::string &)message;
 
 @end
 
@@ -243,6 +322,19 @@
 }
 @end
 
+@implementation GMBTQueuedSubscription
+- (instancetype)initWithOpId:(NSNumber *)opId peripheral:(CBPeripheral *)peripheral characteristic:(CBCharacteristic *) characteristic mode:(NSInteger) mode {
+    self = [super initWithOpId:opId peripheral:peripheral characteristic:characteristic];
+    if (self) {
+        _mode = mode;
+    }
+    return self;
+}
+@end
+
+@implementation GMBTQueuedNotification
+@end
+
 @implementation GMBTQueuedDescriptor
 - (instancetype)initWithOpId:(NSNumber *)opId peripheral:(CBPeripheral *)peripheral descriptor:(CBDescriptor *) descriptor {
     self = [super initWithOpId:opId peripheral:peripheral];
@@ -275,6 +367,7 @@
         _notifyCharacteristic = [NSMutableArray new];
         _readDescriptor = [NSMutableArray new];
         _writeDescriptor = [NSMutableArray new];
+        _writeWithoutResponse = [NSMutableArray new];
     }
     return self;
 }
@@ -283,10 +376,39 @@
 @implementation GMBTWriteBatch
 @end
 
+// The one pair of string conversions in this file. Both are nil-safe: text
+// that is not valid UTF-8 becomes @"", and a nil string or one with no UTF-8
+// form becomes "".
 static NSString *gmbt_ns(const std::string &text) {
     NSString *value = [NSString stringWithUTF8String:text.c_str()];
     return value ? value : @"";
 }
+
+static std::string gmbt_string(NSString *text) {
+    const char *utf8 = text ? text.UTF8String : nullptr;
+    return utf8 ? std::string(utf8) : std::string();
+}
+
+static gmbluetooth::Error gmbt_fail(std::string &message, gmbluetooth::Error error, std::string text) {
+    message = std::move(text);
+    return error;
+}
+
+static gmbluetooth::Error gmbt_ok(std::string &message) {
+    message.clear();
+    return gmbluetooth::Error::Ok;
+}
+
+// Queued notifications and writes without response wait at most this many
+// deep; past it the call is Busy.
+static const NSUInteger kGMBTMaxQueuedSends = 64;
+
+// Scan results kept for bt_le_peripheral_open, least recently seen evicted
+// first.
+static const NSUInteger kGMBTMaxDiscoveredPeripherals = 256;
+
+// How long a connect may take before it fails with Timeout.
+static const NSTimeInterval kGMBTConnectTimeoutSeconds = 15;
 
 static NSString *gmbt_manager_state_name(CBManagerState state) {
     switch (state) {
@@ -300,13 +422,41 @@ static NSString *gmbt_manager_state_name(CBManagerState state) {
     return @"Unknown";
 }
 
+// Whether a manager in this state can take a request. Unknown and Resetting
+// pass: the manager is on its way to a final state, and the request waits
+// for it.
+static gmbluetooth::Error gmbt_require_powered_on(CBManagerState state, std::string &message) {
+    switch (state) {
+        case CBManagerStatePoweredOff:
+            return gmbt_fail(message, gmbluetooth::Error::BluetoothDisabled, "Bluetooth is powered off");
+        case CBManagerStateUnauthorized:
+            return gmbt_fail(message, gmbluetooth::Error::PermissionDenied, "Bluetooth permission was denied");
+        case CBManagerStateUnsupported:
+            return gmbt_fail(message, gmbluetooth::Error::NotSupported, "Bluetooth LE is not supported on this device");
+        default:
+            return gmbt_ok(message);
+    }
+}
+
+// Why a request held for, or running on, a manager that has left PoweredOn
+// failed: the mapping above, and OperationFailed while it is only resetting.
+static gmbluetooth::Error gmbt_unavailable_error(CBManagerState state, std::string &message) {
+    const gmbluetooth::Error error = gmbt_require_powered_on(state, message);
+    if (error != gmbluetooth::Error::Ok) return error;
+    return gmbt_fail(message, gmbluetooth::Error::OperationFailed,
+                     "Bluetooth became unavailable (" + gmbt_string(gmbt_manager_state_name(state)) + ")");
+}
+
+static BOOL gmbt_state_is_transient(CBManagerState state) {
+    return state == CBManagerStateUnknown || state == CBManagerStateResetting;
+}
+
 // The BluetoothError and message a CoreBluetooth NSError reports to GML. An
 // ATT refusal goes through the shared ATT table; a CBError keeps its code in
 // the message.
 static gmbluetooth::Error gmbt_error_from_nserror(NSError *error, std::string &message) {
     const int code = (int)error.code;
-    NSString *description = error.localizedDescription;
-    const std::string text = description.UTF8String ? description.UTF8String : "";
+    const std::string text = gmbt_string(error.localizedDescription);
 
     if ([error.domain isEqualToString:CBATTErrorDomain]) {
         message = gmbluetooth::att_error_message(code);
@@ -330,8 +480,9 @@ static gmbluetooth::Error gmbt_error_from_nserror(NSError *error, std::string &m
         }
     }
 
-    NSString *domain = error.domain;
-    message = text + " (" + (domain.UTF8String ? domain.UTF8String : "error") + " " + std::to_string(code) + ")";
+    std::string domain = gmbt_string(error.domain);
+    if (domain.empty()) domain = "error";
+    message = text + " (" + domain + " " + std::to_string(code) + ")";
     return gmbluetooth::Error::OperationFailed;
 }
 
@@ -351,17 +502,35 @@ static gmbluetooth::Error gmbt_error_from_nserror(NSError *error, std::string &m
     self.eventSink(functionName, params);
 }
 
-// The outcome of a call: "success", plus "error_code" when errorCode is set.
-- (void) notifyResult:(NSString *)functionName errorCode:(NSNumber *)errorCode extraParams:(NSDictionary *)extraParams {
+// The end of a scan the game started: Ok when it asked for the stop,
+// otherwise why the central could not keep it running.
+- (void) notifyScanStopped:(gmbluetooth::Error)error message:(const std::string &)message {
+    [self notifyOperation:@"bt_le_scan_stopped"
+              extraParams:@{ @"error": @((int)error), @"message": gmbt_ns(message) }];
+}
+
+// The completion of bt_le_peripheral_open: success, or a failure with its
+// BluetoothError. errorCode is what the core reads a failure from (133 is a
+// timeout when no error is mapped).
+- (void) notifyOpen:(CBPeripheral *)peripheral errorCode:(NSNumber *)errorCode error:(gmbluetooth::Error)error message:(const std::string &)message {
     NSMutableDictionary *params = [NSMutableDictionary dictionary];
+    NSString *name = peripheral.name;
+    params[@"name"] = name ? name : @"";
+    params[@"address"] = [self peripheralKey:peripheral];
     params[@"success"] = @(errorCode == nil);
-    if (errorCode) params[@"error_code"] = errorCode;
-
-    if (extraParams) {
-        [params addEntriesFromDictionary:extraParams];
+    if (errorCode) {
+        params[@"error_code"] = errorCode;
+        params[@"error"] = @((int)error);
+        params[@"message"] = gmbt_ns(message);
     }
+    [self notifyOperation:@"bt_le_peripheral_open" extraParams:params];
+}
 
-    [self notifyOperation:functionName extraParams:params];
+// The key a peripheral is known by in every table here, and the identifier
+// in its "apple:ble:" device id.
+- (NSString *) peripheralKey:(CBPeripheral *)peripheral {
+    NSString *key = peripheral.identifier.UUIDString;
+    return key ? [key uppercaseString] : @"";
 }
 
 // Completes the call the core registered as opId; Ok with an empty message
@@ -381,10 +550,8 @@ static gmbluetooth::Error gmbt_error_from_nserror(NSError *error, std::string &m
     [self completeOp:opId failure:failure message:std::move(message) result:std::move(result)];
 }
 
-// Fails an op whose manager left PoweredOn before it could run.
-- (void) failOp:(NSNumber *)opId managerState:(CBManagerState)state {
-    NSString *text = [NSString stringWithFormat:@"Bluetooth became unavailable (%@)", gmbt_manager_state_name(state)];
-    [self completeOp:opId failure:gmbluetooth::Error::Disconnected message:std::string(text.UTF8String) result:gmbluetooth::LeOpResult{}];
+- (void) failOp:(NSNumber *)opId error:(gmbluetooth::Error)error message:(const std::string &)message {
+    [self completeOp:opId failure:error message:message result:gmbluetooth::LeOpResult{}];
 }
 
 - (void) completeOp:(NSNumber *)opId error:(NSError *)error {
@@ -397,7 +564,7 @@ static gmbluetooth::Error gmbt_error_from_nserror(NSError *error, std::string &m
     gmbluetooth::LeOpResult result;
     for (CBService *service in services) {
         NSString *uuid = [[self convertTo128BitUUID: service.UUID.UUIDString] uppercaseString];
-        result.attributes.push_back(gmbluetooth::LeAttribute{ std::string(uuid.UTF8String ? uuid.UTF8String : ""), 0 });
+        result.attributes.push_back(gmbluetooth::LeAttribute{ gmbt_string(uuid), 0 });
     }
     return result;
 }
@@ -407,7 +574,7 @@ static gmbluetooth::Error gmbt_error_from_nserror(NSError *error, std::string &m
     for (CBCharacteristic *characteristic in characteristics) {
         NSString *uuid = [characteristic.UUID.UUIDString uppercaseString];
         result.attributes.push_back(gmbluetooth::LeAttribute{
-            std::string(uuid.UTF8String ? uuid.UTF8String : ""), static_cast<std::int32_t>(characteristic.properties) });
+            gmbt_string(uuid), static_cast<std::int32_t>(characteristic.properties) });
     }
     return result;
 }
@@ -416,7 +583,7 @@ static gmbluetooth::Error gmbt_error_from_nserror(NSError *error, std::string &m
     gmbluetooth::LeOpResult result;
     for (CBDescriptor *descriptor in descriptors) {
         NSString *uuid = [[self convertTo128BitUUID: descriptor.UUID.UUIDString] uppercaseString];
-        result.attributes.push_back(gmbluetooth::LeAttribute{ std::string(uuid.UTF8String ? uuid.UTF8String : ""), 0 });
+        result.attributes.push_back(gmbluetooth::LeAttribute{ gmbt_string(uuid), 0 });
     }
     return result;
 }
@@ -517,17 +684,19 @@ static gmbluetooth::Error gmbt_error_from_nserror(NSError *error, std::string &m
 - (id) init {
     self = [super init];
     if (self) {
-        
+
         _discoveredPeripherals = [NSMutableDictionary new];
+        _discoveredOrder = [NSMutableOrderedSet new];
         _openedPeripherals = [NSMutableDictionary new];
         _connectedPeripherals = [NSMutableDictionary new];
-        
+
         _addedServices = [NSMutableDictionary new];
+        _notifyQueue = [NSMutableArray new];
         _initialValues = [NSMapTable mapTableWithKeyOptions:NSPointerFunctionsStrongMemory | NSPointerFunctionsObjectPointerPersonality
                                                valueOptions:NSPointerFunctionsStrongMemory];
 
         _startAdvertisementQueue = [NSMutableArray new];
-        
+
         _addServiceQueue = [NSMutableArray new];
         _readRequestsLookup = [NSMutableDictionary new];
         _writeRequestsLookup = [NSMutableDictionary new];
@@ -535,9 +704,11 @@ static gmbluetooth::Error gmbt_error_from_nserror(NSError *error, std::string &m
         _subscribedCentrals = [NSMutableDictionary new];
 
         _openPeripheralQueue = [NSMutableArray new];
-        _closePeripheralQueue = [NSMutableArray new];
 
         _peripheralQueues = [NSMutableDictionary new];
+
+        _centralState = CBManagerStateUnknown;
+        _peripheralState = CBManagerStateUnknown;
     }
     return self;
 }
@@ -555,49 +726,8 @@ static bool _isServerOpen = false;
 static bool _scanPendingPowerOn = false;
 
 - (void) bt_init {
-    // This class implements centralManager:willRestoreState: and
-    // peripheralManager:willRestoreState:. CoreBluetooth logs
-    // "API MISUSE: ... has no restore identifier but the delegate implements
-    // the ...:willRestoreState: method" unless a restore identifier is supplied
-    // alongside them, so pass one. State restoration itself additionally
-    // requires the bluetooth-central / bluetooth-peripheral UIBackgroundModes;
-    // without those the identifier is simply inert rather than harmful.
-    //
-    // The restore-identifier options are iOS/tvOS only - macOS has no
-    // CoreBluetooth state restoration and does not declare these constants.
-    #if TARGET_OS_IOS || TARGET_OS_TV
-    _centralManager = [[CBCentralManager alloc] initWithDelegate:self queue:nil options:@{
-        CBCentralManagerOptionRestoreIdentifierKey: @"GMBluetoothCentralManager"
-    }];
-    _peripheralManager = [[CBPeripheralManager alloc] initWithDelegate:self queue:nil options:@{
-        CBPeripheralManagerOptionRestoreIdentifierKey: @"GMBluetoothPeripheralManager"
-    }];
-    #else
     _centralManager = [[CBCentralManager alloc] initWithDelegate:self queue:nil options:nil];
     _peripheralManager = [[CBPeripheralManager alloc] initWithDelegate:self queue:nil options:nil];
-    #endif
-
-    // registerForConnectionEventsWithOptions: is deliberately NOT called here.
-    // The central is still in the Unknown state at this point, and CoreBluetooth
-    // answers with "API MISUSE: ... can only accept this command while in the
-    // powered on state" and ignores it. centralManagerDidUpdateState: issues it
-    // once the central actually reaches PoweredOn.
-}
-
-// Commands CoreBluetooth only accepts once the central is powered on.
-- (void) applyPoweredOnCentralOptions {
-    #if TARGET_OS_OSX
-    // Not available on macOS.
-    #else
-    if (@available(iOS 13.0, *)) {
-        NSDictionary *options = @{
-            CBConnectPeripheralOptionNotifyOnConnectionKey: @YES,
-            CBConnectPeripheralOptionNotifyOnDisconnectionKey: @YES
-        };
-
-        [self.centralManager registerForConnectionEventsWithOptions: options];
-    }
-    #endif
 }
 
 - (void) bt_end {
@@ -608,84 +738,55 @@ static bool _scanPendingPowerOn = false;
     _isAdvertising = false;
     _isServerOpen = false;
 
+    // A connect timer retains this object and its entry until it fires.
+    for (GMBTQueuedTimedPeripheral *queued in _openPeripheralQueue)
+        [queued.timer invalidate];
+    [_openPeripheralQueue removeAllObjects];
+
     // The core fails the ops these held once the backend is gone.
     [_peripheralQueues removeAllObjects];
+    [_startAdvertisementQueue removeAllObjects];
+    [_addServiceQueue removeAllObjects];
+    [_addedServices removeAllObjects];
+    [_notifyQueue removeAllObjects];
     [_initialValues removeAllObjects];
     [_readRequestsLookup removeAllObjects];
     [_writeRequestsLookup removeAllObjects];
     [_centralSubscriptions removeAllObjects];
     [_subscribedCentrals removeAllObjects];
+    [_openedPeripherals removeAllObjects];
+    [_connectedPeripherals removeAllObjects];
+    [_discoveredPeripherals removeAllObjects];
+    [_discoveredOrder removeAllObjects];
 
     _centralManager = nil;
     _peripheralManager = nil;
+    _centralState = CBManagerStateUnknown;
+    _peripheralState = CBManagerStateUnknown;
 }
 
-
-// ####################################################################################
-// # CORE
-// ####################################################################################
-
-- (double) bt_is_enabled {
-    return _centralManager && _centralManager.state == CBManagerStatePoweredOn;
-}
-
-- (double) bt_request_enable {
-    return 1.0;
-}
-
-- (NSString*) bt_get_name {
-    return @"";
-}
-
-- (NSString*) bt_get_address {
-    return @"";
-}
-
-- (NSString*) bt_get_paired_devices {
-    return @"[]";
-}
-
-// ####################################################################################
-// # BASE
-// ####################################################################################
-
-- (double) bt_le_is_supported {
-    return 1.0;
-}
 
 // ####################################################################################
 // # SCANNER
 // ####################################################################################
 
-- (double) bt_le_scan_start {
+// Ok while a scan is already running or waiting for PoweredOn: there is one
+// scan, and asking for it again changes nothing.
+- (gmbluetooth::Error) bt_le_scan_start:(std::string &)message {
+    const gmbluetooth::Error error = gmbt_require_powered_on(_centralManager.state, message);
+    if (error != gmbluetooth::Error::Ok) return error;
 
-    if (_isScanning || _scanPendingPowerOn) {
-        NSLog(@"[GMBluetooth] bt_le_scan_start REJECTED: a scan is already %@ "
-              @"(CBCentralManager.isScanning=%d, state=%d)",
-              _scanPendingPowerOn ? @"pending power-on" : @"running",
-              (int)[_centralManager isScanning], (int)_centralManager.state);
-        return -1;
-    }
-
-    // Clear discovered peripherals mutable array
-    [self.discoveredPeripherals removeAllObjects];
-
-    int authorization = -1;
-    if (@available(iOS 13.1, macOS 10.15, *)) {
-        authorization = (int)[CBManager authorization];
-    }
-    NSLog(@"[GMBluetooth] bt_le_scan_start: CBCentralManager.state=%d (5=PoweredOn) authorization=%d",
-          (int)_centralManager.state, authorization);
+    if (_isScanning || _scanPendingPowerOn) return gmbt_ok(message);
 
     if (_centralManager.state != CBManagerStatePoweredOn) {
         _scanPendingPowerOn = true;
         NSLog(@"[GMBluetooth] bt_le_scan_start: central is not PoweredOn yet - scan DEFERRED, "
               @"it will start automatically from centralManagerDidUpdateState:");
-        return 0;
+        return gmbt_ok(message);
     }
 
     [self beginScan];
-    return 0;
+    return gmbt_ok(message);
 }
 
 // Issues the actual CoreBluetooth scan. Only ever called with the central
@@ -699,61 +800,92 @@ static bool _scanPendingPowerOn = false;
 
     NSLog(@"[GMBluetooth] beginScan: CBCentralManager.isScanning=%d",
           (int)[_centralManager isScanning]);
-
-    [self notifyResult:@"bt_le_scan_start" errorCode:nil extraParams:nil];
 }
 
-- (double) bt_le_scan_is_active {
-    return [self.centralManager isScanning] ? 1.0 : 0.0;
+// A deferred scan counts as running: the game was told it started.
+- (BOOL) bt_le_scan_is_active {
+    return _isScanning || _scanPendingPowerOn;
 }
 
-- (double) bt_le_scan_stop {
+// Ok with no event when nothing is running; otherwise the scan ends here and
+// scan_stopped reports it.
+- (gmbluetooth::Error) bt_le_scan_stop:(std::string &)message {
 
-    if (!_isScanning && !_scanPendingPowerOn) {
-        NSLog(@"[GMBluetooth] bt_le_scan_stop REJECTED: no scan running or pending");
-        return -1;
-    }
+    if (!_isScanning && !_scanPendingPowerOn) return gmbt_ok(message);
 
     // Cancels a deferred request too, so stopping before the central powers on
     // does not leave a scan queued to fire later.
+    const bool wasScanning = _isScanning;
     _scanPendingPowerOn = false;
     _isScanning = false;
 
-    [_centralManager stopScan];
+    if (wasScanning) [_centralManager stopScan];
 
-    [self notifyResult:@"bt_le_scan_stop" errorCode:nil extraParams:nil];
+    [self notifyScanStopped:gmbluetooth::Error::Ok message:std::string()];
+    return gmbt_ok(message);
+}
 
-    return 0;
+// True while the peripheral is open or waiting in the connect queue.
+- (BOOL) peripheralIsInUse:(NSString *)key {
+    if (_openedPeripherals[key]) return YES;
+    for (GMBTQueuedTimedPeripheral *queued in _openPeripheralQueue) {
+        if ([[self peripheralKey:queued.peripheral] isEqualToString:key]) return YES;
+    }
+    return NO;
+}
+
+// Keeps a peripheral bt_le_peripheral_open can find, most recently seen last.
+// Past the cap the least recently seen goes, unless it is open or queued.
+- (void) rememberPeripheral:(CBPeripheral *)peripheral {
+    NSString *key = [self peripheralKey:peripheral];
+    if (key.length == 0) return;
+
+    _discoveredPeripherals[key] = peripheral;
+    [_discoveredOrder removeObject:key];
+    [_discoveredOrder addObject:key];
+
+    NSUInteger index = 0;
+    while (_discoveredOrder.count > kGMBTMaxDiscoveredPeripherals && index < _discoveredOrder.count) {
+        NSString *oldest = _discoveredOrder[index];
+        if ([self peripheralIsInUse:oldest]) {
+            ++index;
+            continue;
+        }
+        [_discoveredOrder removeObjectAtIndex:index];
+        [_discoveredPeripherals removeObjectForKey:oldest];
+    }
+}
+
+- (void) forgetDiscoveredPeripherals {
+    [_discoveredPeripherals removeAllObjects];
+    [_discoveredOrder removeAllObjects];
 }
 
 - (void) centralManager:(CBCentralManager *)central didDiscoverPeripheral:(CBPeripheral *)peripheral advertisementData:(NSDictionary<NSString *,id> *)advertisementData RSSI:(NSNumber *)RSSI {
-    
-    // Add discovered peripheral to the mutable array
-    [_discoveredPeripherals setObject:peripheral forKey:[[peripheral.identifier UUIDString] uppercaseString]];
 
-    // 1. Name
-    NSString *name = peripheral.name;
-    if (name == nil) {
-        name = @"Unknown";
-    }
+    [self rememberPeripheral:peripheral];
+
+    // 1. Name: the advertised one first, since peripheral.name is a cached
+    // GAP name that may be stale or missing.
+    NSString *name = advertisementData[CBAdvertisementDataLocalNameKey];
+    if (![name isKindOfClass:[NSString class]] || name.length == 0) name = peripheral.name;
+    if (!name) name = @"";
 
     // 2. Address (UUID in this case)
-    NSString *uuidString = peripheral.identifier.UUIDString;
+    NSString *uuidString = [self peripheralKey:peripheral];
 
-    // 3. Signal Strength
-    NSInteger rssiValue = RSSI.integerValue;
-
-    // 4. Is_connectable
+    // 3. Is_connectable
     NSNumber *isConnectable = advertisementData[CBAdvertisementDataIsConnectable];
     BOOL connectable = [isConnectable boolValue];
 
-    NSDictionary *params = @{
-                             @"name": name,
-                             @"address": uuidString,
-                             @"raw_signal": @(rssiValue),
-                             @"is_connectable": @(connectable)
-                            };
-    
+    NSMutableDictionary *params = [NSMutableDictionary dictionary];
+    params[@"name"] = name;
+    params[@"address"] = uuidString;
+    params[@"is_connectable"] = @(connectable);
+
+    // 4. Signal strength. CoreBluetooth reports 127 when it has none.
+    if (RSSI && RSSI.integerValue != 127) params[@"raw_signal"] = RSSI;
+
     [self notifyOperation:@"bt_le_scan_result" extraParams:params];
 }
 
@@ -765,24 +897,39 @@ static bool _scanPendingPowerOn = false;
     if (!_peripheralManager || _peripheralManager.state != CBManagerStatePoweredOn)
         return;
 
-    [self handleQueue:_startAdvertisementQueue withBlock:^(GMBTQueuedMutableDictionary *queuedMutableDictionary) {
-        [self->_peripheralManager startAdvertising:queuedMutableDictionary.dictionary];
-    }];
+    GMBTQueuedMutableDictionary *queued = [self queuePeek:_startAdvertisementQueue];
+    if (!queued || queued.issued) return;
+    queued.issued = YES;
+    [_peripheralManager startAdvertising:queued.dictionary];
+}
+
+// Fails every start still waiting for peripheralManagerDidStartAdvertising:.
+- (void) failAdvertiseStarts:(gmbluetooth::Error)error message:(const std::string &)message {
+    while (_startAdvertisementQueue.count > 0) {
+        GMBTQueuedMutableDictionary *queued = [self queueDequeue:_startAdvertisementQueue];
+        [self failOp:queued.opId error:error message:message];
+    }
 }
 
 // CBPeripheralManager.startAdvertising takes only LocalName and ServiceUUIDs;
 // AppleBackend::le_advertise_start refuses every other field before this.
 // The UUIDs were validated by the core, so UUIDWithString cannot throw.
-- (double) bt_le_advertise_start:(BOOL)includeName serviceUUIDs:(NSArray<NSString *> *)serviceUuidStrings opId:(NSNumber *)opId {
-    if (_isAdvertising || (_peripheralManager && _peripheralManager.isAdvertising)) return -1;
+- (gmbluetooth::Error) bt_le_advertise_start:(BOOL)includeName serviceUUIDs:(NSArray<NSString *> *)serviceUuidStrings opId:(NSNumber *)opId message:(std::string &)message {
+    const gmbluetooth::Error error = gmbt_require_powered_on(_peripheralManager.state, message);
+    if (error != gmbluetooth::Error::Ok) return error;
+
+    if ([self bt_le_advertise_is_active])
+        return gmbt_fail(message, gmbluetooth::Error::Busy, "Bluetooth LE advertising is already running; stop it first");
 
     NSMutableDictionary *advertisementData = [NSMutableDictionary dictionary];
 
     if (includeName) {
-#if TARGET_OS_IOS
+#if TARGET_OS_OSX
+        NSString *deviceName = [[NSHost currentHost] localizedName];
+#elif TARGET_OS_IOS || TARGET_OS_TV
         NSString *deviceName = [[UIDevice currentDevice] name];
 #else
-        NSString *deviceName = [[NSHost currentHost] localizedName];
+        NSString *deviceName = nil;
 #endif
         if (deviceName.length > 0)
             advertisementData[CBAdvertisementDataLocalNameKey] = deviceName;
@@ -798,27 +945,32 @@ static bool _scanPendingPowerOn = false;
 
     GMBTQueuedMutableDictionary *queued = [[GMBTQueuedMutableDictionary alloc] initWithOpId:opId
                                                                                     dictionary:advertisementData];
-    [self queueEnqueue:_startAdvertisementQueue value:queued withHandler:^(){ [self handleStartAdvertisementQueue]; }];
-    return 0;
+    [_startAdvertisementQueue addObject:queued];
+    [self handleStartAdvertisementQueue];
+    return gmbt_ok(message);
 }
 
-- (double) bt_le_advertise_stop {
-    if (!_isAdvertising && !(_peripheralManager && _peripheralManager.isAdvertising)) return -1;
+// Ok with nothing to do when idle. A start still waiting for its answer
+// fails, since the game asked for advertising to end before it began.
+- (gmbluetooth::Error) bt_le_advertise_stop:(std::string &)message {
+    if (![self bt_le_advertise_is_active] && !_peripheralManager.isAdvertising) return gmbt_ok(message);
 
-    [_peripheralManager stopAdvertising];
+    [self failAdvertiseStarts:gmbluetooth::Error::OperationFailed message:"Advertising stopped before it started"];
+    if (_peripheralManager.state == CBManagerStatePoweredOn) [_peripheralManager stopAdvertising];
     _isAdvertising = false;
-
-    [self notifyResult:@"bt_le_advertise_stop" errorCode:nil extraParams:nil];
-    return 0;
+    return gmbt_ok(message);
 }
 
-- (double) bt_le_advertise_is_active {
-    return _peripheralManager.isAdvertising ? 1.0 : 0.0;
+// Running from the call that starts it, so a second start is Busy while the
+// first is still waiting for CoreBluetooth.
+- (BOOL) bt_le_advertise_is_active {
+    return _isAdvertising || _startAdvertisementQueue.count > 0;
 }
 
 - (void) peripheralManagerDidStartAdvertising:(CBPeripheralManager *)peripheral error:(NSError *)error {
-    GMBTQueuedMutableDictionary *queuedAdvertisementData = [self queueDequeue:_startAdvertisementQueue];
-    if (!queuedAdvertisementData) return;
+    GMBTQueuedMutableDictionary *queuedAdvertisementData = [self queuePeek:_startAdvertisementQueue];
+    if (!queuedAdvertisementData || !queuedAdvertisementData.issued) return;
+    [self queueDequeue:_startAdvertisementQueue];
 
     _isAdvertising = (error == nil && peripheral.isAdvertising);
     [self completeOp:queuedAdvertisementData.opId error:error];
@@ -834,40 +986,73 @@ static bool _scanPendingPowerOn = false;
     if (!_peripheralManager || _peripheralManager.state != CBManagerStatePoweredOn)
         return;
 
-    [self handleQueue:_addServiceQueue withBlock:^(GMBTQueuedMutableService *queuedMutableService) {
-        [self->_peripheralManager addService:queuedMutableService.service];
-    }];
+    GMBTQueuedMutableService *queued = [self queuePeek:_addServiceQueue];
+    if (!queued || queued.issued) return;
+    queued.issued = YES;
+    [_peripheralManager addService:queued.service];
 }
 
-- (double) bt_le_server_open {
-    
-    if (_isServerOpen) return -1;
-    
+// Forgets every service, value, queued notification and subscription the
+// server held. Queued adds fail with error; an add CoreBluetooth is working
+// on fails too when failInFlight (no answer will come), and is otherwise left
+// for didAddService to fail and undo.
+- (void) resetServerState:(gmbluetooth::Error)error message:(const std::string &)message failInFlight:(BOOL)failInFlight {
+    GMBTQueuedMutableService *head = [self queuePeek:_addServiceQueue];
+    const BOOL keepHead = head && head.issued && !failInFlight;
+    if (keepHead) {
+        head.abandoned = YES;
+        [_addServiceQueue removeObjectAtIndex:0];
+    }
+    while (_addServiceQueue.count > 0) {
+        GMBTQueuedMutableService *queued = [self queueDequeue:_addServiceQueue];
+        [self failOp:queued.opId error:error message:message];
+    }
+    if (keepHead) [_addServiceQueue addObject:head];
+
+    if (_peripheralManager.state == CBManagerStatePoweredOn) [_peripheralManager removeAllServices];
+    [_addedServices removeAllObjects];
+    [_initialValues removeAllObjects];
+    [_notifyQueue removeAllObjects];
+    // The core answered the requests these held before asking.
+    [_readRequestsLookup removeAllObjects];
+    [_writeRequestsLookup removeAllObjects];
+    // The characteristics they named are gone; no unsubscribe will come.
+    [_centralSubscriptions removeAllObjects];
+    [_subscribedCentrals removeAllObjects];
+}
+
+// Ok when already open: there is one server.
+- (gmbluetooth::Error) bt_le_server_open:(std::string &)message {
+    const gmbluetooth::Error error = gmbt_require_powered_on(_peripheralManager.state, message);
+    if (error != gmbluetooth::Error::Ok) return error;
+
     _isServerOpen = true;
-    
-    [self notifyResult:@"bt_le_server_open" errorCode:nil extraParams:nil];
-
-    return 0;
+    return gmbt_ok(message);
 }
 
-- (double) bt_le_server_add_service:(NSString*) serviceDataString opId:(NSNumber *)opId {
-    if (!_isServerOpen) return -1;
+- (gmbluetooth::Error) bt_le_server_add_service:(NSString*) serviceDataString opId:(NSNumber *)opId message:(std::string &)message {
+    const gmbluetooth::Error stateError = gmbt_require_powered_on(_peripheralManager.state, message);
+    if (stateError != gmbluetooth::Error::Ok) return stateError;
+    if (!_isServerOpen) return gmbt_fail(message, gmbluetooth::Error::OperationFailed, "The GATT server is not running");
 
     NSData *data = [serviceDataString dataUsingEncoding:NSUTF8StringEncoding];
     NSError *error = nil;
-    id parsed = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+    id parsed = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:&error] : nil;
     if (error || ![parsed isKindOfClass:[NSDictionary class]]) {
         NSLog(@"[GMBluetooth] invalid GATT service definition: %@", error);
-        return -1;
+        return gmbt_fail(message, gmbluetooth::Error::InvalidArgument, "Invalid GATT service definition");
     }
 
     NSDictionary *serviceData = (NSDictionary *)parsed;
     NSString *serviceUuidString = serviceData[@"uuid"];
     if (![serviceUuidString isKindOfClass:[NSString class]] || serviceUuidString.length == 0)
-        return -1;
+        return gmbt_fail(message, gmbluetooth::Error::InvalidArgument, "The GATT service has no UUID");
 
     CBUUID *serviceUUID = [CBUUID UUIDWithString:serviceUuidString];
     CBMutableService *service = [[CBMutableService alloc] initWithType:serviceUUID primary:YES];
+
+    CBUUID *cccdUUID = [CBUUID UUIDWithString:CBUUIDClientCharacteristicConfigurationString];
+    CBUUID *userDescriptionUUID = [CBUUID UUIDWithString:CBUUIDCharacteristicUserDescriptionString];
 
     NSMutableArray<CBMutableCharacteristic *> *characteristicsArray = [NSMutableArray array];
     // Moved into _initialValues only once the whole definition parsed, so a
@@ -897,11 +1082,11 @@ static bool _scanPendingPowerOn = false;
 
             // permissions is BluetoothLeAttributePermission, Android's PERMISSION_*
             // bits. CoreBluetooth has no signed-write permission, so asking for
-            // one fails the call (-3) instead of adding a weaker characteristic.
+            // one fails the call instead of adding a weaker characteristic.
             const NSUInteger permissions = [charDict[@"permissions"] unsignedIntegerValue];
             if (permissions & (gmbluetooth::kPermissionWriteSigned | gmbluetooth::kPermissionWriteSignedMitm)) {
                 NSLog(@"[GMBluetooth] characteristic %@ asks for a signed-write permission, which Apple does not have", charUuidString);
-                return -3;
+                return gmbt_fail(message, gmbluetooth::Error::NotSupported, "Apple has no signed-write permission");
             }
             CBAttributePermissions charPermissions = 0;
             if (permissions & gmbluetooth::kPermissionRead)
@@ -919,7 +1104,7 @@ static bool _scanPendingPowerOn = false;
                 initialValue = [[NSData alloc] initWithBase64EncodedString:(NSString *)initialValueField options:0];
                 if (!initialValue) {
                     NSLog(@"[GMBluetooth] characteristic %@ has invalid base64 initial value", charUuidString);
-                    return -1;
+                    return gmbt_fail(message, gmbluetooth::Error::InvalidArgument, "A characteristic's initial value is not valid base64");
                 }
             }
 
@@ -947,10 +1132,20 @@ static bool _scanPendingPowerOn = false;
 
                     CBUUID *descUUID = [CBUUID UUIDWithString:descUuidString];
                     // CoreBluetooth owns the CCCD for Notify/Indicate characteristics.
-                    if ([descUUID isEqual:[CBUUID UUIDWithString:CBUUIDClientCharacteristicConfigurationString]])
+                    if ([descUUID isEqual:cccdUUID])
                         continue;
 
-                    CBMutableDescriptor *descriptor = [[CBMutableDescriptor alloc] initWithType:descUUID value:[NSData data]];
+                    // CBMutableDescriptor takes only the User Description, whose
+                    // value must be a string, and the Presentation Format, whose
+                    // value must be its 7 bytes; the definition carries no value,
+                    // and anything else throws. Refused before anything is added.
+                    if (![descUUID isEqual:userDescriptionUUID]) {
+                        return gmbt_fail(message, gmbluetooth::Error::NotSupported,
+                                         "Apple can host only the Characteristic User Description descriptor (0x2901), not " +
+                                         gmbt_string(descUuidString));
+                    }
+
+                    CBMutableDescriptor *descriptor = [[CBMutableDescriptor alloc] initWithType:descUUID value:@""];
                     [descriptorsArray addObject:descriptor];
                 }
             }
@@ -966,94 +1161,65 @@ static bool _scanPendingPowerOn = false;
         [_initialValues setObject:[pendingInitialValues objectForKey:characteristic] forKey:characteristic];
 
     GMBTQueuedMutableService *queueService = [[GMBTQueuedMutableService alloc] initWithOpId:opId service:service];
-    [self queueEnqueue:_addServiceQueue value:queueService withHandler:^(){ [self handleAddServiceQueue]; }];
-    return 0;
+    [_addServiceQueue addObject:queueService];
+    [self handleAddServiceQueue];
+    return gmbt_ok(message);
 }
 
-- (double) bt_le_server_clear_services {
-    
-    if (!_isServerOpen) return -1;
+// Ok when there is nothing to clear.
+- (gmbluetooth::Error) bt_le_server_clear_services:(std::string &)message {
+    if (!_isServerOpen) return gmbt_ok(message);
 
-    [_peripheralManager removeAllServices];
-    [_initialValues removeAllObjects];
-    // The core answered the requests these held before asking.
-    [_readRequestsLookup removeAllObjects];
-    [_writeRequestsLookup removeAllObjects];
-    // The characteristics they named are gone; no unsubscribe will come.
-    [_centralSubscriptions removeAllObjects];
-    [_subscribedCentrals removeAllObjects];
-
-    [self notifyResult:@"bt_le_server_clear_services" errorCode:nil extraParams:nil];
-
-    return 0;
+    [self resetServerState:gmbluetooth::Error::OperationFailed
+                   message:"The GATT services were cleared before this one was added"
+              failInFlight:NO];
+    return gmbt_ok(message);
 }
 
-- (double) bt_le_server_close {
-    if (!_isServerOpen) return -1;
-    
+// Ok when already closed. Advertising stops with the server.
+- (gmbluetooth::Error) bt_le_server_close:(std::string &)message {
+    if (!_isServerOpen) return gmbt_ok(message);
+
     _isServerOpen = false;
-    [_peripheralManager removeAllServices];
-    [_initialValues removeAllObjects];
     // The core answered the requests these held before asking, and retires
     // every central it knows once the stop succeeds.
-    [_readRequestsLookup removeAllObjects];
-    [_writeRequestsLookup removeAllObjects];
-    [_centralSubscriptions removeAllObjects];
-    [_subscribedCentrals removeAllObjects];
+    [self resetServerState:gmbluetooth::Error::OperationFailed
+                   message:"The GATT server stopped before the service was added"
+              failInFlight:NO];
 
+    [self failAdvertiseStarts:gmbluetooth::Error::OperationFailed message:"Advertising stopped before it started"];
     if ([_peripheralManager isAdvertising]) {
         [_peripheralManager stopAdvertising];
     }
-    
-    [self notifyResult:@"bt_le_server_close" errorCode:nil extraParams:nil];
+    _isAdvertising = false;
 
-    return 0;
+    return gmbt_ok(message);
 }
 
-- (double) bt_le_server_respond_read:(double) requestId status:(double) status value:(NSString*) value {
-    // Convert the requestId to NSNumber for dictionary lookup
+- (gmbluetooth::Error) bt_le_server_respond_read:(double) requestId status:(double) status value:(NSString*) value message:(std::string &)message {
     NSNumber *requestKey = [NSNumber numberWithDouble:requestId];
-    
-    CBATTRequest *request = nil;
-    
-    // Retrieve the corresponding CBATTRequest from _readRequests dictionary
-    request = _readRequestsLookup[requestKey];
-    
-    if (!request) {
-        NSLog(@"Request with ID %f not found", requestId);
-        return 0;
-    }
-        
+    CBATTRequest *request = _readRequestsLookup[requestKey];
+    if (!request) return gmbt_fail(message, gmbluetooth::Error::OperationFailed, "The read request is no longer pending");
+
     // status is an ATT error code the core validated. A refusal carries no
     // value, so the (empty) value is only decoded for a success.
     const CBATTError result = (CBATTError)status;
     if (result == CBATTErrorSuccess) {
         NSData *dataValue = [[NSData alloc] initWithBase64EncodedString:(value ? value : @"") options:0];
-        if (!dataValue) {
-            NSLog(@"Failed to decode base64 value");
-            return -1;
-        }
+        if (!dataValue) return gmbt_fail(message, gmbluetooth::Error::InvalidArgument, "The read response is not valid base64");
         request.value = dataValue;
     }
 
-    // Respond to the read request
     [_peripheralManager respondToRequest:request withResult:result];
-    
-    // Remove the request from the _readRequests dictionary
     [_readRequestsLookup removeObjectForKey:requestKey];
-    
-    return 1; // Indicate success
+    return gmbt_ok(message);
 }
 
-- (double) bt_le_server_respond_write:(double) requestId status:(double) status {
-    // Convert the requestId to NSNumber for dictionary lookup
+- (gmbluetooth::Error) bt_le_server_respond_write:(double) requestId status:(double) status message:(std::string &)message {
     NSNumber *requestKey = [NSNumber numberWithDouble:requestId];
 
     GMBTWriteBatch *batch = _writeRequestsLookup[requestKey];
-    if (!batch) {
-        NSLog(@"Write request with ID %f not found", requestId);
-        return 0;
-    }
+    if (!batch) return gmbt_fail(message, gmbluetooth::Error::OperationFailed, "The write request is no longer pending");
     [_writeRequestsLookup removeObjectForKey:requestKey];
 
     // The batch is answered once, after its last part, with the first error.
@@ -1067,31 +1233,48 @@ static bool _scanPendingPowerOn = false;
         [_peripheralManager respondToRequest:batch.firstRequest withResult:batch.result];
     }
 
-    return 1; // Indicate success
+    return gmbt_ok(message);
+}
+
+- (BOOL) central:(NSString *)centralKey isSubscribedTo:(CBCharacteristic *)characteristic {
+    return _subscribedCentrals[centralKey] != nil &&
+           [_centralSubscriptions[centralKey] containsObject:[self subscriptionKey:characteristic]];
+}
+
+// Sends queued notifications in order until CoreBluetooth's transmit queue is
+// full again; peripheralManagerIsReadyToUpdateSubscribers: resumes. One for a
+// central that has since unsubscribed is dropped.
+- (void) sendQueuedNotifications {
+    while (_notifyQueue.count > 0) {
+        GMBTQueuedNotification *queued = _notifyQueue.firstObject;
+        if (queued.centralKey.length > 0 && ![self central:queued.centralKey isSubscribedTo:queued.characteristic]) {
+            [_notifyQueue removeObjectAtIndex:0];
+            continue;
+        }
+        if (![_peripheralManager updateValue:queued.value forCharacteristic:queued.characteristic onSubscribedCentrals:queued.centrals])
+            return;
+        [_notifyQueue removeObjectAtIndex:0];
+    }
 }
 
 // central: empty broadcasts to every subscriber; otherwise the key a server
-// event named the central by. Returns 0, -1 on failure, or -2 when that
-// central is not subscribed to the characteristic.
-- (double) bt_le_server_notify_value:(NSString*) serviceUuid characteristicUuid:(NSString*) characteristicUuid central:(NSString*) centralKey value:(NSString*) value {
+// event named the central by, NotFound when that central is not subscribed
+// to the characteristic. A value CoreBluetooth cannot take now waits, in
+// order, behind any already waiting.
+- (gmbluetooth::Error) bt_le_server_notify_value:(NSString*) serviceUuid characteristicUuid:(NSString*) characteristicUuid central:(NSString*) centralKey value:(NSString*) value message:(std::string &)message {
+    const gmbluetooth::Error stateError = gmbt_require_powered_on(_peripheralManager.state, message);
+    if (stateError != gmbluetooth::Error::Ok) return stateError;
+    if (!_isServerOpen) return gmbt_fail(message, gmbluetooth::Error::OperationFailed, "The GATT server is not running");
 
-    // Decode the base64 value
-    NSData *dataValue = [[NSData alloc] initWithBase64EncodedString:value options:0];
-    if (!dataValue) {
-        NSLog(@"Failed to decode base64 value");
-        return -1;
-    }
+    NSData *dataValue = [[NSData alloc] initWithBase64EncodedString:(value ? value : @"") options:0];
+    if (!dataValue) return gmbt_fail(message, gmbluetooth::Error::InvalidArgument, "The value is not valid base64");
 
     NSString *canonicalServiceUuid = [CBUUID UUIDWithString:serviceUuid].UUIDString;
     NSString *canonicalCharacteristicUuid = [CBUUID UUIDWithString:characteristicUuid].UUIDString;
 
     CBMutableService *service = _addedServices[canonicalServiceUuid];
-    if (!service) {
-        NSLog(@"Service not found");
-        return -1;
-    }
-    
-    // Find the target characteristic
+    if (!service) return gmbt_fail(message, gmbluetooth::Error::NotFound, "Service " + gmbt_string(serviceUuid) + " not found");
+
     CBMutableCharacteristic *characteristic = nil;
     for (CBMutableCharacteristic *charac in service.characteristics) {
         if ([charac.UUID.UUIDString isEqualToString:canonicalCharacteristicUuid]) {
@@ -1099,46 +1282,61 @@ static bool _scanPendingPowerOn = false;
             break;
         }
     }
-
-    if (!characteristic) {
-        NSLog(@"Characteristic not found");
-        return -1;
-    }
+    if (!characteristic)
+        return gmbt_fail(message, gmbluetooth::Error::NotFound, "Characteristic " + gmbt_string(characteristicUuid) + " not found");
 
     NSArray<CBCentral *> *centrals = nil;
     if (centralKey.length > 0) {
-        CBCentral *central = _subscribedCentrals[centralKey];
-        if (!central || ![_centralSubscriptions[centralKey] containsObject:[self subscriptionKey:characteristic]])
-            return -2;
-        centrals = @[central];
+        if (![self central:centralKey isSubscribedTo:characteristic])
+            return gmbt_fail(message, gmbluetooth::Error::NotFound, "That central is not subscribed to the characteristic");
+        centrals = @[ _subscribedCentrals[centralKey] ];
     }
 
-    // Notify the subscribed centrals, or the one named
-    BOOL success = [_peripheralManager updateValue:dataValue forCharacteristic:characteristic onSubscribedCentrals:centrals];
-    if (!success) {
-        NSLog(@"Failed to notify subscribed centrals");
-        return -1;
-    }
-    
-    return 0;
+    if (_notifyQueue.count >= kGMBTMaxQueuedSends)
+        return gmbt_fail(message, gmbluetooth::Error::Busy, "Too many GATT notifications are waiting to be sent");
+
+    // Nothing waiting: sent now if CoreBluetooth takes it.
+    if (_notifyQueue.count == 0 &&
+        [_peripheralManager updateValue:dataValue forCharacteristic:characteristic onSubscribedCentrals:centrals])
+        return gmbt_ok(message);
+
+    GMBTQueuedNotification *queued = [GMBTQueuedNotification new];
+    queued.characteristic = characteristic;
+    queued.value = dataValue;
+    queued.centrals = centrals;
+    queued.centralKey = centrals ? centralKey : nil;
+    [_notifyQueue addObject:queued];
+    return gmbt_ok(message);
 }
 
 - (void) peripheralManager:(CBPeripheralManager *)peripheral didAddService:(CBService *)service error:(NSError *)error {
-    GMBTQueuedMutableService *queuedService = [self queueDequeue:_addServiceQueue];
-    if (!queuedService) return;
-    
+    GMBTQueuedMutableService *queuedService = [self queuePeek:_addServiceQueue];
+    if (!queuedService || !queuedService.issued) return;
+    [self queueDequeue:_addServiceQueue];
+
+    // The server was stopped or cleared meanwhile: the service goes again.
+    if (queuedService.abandoned) {
+        if (!error) [peripheral removeService:queuedService.service];
+        for (CBMutableCharacteristic *characteristic in queuedService.service.characteristics)
+            [_initialValues removeObjectForKey:characteristic];
+        [self failOp:queuedService.opId error:gmbluetooth::Error::OperationFailed
+             message:"The GATT server was stopped or cleared before the service was added"];
+        [self handleAddServiceQueue];
+        return;
+    }
+
     if (!error) _addedServices[[service.UUID UUIDString]] = queuedService.service;
     else {
         for (CBMutableCharacteristic *characteristic in queuedService.service.characteristics)
             [_initialValues removeObjectForKey:characteristic];
     }
     [self completeOp:queuedService.opId error:error];
-    
+
     [self handleAddServiceQueue];
 }
 
 - (void) peripheralManagerIsReadyToUpdateSubscribers:(CBPeripheralManager *)peripheral {
-    [self notifyResult:@"bt_le_server_notify_value" errorCode:@(-1) extraParams:nil];
+    [self sendQueuedNotifications];
 }
 
 - (void) peripheralManagerDidUpdateState:(CBPeripheralManager *)peripheral {
@@ -1147,8 +1345,8 @@ static bool _scanPendingPowerOn = false;
 }
 
 - (void) applyPeripheralManagerState:(CBPeripheralManager *)peripheral {
-    [self notifyOperation:@"bt_le_peripheral_manager_update_state"
-              extraParams:@{ @"success": @((int)peripheral.state) }];
+    const CBManagerState previous = _peripheralState;
+    _peripheralState = peripheral.state;
 
     if (peripheral.state == CBManagerStatePoweredOn) {
         [self handleAddServiceQueue];
@@ -1156,10 +1354,15 @@ static bool _scanPendingPowerOn = false;
         return;
     }
 
-    if (peripheral.state == CBManagerStateUnknown || peripheral.state == CBManagerStateResetting)
+    // Not up yet: what was asked for waits for PoweredOn or a final state.
+    if (gmbt_state_is_transient(peripheral.state) && previous != CBManagerStatePoweredOn)
         return;
 
+    std::string message;
+    const gmbluetooth::Error error = gmbt_unavailable_error(peripheral.state, message);
+
     _isAdvertising = false;
+    [self failAdvertiseStarts:error message:message];
 
     // The radio is gone and every central with it; no unsubscribe follows.
     NSArray<CBCentral *> *centrals = _subscribedCentrals.allValues;
@@ -1168,33 +1371,10 @@ static bool _scanPendingPowerOn = false;
     for (CBCentral *central in centrals)
         [self notifyServerCentral:central connected:NO];
 
-    while (_startAdvertisementQueue.count > 0) {
-        GMBTQueuedMutableDictionary *queued = [self queueDequeue:_startAdvertisementQueue];
-        [self failOp:queued.opId managerState:peripheral.state];
-    }
-    while (_addServiceQueue.count > 0) {
-        GMBTQueuedMutableService *queued = [self queueDequeue:_addServiceQueue];
-        [self failOp:queued.opId managerState:peripheral.state];
-    }
-}
-
-- (void) peripheralManager:(CBPeripheralManager *)peripheral willRestoreState:(NSDictionary<NSString *,id> *)dict {
-    
-    // Restore services
-    NSArray *services = dict[CBPeripheralManagerRestoredStateServicesKey];
-    if (services) {
-        for (CBMutableService *service in services) {
-            _addedServices[[service.UUID UUIDString]] = service;
-        }
-    }
-
-    // Restore advertisement data and re-start advertising if app was advertising at the time it was terminated
-    NSDictionary *advertisingData = dict[CBPeripheralManagerRestoredStateAdvertisementDataKey];
-    if (advertisingData) {
-        [_peripheralManager startAdvertising:advertisingData];
-    }
-    
-    [self notifyOperation:@"bt_le_server_restore_state" extraParams:nil];
+    // CoreBluetooth dropped the services too; the server stays open for the
+    // game to add them again.
+    [self resetServerState:error message:message failInFlight:YES];
+    [self notifyOperation:@"bt_le_server_services_reset" extraParams:@{}];
 }
 
 - (NSString *)convertTo128BitUUID:(NSString *)shortUUID {
@@ -1226,9 +1406,11 @@ static bool _scanPendingPowerOn = false;
     return [NSData data];
 }
 
+// The device a server event's central is. CoreBluetooth gives a central no
+// address, only an identifier, so it is named by its device id alone.
 - (NSString *) createJSONFromCentral:(CBCentral *)central {
     NSDictionary *centralDictionary = @{
-        @"address" : [self convertTo128BitUUID: central.identifier.UUIDString]
+        @"device_id" : [@"apple:ble:" stringByAppendingString:[self centralKey:central]]
     };
     
     NSError *error = nil;
@@ -1418,28 +1600,59 @@ static bool _scanPendingPowerOn = false;
 // # CLIENT
 // ####################################################################################
 
-- (double) bt_le_ios_state {
-    return _centralManager.state;
+static gmbluetooth::Error gmbt_not_open(std::string &message) {
+    return gmbt_fail(message, gmbluetooth::Error::OperationFailed, "The LE connection is not open");
 }
 
-- (double) bt_le_ios_authorization {
-    if (@available(iOS 13.0, *)) {
-        return _centralManager.authorization;
-    } else {
-        return -4;
-    }
+static gmbluetooth::Error gmbt_not_found(const char *what, NSString *uuid, std::string &message) {
+    return gmbt_fail(message, gmbluetooth::Error::NotFound, std::string(what) + " " + gmbt_string(uuid) + " not found");
 }
 
-static NSData *KCharacteristicUnsubscribe = [NSData dataWithBytes:(int[]){1} length:sizeof(int)];
-static NSData *KCharacteristicNotify = [NSData dataWithBytes:(int[]){2} length:sizeof(int)];
-static NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length:sizeof(int)];
+static gmbluetooth::Error gmbt_bad_base64(std::string &message) {
+    return gmbt_fail(message, gmbluetooth::Error::InvalidArgument, "The value is not valid base64");
+}
 
+// Issues the head of the connect queue once the central can take it. A head
+// with a timer was already issued.
 - (void) handleOpenPeripheralQueue {
-    [self handleQueue:_openPeripheralQueue withBlock:^(GMBTQueuedTimedPeripheral *queuedTimedPeripheral) {
-        [self->_centralManager connectPeripheral:queuedTimedPeripheral.peripheral options:nil];
-        queuedTimedPeripheral.timer = [NSTimer scheduledTimerWithTimeInterval:10 target:self selector:@selector(connectionDidTimeout) userInfo:nil repeats:NO];
-        
-    }];
+    if (!_centralManager || _centralManager.state != CBManagerStatePoweredOn) return;
+
+    GMBTQueuedTimedPeripheral *queued = [self queuePeek:_openPeripheralQueue];
+    if (!queued || queued.timer) return;
+
+    [_centralManager connectPeripheral:queued.peripheral options:nil];
+    queued.timer = [NSTimer scheduledTimerWithTimeInterval:kGMBTConnectTimeoutSeconds
+                                                    target:self
+                                                  selector:@selector(connectionDidTimeout:)
+                                                  userInfo:queued
+                                                   repeats:NO];
+}
+
+- (GMBTQueuedTimedPeripheral *) queuedOpenFor:(CBPeripheral *)peripheral {
+    for (GMBTQueuedTimedPeripheral *queued in _openPeripheralQueue) {
+        if (queued.peripheral == peripheral) return queued;
+    }
+    return nil;
+}
+
+// Takes a connect out of the queue and stops its timer; cancel also stops
+// the attempt CoreBluetooth is making for it. The caller issues the next.
+- (void) removeQueuedOpen:(GMBTQueuedTimedPeripheral *)queued cancel:(BOOL)cancel {
+    const BOOL issued = queued.timer != nil;
+    [queued.timer invalidate];
+    [_openPeripheralQueue removeObjectIdenticalTo:queued];
+    if (cancel && issued && _centralManager.state == CBManagerStatePoweredOn)
+        [_centralManager cancelPeripheralConnection:queued.peripheral];
+}
+
+// Fails every connect still waiting, for a central that left PoweredOn.
+- (void) failQueuedOpens:(gmbluetooth::Error)error message:(const std::string &)message {
+    NSArray<GMBTQueuedTimedPeripheral *> *queued = [_openPeripheralQueue copy];
+    [_openPeripheralQueue removeAllObjects];
+    for (GMBTQueuedTimedPeripheral *entry in queued) {
+        [entry.timer invalidate];
+        [self notifyOpen:entry.peripheral errorCode:@((int)error) error:error message:message];
+    }
 }
 
 - (void) handleFetchServicesQueue:(NSMutableArray *)queue {
@@ -1473,9 +1686,8 @@ static NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length
 }
 
 - (void) handleNotifyCharacteristicQueue:(NSMutableArray *)queue {
-    [self handleQueue:queue withBlock:^(GMBTQueuedCharacteristicWithData *queuedCharacteristicData) {
-        BOOL enable = [queuedCharacteristicData.data isEqualToData: KCharacteristicUnsubscribe] ? false : true;
-        [queuedCharacteristicData.peripheral setNotifyValue:enable forCharacteristic:queuedCharacteristicData.characteristic];
+    [self handleQueue:queue withBlock:^(GMBTQueuedSubscription *queuedSubscription) {
+        [queuedSubscription.peripheral setNotifyValue:(queuedSubscription.mode != 0) forCharacteristic:queuedSubscription.characteristic];
     }];
 }
 
@@ -1491,95 +1703,104 @@ static NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length
     }];
 }
 
+// Hands queued writes without response to CoreBluetooth while it can take
+// them, completing each as it goes; peripheralIsReadyToSendWriteWithoutResponse:
+// resumes. Before iOS 11 / macOS 10.13 there is no flow control to wait for.
+- (void) sendWritesWithoutResponse:(CBPeripheral *)peripheral {
+    NSMutableArray *queue = [self queuesForPeripheral:peripheral create:NO].writeWithoutResponse;
+    while (queue.count > 0) {
+        if (@available(iOS 11.0, macOS 10.13, *)) {
+            if (!peripheral.canSendWriteWithoutResponse) return;
+        }
+        GMBTQueuedCharacteristicWithData *queued = [self queueDequeue:queue];
+        [peripheral writeValue:queued.data forCharacteristic:queued.characteristic type:CBCharacteristicWriteWithoutResponse];
+        [self completeOp:queued.opId error:nil];
+    }
+}
 
 - (CBPeripheral *) peripheralForUuid:(NSString *)peripheralUuid {
-    
-    CBPeripheral *peripheral = [_openedPeripherals objectForKey:peripheralUuid];
-    if (peripheral == nil) {
-        NSLog(@"Peripheral not found");
-    }
-    
-    return peripheral;
+    return [_openedPeripherals objectForKey:[peripheralUuid uppercaseString]];
 }
 
 - (NSData *) dataFromBase64:(NSString *)value {
-    NSData *data = [[NSData alloc] initWithBase64EncodedString:value options:0];
-    if (data == nil) {
-        NSLog(@"Invalid base64 encoded value");
-    }
-    return data;
+    return [[NSData alloc] initWithBase64EncodedString:(value ? value : @"") options:0];
 }
 
-- (double) bt_le_peripheral_open:(NSString*) peripheralUuid {
-    CBPeripheral *peripheral = [_discoveredPeripherals objectForKey:peripheralUuid];
-    if (!peripheral) return -1;
-        
+// Busy while the peripheral is open or connecting. A peripheral no scan has
+// reported since the central last powered on may still be known to
+// CoreBluetooth by its identifier; NotFound when it is not.
+- (gmbluetooth::Error) bt_le_peripheral_open:(NSString*) peripheralUuid message:(std::string &)message {
+    const gmbluetooth::Error stateError = gmbt_require_powered_on(_centralManager.state, message);
+    if (stateError != gmbluetooth::Error::Ok) return stateError;
+
+    NSString *key = [peripheralUuid uppercaseString];
+    if ([self peripheralIsInUse:key])
+        return gmbt_fail(message, gmbluetooth::Error::Busy, "The device already has a connection");
+
+    CBPeripheral *peripheral = _discoveredPeripherals[key];
+    if (!peripheral && _centralManager.state == CBManagerStatePoweredOn) {
+        NSUUID *identifier = [[NSUUID alloc] initWithUUIDString:peripheralUuid];
+        if (identifier) {
+            peripheral = [_centralManager retrievePeripheralsWithIdentifiers:@[ identifier ]].firstObject;
+            if (peripheral) [self rememberPeripheral:peripheral];
+        }
+    }
+    if (!peripheral)
+        return gmbt_fail(message, gmbluetooth::Error::NotFound, "The device is not known to CoreBluetooth; scan for it again");
+
     // No op id: the core matches the open by the peripheral's connection.
     GMBTQueuedTimedPeripheral *queuePeripheral = [[GMBTQueuedTimedPeripheral alloc] initWithOpId:nil peripheral:peripheral];
+    [_openPeripheralQueue addObject:queuePeripheral];
+    [self handleOpenPeripheralQueue];
 
-    [self queueEnqueue:_openPeripheralQueue value:queuePeripheral withHandler:^{ [self handleOpenPeripheralQueue]; }];
-
-    return 0;
+    return gmbt_ok(message);
 }
 
-- (double) bt_le_peripheral_is_open:(NSString*) peripheralUuid {
-    return [_openedPeripherals objectForKey: peripheralUuid] == nil ? 0.0 : 1.0;
+- (BOOL) bt_le_peripheral_is_connected:(NSString*) peripheralUuid {
+    return [_connectedPeripherals objectForKey:[peripheralUuid uppercaseString]] != nil;
 }
 
-- (double) bt_le_peripheral_is_connected:(NSString*) peripheralUuid {
-    return [_connectedPeripherals objectForKey: peripheralUuid] == nil ? 0.0 : 1.0;
-}
-
-- (double) bt_le_peripheral_is_paired:(NSString*) peripheralUuid {
-    NSLog(@"%s :: method not available on iOS", "bt_le_peripheral_is_paired");
-    return 0.0;
-}
-
-- (double) bt_le_peripheral_close:(NSString*) peripheralUuid {
-    
-    CBPeripheral *peripheral = [_openedPeripherals objectForKey:peripheralUuid];
-    if (peripheral == nil) {
-        NSLog(@"Peripheral not found");
-        return 0.0;
-    }
-        
-    [_openedPeripherals removeObjectForKey:peripheralUuid];
-    [_connectedPeripherals removeObjectForKey:peripheralUuid];
-    [self dropQueuesForPeripheral:peripheral];
-
-    [_centralManager cancelPeripheralConnection:peripheral];
-
-    return 1.0;
-}
-
-- (double) bt_le_peripheral_close_all {
-
-    for (NSString *key in _openedPeripherals) {
-        CBPeripheral *peripheral = _openedPeripherals[key];
+// Synchronous and silent: the core retires the connection itself. A
+// peripheral still connecting leaves the queue, and the next connect goes.
+- (gmbluetooth::Error) bt_le_peripheral_close:(NSString*) peripheralUuid message:(std::string &)message {
+    NSString *key = [peripheralUuid uppercaseString];
+    CBPeripheral *peripheral = [_openedPeripherals objectForKey:key];
+    if (peripheral) {
+        [_openedPeripherals removeObjectForKey:key];
+        [_connectedPeripherals removeObjectForKey:key];
+        [self dropQueuesForPeripheral:peripheral];
         [_centralManager cancelPeripheralConnection:peripheral];
+        return gmbt_ok(message);
     }
 
-    [_openedPeripherals removeAllObjects];
-    [_connectedPeripherals removeAllObjects];
-    [_peripheralQueues removeAllObjects];
-
-    return 1.0;
+    GMBTQueuedTimedPeripheral *queued = nil;
+    for (GMBTQueuedTimedPeripheral *entry in _openPeripheralQueue) {
+        if ([[self peripheralKey:entry.peripheral] isEqualToString:key]) {
+            queued = entry;
+            break;
+        }
+    }
+    if (queued) {
+        [self removeQueuedOpen:queued cancel:YES];
+        [self handleOpenPeripheralQueue];
+    }
+    return gmbt_ok(message);
 }
 
-- (double) bt_le_peripheral_get_services:(NSString*) peripheralUuid opId:(NSNumber *)opId {
+- (gmbluetooth::Error) bt_le_peripheral_get_services:(NSString*) peripheralUuid opId:(NSNumber *)opId message:(std::string &)message {
     CBPeripheral *peripheral = [self peripheralForUuid:peripheralUuid];
-    if (!peripheral) return -1;
+    if (!peripheral) return gmbt_not_open(message);
 
     GMBTQueuedPeripheral *queuePeripheral = [[GMBTQueuedPeripheral alloc] initWithOpId:opId peripheral:peripheral];
 
     NSMutableArray *queue = [self queuesForPeripheral:peripheral create:YES].fetchServices;
     [self queueEnqueue:queue value:queuePeripheral withHandler:^{ [self handleFetchServicesQueue:queue]; }];
 
-    return 0;
+    return gmbt_ok(message);
 }
 
 - (CBService *) findServiceInPeripheral:(CBPeripheral *)peripheral withUUID:(NSString *)serviceUuid {
-    
+
     // Convert the service UUID string to a CBUUID
     CBUUID *targetUuid = [CBUUID UUIDWithString:serviceUuid];
     for (CBService *service in peripheral.services) {
@@ -1587,263 +1808,234 @@ static NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length
             return service;
         }
     }
-    
-    NSLog(@"Service not found");
-    
+
     return nil;
 }
 
-- (double) bt_le_service_get_characteristics:(NSString*) peripheralUuid service:(NSString*) serviceUuid opId:(NSNumber *)opId {
+- (gmbluetooth::Error) bt_le_service_get_characteristics:(NSString*) peripheralUuid service:(NSString*) serviceUuid opId:(NSNumber *)opId message:(std::string &)message {
     CBPeripheral *peripheral = [self peripheralForUuid:peripheralUuid];
-    if (!peripheral) return -1;
+    if (!peripheral) return gmbt_not_open(message);
 
-    // Get service with matching UUID
     CBService *service = [self findServiceInPeripheral:peripheral withUUID:serviceUuid];
-    if (!service) return -1;
+    if (!service) return gmbt_not_found("Service", serviceUuid, message);
 
     GMBTQueuedService *queuedService = [[GMBTQueuedService alloc] initWithOpId:opId peripheral:peripheral service:service];
 
     NSMutableArray *queue = [self queuesForPeripheral:peripheral create:YES].fetchCharacteristics;
     [self queueEnqueue:queue value:queuedService withHandler:^{ [self handleFetchCharacteristicsQueue:queue]; }];
 
-    return 0;
+    return gmbt_ok(message);
 }
 
 - (CBCharacteristic *) findCharacteristicInService:(CBService *)service withUUID:(NSString *)characteristicUuid {
-    
+
     // Convert the characteristic UUID string to a CBUUID
     CBUUID *targetUuid = [CBUUID UUIDWithString:characteristicUuid];
-    
+
     for (CBCharacteristic *characteristic in service.characteristics) {
         if ([characteristic.UUID isEqual:targetUuid]) {
             return characteristic;
         }
     }
-    
-    NSLog(@"Characteristic not found");
-    
+
     return nil;
 }
 
-- (double) bt_le_characteristic_get_descriptors:(NSString*) peripheralUuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid opId:(NSNumber *)opId {
-    
+// The characteristic a GATT call names on an open peripheral, or nil with
+// the call's error and message set.
+- (CBCharacteristic *) characteristicFor:(NSString *)peripheralUuid service:(NSString *)serviceUuid characteristic:(NSString *)characteristicUuid error:(gmbluetooth::Error &)error message:(std::string &)message {
     CBPeripheral *peripheral = [self peripheralForUuid:peripheralUuid];
-    if (!peripheral) return -1;
-    
-    // Get service with matching UUID
+    if (!peripheral) {
+        error = gmbt_not_open(message);
+        return nil;
+    }
     CBService *service = [self findServiceInPeripheral:peripheral withUUID:serviceUuid];
-    if (!service) return -1;
-    
-
-    // Get service with matching UUID
+    if (!service) {
+        error = gmbt_not_found("Service", serviceUuid, message);
+        return nil;
+    }
     CBCharacteristic *characteristic = [self findCharacteristicInService:service withUUID:characteristicUuid];
-    if (!characteristic) return -1;
-    
-    
+    if (!characteristic) {
+        error = gmbt_not_found("Characteristic", characteristicUuid, message);
+        return nil;
+    }
+    error = gmbt_ok(message);
+    return characteristic;
+}
+
+- (gmbluetooth::Error) bt_le_characteristic_get_descriptors:(NSString*) peripheralUuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid opId:(NSNumber *)opId message:(std::string &)message {
+    gmbluetooth::Error error = gmbluetooth::Error::Ok;
+    CBCharacteristic *characteristic = [self characteristicFor:peripheralUuid service:serviceUuid characteristic:characteristicUuid error:error message:message];
+    if (!characteristic) return error;
+    CBPeripheral *peripheral = characteristic.service.peripheral;
+
     GMBTQueuedCharacteristic *queuedCharacteristic = [[GMBTQueuedCharacteristic alloc] initWithOpId:opId peripheral:peripheral characteristic:characteristic];
 
     NSMutableArray *queue = [self queuesForPeripheral:peripheral create:YES].fetchDescriptors;
     [self queueEnqueue:queue value:queuedCharacteristic withHandler:^{ [self handleFetchDescriptorsQueue:queue]; }];
 
-    return 0;
+    return gmbt_ok(message);
 }
 
-- (double) bt_le_characteristic_read:(NSString*) peripheralUuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid opId:(NSNumber *)opId {
-    
-    CBPeripheral *peripheral = [self peripheralForUuid:peripheralUuid];
-    if (!peripheral) return -1;
-    
-    // Get service with matching UUID
-    CBService *service = [self findServiceInPeripheral:peripheral withUUID:serviceUuid];
-    if (!service) return -1;
+- (gmbluetooth::Error) bt_le_characteristic_read:(NSString*) peripheralUuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid opId:(NSNumber *)opId message:(std::string &)message {
+    gmbluetooth::Error error = gmbluetooth::Error::Ok;
+    CBCharacteristic *characteristic = [self characteristicFor:peripheralUuid service:serviceUuid characteristic:characteristicUuid error:error message:message];
+    if (!characteristic) return error;
+    CBPeripheral *peripheral = characteristic.service.peripheral;
 
-    // Get service with matching UUID
-    CBCharacteristic *characteristic = [self findCharacteristicInService:service withUUID:characteristicUuid];
-    if (!characteristic) return -1;
-    
     GMBTQueuedCharacteristic *queuedCharacteristic = [[GMBTQueuedCharacteristic alloc] initWithOpId:opId peripheral:peripheral characteristic:characteristic];
 
     NSMutableArray *queue = [self queuesForPeripheral:peripheral create:YES].readCharacteristic;
     [self queueEnqueue:queue value:queuedCharacteristic withHandler:^{ [self handleReadCharacteristicQueue:queue]; }];
 
-    return 0;
+    return gmbt_ok(message);
 }
 
-- (double) bt_le_characteristic_write_request:(NSString*) peripheralUuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid value:(NSString*) value opId:(NSNumber *)opId {
-    
-    CBPeripheral *peripheral = [self peripheralForUuid:peripheralUuid];
-    if (!peripheral) return -1;
-    
-    CBService *service = [self findServiceInPeripheral:peripheral withUUID:serviceUuid];
-    if (!service) return -1;
+- (gmbluetooth::Error) bt_le_characteristic_write_request:(NSString*) peripheralUuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid value:(NSString*) value opId:(NSNumber *)opId message:(std::string &)message {
+    gmbluetooth::Error error = gmbluetooth::Error::Ok;
+    CBCharacteristic *characteristic = [self characteristicFor:peripheralUuid service:serviceUuid characteristic:characteristicUuid error:error message:message];
+    if (!characteristic) return error;
+    CBPeripheral *peripheral = characteristic.service.peripheral;
 
-    CBCharacteristic *characteristic = [self findCharacteristicInService:service withUUID:characteristicUuid];
-    if (!characteristic) return -1;
-    
     NSData *data = [self dataFromBase64:value];
-    if (!data) return -1;
-    
+    if (!data) return gmbt_bad_base64(message);
+
     GMBTQueuedCharacteristicWithData *queuedCharacteristicData = [[GMBTQueuedCharacteristicWithData alloc] initWithOpId:opId peripheral:peripheral characteristic:characteristic data:data];
 
     NSMutableArray *queue = [self queuesForPeripheral:peripheral create:YES].writeCharacteristic;
     [self queueEnqueue:queue value:queuedCharacteristicData withHandler:^{ [self handleWriteCharacteristicQueue:queue]; }];
 
-    return 0;
+    return gmbt_ok(message);
 }
 
-- (double) bt_le_characteristic_write_command:(NSString*) peripheralUuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid value:(NSString*) value opId:(NSNumber *)opId {
-    
-    CBPeripheral *peripheral = [self peripheralForUuid:peripheralUuid];
-    if (!peripheral) return -1;
-    
-    CBService *service = [self findServiceInPeripheral:peripheral withUUID:serviceUuid];
-    if (!service) return -1;
+// CoreBluetooth sends no delegate call for a write without response, so each
+// completes when it is handed over: now, or from the queue once the link
+// can take it.
+- (gmbluetooth::Error) bt_le_characteristic_write_command:(NSString*) peripheralUuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid value:(NSString*) value opId:(NSNumber *)opId message:(std::string &)message {
+    gmbluetooth::Error error = gmbluetooth::Error::Ok;
+    CBCharacteristic *characteristic = [self characteristicFor:peripheralUuid service:serviceUuid characteristic:characteristicUuid error:error message:message];
+    if (!characteristic) return error;
+    CBPeripheral *peripheral = characteristic.service.peripheral;
 
-    CBCharacteristic *characteristic = [self findCharacteristicInService:service withUUID:characteristicUuid];
-    if (!characteristic) return -1;
-    
+    if (!(characteristic.properties & CBCharacteristicPropertyWriteWithoutResponse))
+        return gmbt_fail(message, gmbluetooth::Error::NotSupported, "The characteristic does not take writes without response");
+
     NSData *data = [self dataFromBase64:value];
-    if (!data) return -1;
-    
-    [peripheral writeValue:data forCharacteristic:characteristic type:CBCharacteristicWriteWithoutResponse];
+    if (!data) return gmbt_bad_base64(message);
 
-    // CoreBluetooth sends no delegate call for a write without response, so
-    // it completes here, under its own op id, before this call returns.
-    [self completeOp:opId error:nil];
+    if (@available(iOS 9.0, macOS 10.12, *)) {
+        const NSUInteger maximum = [peripheral maximumWriteValueLengthForType:CBCharacteristicWriteWithoutResponse];
+        if (data.length > maximum) {
+            return gmbt_fail(message, gmbluetooth::Error::InvalidArgument,
+                             "A write without response takes at most " + std::to_string((unsigned long)maximum) + " bytes on this link");
+        }
+    }
 
-    return 0;
+    NSMutableArray *queue = [self queuesForPeripheral:peripheral create:YES].writeWithoutResponse;
+    if (queue.count >= kGMBTMaxQueuedSends)
+        return gmbt_fail(message, gmbluetooth::Error::Busy, "Too many writes without response are waiting to be sent");
+
+    GMBTQueuedCharacteristicWithData *queued = [[GMBTQueuedCharacteristicWithData alloc] initWithOpId:opId peripheral:peripheral characteristic:characteristic data:data];
+    [queue addObject:queued];
+    [self sendWritesWithoutResponse:peripheral];
+
+    return gmbt_ok(message);
 }
 
-- (double) manageCharacteristicSubscriptionForPeripheral:(NSString*) peripheralUuid service:(NSString*) serviceUuid characteristicUuid:(NSString*) characteristicUuid type:(NSData*)type opId:(NSNumber *)opId {
-    CBPeripheral *peripheral = [self peripheralForUuid:peripheralUuid];
-    if (!peripheral) return -1;
-    
-    CBService *service = [self findServiceInPeripheral:peripheral withUUID:serviceUuid];
-    if (!service) return -1;
-    
-    CBCharacteristic *characteristic = [self findCharacteristicInService:service withUUID:characteristicUuid];
-    if (!characteristic) return -1;
-    
-    GMBTQueuedCharacteristicWithData *queuedCharacteristicData = [[GMBTQueuedCharacteristicWithData alloc] initWithOpId:opId peripheral:peripheral characteristic:characteristic data:type];
+- (void) peripheralIsReadyToSendWriteWithoutResponse:(CBPeripheral *)peripheral {
+    [self sendWritesWithoutResponse:peripheral];
+}
+
+- (gmbluetooth::Error) bt_le_characteristic_subscribe:(NSString*) peripheralUuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid mode:(NSInteger)mode opId:(NSNumber *)opId message:(std::string &)message {
+    gmbluetooth::Error error = gmbluetooth::Error::Ok;
+    CBCharacteristic *characteristic = [self characteristicFor:peripheralUuid service:serviceUuid characteristic:characteristicUuid error:error message:message];
+    if (!characteristic) return error;
+    CBPeripheral *peripheral = characteristic.service.peripheral;
+
+    GMBTQueuedSubscription *queuedSubscription = [[GMBTQueuedSubscription alloc] initWithOpId:opId peripheral:peripheral characteristic:characteristic mode:mode];
 
     NSMutableArray *queue = [self queuesForPeripheral:peripheral create:YES].notifyCharacteristic;
-    [self queueEnqueue:queue value:queuedCharacteristicData withHandler:^{ [self handleNotifyCharacteristicQueue:queue]; }];
+    [self queueEnqueue:queue value:queuedSubscription withHandler:^{ [self handleNotifyCharacteristicQueue:queue]; }];
 
-    return 0;
-}
-
-- (double) bt_le_characteristic_notify:(NSString*) peripheralUuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid opId:(NSNumber *)opId {
-
-    return [self manageCharacteristicSubscriptionForPeripheral:peripheralUuid service:serviceUuid characteristicUuid:characteristicUuid type: KCharacteristicNotify opId:opId];
-}
-
-- (double) bt_le_characteristic_indicate:(NSString*) peripheralUuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid opId:(NSNumber *)opId {
-
-    return [self manageCharacteristicSubscriptionForPeripheral:peripheralUuid service:serviceUuid characteristicUuid:characteristicUuid type: KCharacteristicIndicate opId:opId];
-}
-
-- (double) bt_le_characteristic_unsubscribe:(NSString*) peripheralUuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid opId:(NSNumber *)opId {
-
-    return [self manageCharacteristicSubscriptionForPeripheral:peripheralUuid service:serviceUuid characteristicUuid:characteristicUuid type:KCharacteristicUnsubscribe opId:opId];
+    return gmbt_ok(message);
 }
 
 - (CBDescriptor *) findDescriptorInCharacteristic:(CBCharacteristic *)characteristic withUUID:(NSString *)descriptorUuid {
-    
+
     // Convert the descriptor UUID string to a CBUUID
     CBUUID *targetUuid = [CBUUID UUIDWithString:descriptorUuid];
-    
+
     for (CBDescriptor *descriptor in characteristic.descriptors) {
         if ([descriptor.UUID isEqual:targetUuid]) {
             return descriptor;
         }
     }
-    
-    NSLog(@"Descriptor not found");
-    
+
     return nil;
 }
 
-- (double) bt_le_descriptor_read:(NSString*) peripheralUuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid descriptor:(NSString*) descriptorUuid opId:(NSNumber *)opId {
-    
-    CBPeripheral *peripheral = [self peripheralForUuid:peripheralUuid];
-    if (!peripheral) return -1;
-    
-    // Get service with matching UUID
-    CBService *service = [self findServiceInPeripheral:peripheral withUUID:serviceUuid];
-    if (!service) return -1;
+- (gmbluetooth::Error) bt_le_descriptor_read:(NSString*) peripheralUuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid descriptor:(NSString*) descriptorUuid opId:(NSNumber *)opId message:(std::string &)message {
+    gmbluetooth::Error error = gmbluetooth::Error::Ok;
+    CBCharacteristic *characteristic = [self characteristicFor:peripheralUuid service:serviceUuid characteristic:characteristicUuid error:error message:message];
+    if (!characteristic) return error;
+    CBPeripheral *peripheral = characteristic.service.peripheral;
 
-    // Get characteristic with matching UUID
-    CBCharacteristic *characteristic = [self findCharacteristicInService:service withUUID:characteristicUuid];
-    if (!characteristic) return -1;
-    
-    // Get descriptor with matching UUID
     CBDescriptor *descriptor = [self findDescriptorInCharacteristic:characteristic withUUID:descriptorUuid];
-    if (!descriptor) return -1;
-    
+    if (!descriptor) return gmbt_not_found("Descriptor", descriptorUuid, message);
+
     GMBTQueuedDescriptor *queuedDescriptor = [[GMBTQueuedDescriptor alloc] initWithOpId:opId peripheral:peripheral descriptor:descriptor];
 
     NSMutableArray *queue = [self queuesForPeripheral:peripheral create:YES].readDescriptor;
     [self queueEnqueue:queue value:queuedDescriptor withHandler:^{ [self handleReadDescriptorQueue:queue]; }];
 
-    return 0;
+    return gmbt_ok(message);
 }
 
-- (double) bt_le_descriptor_write:(NSString*) peripheralUuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid descriptor:(NSString*) descriptorUuid value:(NSString*) value opId:(NSNumber *)opId {
-    
-    CBPeripheral *peripheral = [self peripheralForUuid:peripheralUuid];
-    if (!peripheral) return -1;
-    
-    // Get service with matching UUID
-    CBService *service = [self findServiceInPeripheral:peripheral withUUID:serviceUuid];
-    if (!service) return -1;
+- (gmbluetooth::Error) bt_le_descriptor_write:(NSString*) peripheralUuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid descriptor:(NSString*) descriptorUuid value:(NSString*) value opId:(NSNumber *)opId message:(std::string &)message {
+    gmbluetooth::Error error = gmbluetooth::Error::Ok;
+    CBCharacteristic *characteristic = [self characteristicFor:peripheralUuid service:serviceUuid characteristic:characteristicUuid error:error message:message];
+    if (!characteristic) return error;
+    CBPeripheral *peripheral = characteristic.service.peripheral;
 
-    // Get characteristic with matching UUID
-    CBCharacteristic *characteristic = [self findCharacteristicInService:service withUUID:characteristicUuid];
-    if (!characteristic) return -1;
-    
-    // Get descriptor with matching UUID
     CBDescriptor *descriptor = [self findDescriptorInCharacteristic:characteristic withUUID:descriptorUuid];
-    if (!descriptor) return -1;
-    
+    if (!descriptor) return gmbt_not_found("Descriptor", descriptorUuid, message);
+
     NSData *data = [self dataFromBase64:value];
-    if (!data) return -1;
-    
+    if (!data) return gmbt_bad_base64(message);
+
     GMBTQueuedDescriptorWithData *queuedDescriptorWithData = [[GMBTQueuedDescriptorWithData alloc] initWithOpId:opId peripheral:peripheral descriptor:descriptor data:data];
 
     NSMutableArray *queue = [self queuesForPeripheral:peripheral create:YES].writeDescriptor;
     [self queueEnqueue:queue value:queuedDescriptorWithData withHandler:^{ [self handleWriteDescriptorQueue:queue]; }];
 
-    return 0;
+    return gmbt_ok(message);
 }
 
+// Only a connect still queued is reported. Any other connect - one the game
+// closed while it was connecting, or one that timed out just before this -
+// is cancelled again, unless the peripheral is open.
 - (void) centralManager:(CBCentralManager *)central didConnectPeripheral:(CBPeripheral *)peripheral {
-	
-    GMBTQueuedTimedPeripheral *queuedPeripheral = [self queueDequeue:_openPeripheralQueue];
-    
-    [queuedPeripheral.timer invalidate];
-    
-    peripheral.delegate = self;
-	
-    [_openedPeripherals setObject:peripheral forKey:[peripheral.identifier UUIDString]];
-    [_connectedPeripherals setObject:peripheral forKey:[peripheral.identifier UUIDString]];
-    
-    NSMutableDictionary* params = [[NSMutableDictionary alloc] init];
-    params[@"name"] = peripheral.name ?: @"";
-    params[@"address"] = peripheral.identifier.UUIDString;
+    NSString *key = [self peripheralKey:peripheral];
+    GMBTQueuedTimedPeripheral *queuedPeripheral = [self queuedOpenFor:peripheral];
+    if (!queuedPeripheral) {
+        if (!_openedPeripherals[key]) [central cancelPeripheralConnection:peripheral];
+        return;
+    }
+    [self removeQueuedOpen:queuedPeripheral cancel:NO];
 
-    [self notifyResult:@"bt_le_peripheral_open" errorCode:nil extraParams:params];
+    peripheral.delegate = self;
+
+    [_openedPeripherals setObject:peripheral forKey:key];
+    [_connectedPeripherals setObject:peripheral forKey:key];
+
+    [self notifyOpen:peripheral errorCode:nil error:gmbluetooth::Error::Ok message:std::string()];
     [self handleOpenPeripheralQueue];
 }
 
 - (void) centralManager:(CBCentralManager *)central didFailToConnectPeripheral:(CBPeripheral *)peripheral error:(NSError *)error {
-    
-    GMBTQueuedTimedPeripheral *queuedPeripheral = [self queueDequeue:_openPeripheralQueue];
-    
-    [queuedPeripheral.timer invalidate];
-    
-    NSMutableDictionary* params = [[NSMutableDictionary alloc] init];
-    params[@"name"] = peripheral.name ?: @"";
-    params[@"address"] = peripheral.identifier.UUIDString;
+    GMBTQueuedTimedPeripheral *queuedPeripheral = [self queuedOpenFor:peripheral];
+    if (!queuedPeripheral) return;
+    [self removeQueuedOpen:queuedPeripheral cancel:NO];
 
     // A connect that failed for no more specific reason is ConnectionFailed.
     std::string message = "LE connect failed";
@@ -1852,36 +2044,32 @@ static NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length
         failure = gmbt_error_from_nserror(error, message);
         if (failure == gmbluetooth::Error::OperationFailed) failure = gmbluetooth::Error::ConnectionFailed;
     }
-    params[@"error"] = @((int)failure);
-    params[@"message"] = gmbt_ns(message);
 
-    [self notifyResult:@"bt_le_peripheral_open" errorCode:@((int)error.code) extraParams:params];
+    [self notifyOpen:peripheral errorCode:@(error ? (int)error.code : 0) error:failure message:message];
     [self handleOpenPeripheralQueue];
 }
 
-- (void) connectionDidTimeout {
-    GMBTQueuedPeripheral *queuedPeripheral = [self queueDequeue:_openPeripheralQueue];
-    
-    [_centralManager cancelPeripheralConnection: queuedPeripheral.peripheral];
-    
-    NSMutableDictionary* params = [[NSMutableDictionary alloc] init];
-    params[@"name"] = queuedPeripheral.peripheral.name ?: @"";
-    params[@"address"] = queuedPeripheral.peripheral.identifier.UUIDString;
-    params[@"error"] = @((int)gmbluetooth::Error::Timeout);
-    params[@"message"] = @"LE connect timed out";
+// timer.userInfo is the connect it bounds; one that already left the queue
+// has had its answer.
+- (void) connectionDidTimeout:(NSTimer *)timer {
+    GMBTQueuedTimedPeripheral *queuedPeripheral = timer.userInfo;
+    if (![queuedPeripheral isKindOfClass:[GMBTQueuedTimedPeripheral class]] ||
+        [_openPeripheralQueue indexOfObjectIdenticalTo:queuedPeripheral] == NSNotFound)
+        return;
 
-    [self notifyResult:@"bt_le_peripheral_open" errorCode:@133 extraParams:params];
+    [self removeQueuedOpen:queuedPeripheral cancel:YES];
+    [self notifyOpen:queuedPeripheral.peripheral errorCode:@133 error:gmbluetooth::Error::Timeout message:"LE connect timed out"];
     [self handleOpenPeripheralQueue];
 }
 
 - (void) centralManager:(CBCentralManager *)central didDisconnectPeripheral:(CBPeripheral *)peripheral error:(NSError *)error {
-    NSString *key = peripheral.identifier.UUIDString;
+    NSString *key = [self peripheralKey:peripheral];
     [self dropQueuesForPeripheral:peripheral];
 
     // Not open any more: the game closed it (bt_le_peripheral_close), the
     // central reported it when it left PoweredOn, or it never finished
     // opening. Each of those has already been reported.
-    if (!key || !_openedPeripherals[key]) return;
+    if (key.length == 0 || !_openedPeripherals[key]) return;
 
     [_openedPeripherals removeObjectForKey:key];
     [_connectedPeripherals removeObjectForKey:key];
@@ -1899,39 +2087,6 @@ static NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length
     params[@"message"] = gmbt_ns(message);
     [self notifyOperation:@"bt_le_peripheral_disconnect" extraParams:params];
 }
-
-#if TARGET_OS_IOS
-
-- (void) centralManager:(CBCentralManager *)central connectionEventDidOccur:(CBConnectionEvent)event forPeripheral:(CBPeripheral *)peripheral {
-    
-    NSMutableDictionary* params = [[NSMutableDictionary alloc] init];
-    params[@"name"] = peripheral.name ?: @"";
-    params[@"address"] = peripheral.identifier.UUIDString;
-    
-    // Peripheral connected
-    if (event == CBConnectionEventPeerConnected) {
-        peripheral.delegate = self;
-        [_connectedPeripherals setObject:peripheral forKey:peripheral.identifier.UUIDString];
-        
-        params[@"is_connected"] = @(true);
-    }
-    // Peripheral disconneted
-    else if (event == CBConnectionEventPeerDisconnected) {
-        // Still open means the link dropped; otherwise the game closed it
-        // (bt_le_peripheral_close) or never opened it.
-        const BOOL lost = _openedPeripherals[peripheral.identifier.UUIDString] != nil;
-        peripheral.delegate = nil;
-        [_connectedPeripherals removeObjectForKey:peripheral.identifier.UUIDString];
-
-        params[@"is_connected"] = @(false);
-        params[@"error"] = @((int)(lost ? gmbluetooth::Error::Disconnected : gmbluetooth::Error::Ok));
-        params[@"message"] = lost ? @"The peripheral disconnected" : @"";
-    }
-    
-    [self notifyOperation:@"bt_le_peripheral_connection_state_changed" extraParams:params];
-}
-
-#endif
 
 - (void) peripheral:(CBPeripheral *)peripheral didDiscoverServices:(NSError *)error {
 	
@@ -1981,12 +2136,12 @@ static NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length
 - (void) peripheral:(CBPeripheral *)peripheral didUpdateNotificationStateForCharacteristic:(CBCharacteristic *)characteristic error:(NSError *)error {
     
     NSMutableArray *queue = [self queuesForPeripheral:peripheral create:NO].notifyCharacteristic;
-    GMBTQueuedCharacteristicWithData *queuedCharacteristicWithData = [self takeHeadOf:queue answering:@"didUpdateNotificationStateForCharacteristic" matching:^BOOL(id head) {
-        return ((GMBTQueuedCharacteristicWithData *)head).characteristic == characteristic;
+    GMBTQueuedSubscription *queuedSubscription = [self takeHeadOf:queue answering:@"didUpdateNotificationStateForCharacteristic" matching:^BOOL(id head) {
+        return ((GMBTQueuedSubscription *)head).characteristic == characteristic;
     }];
-    if (!queuedCharacteristicWithData) return;
+    if (!queuedSubscription) return;
 
-    [self completeOp:queuedCharacteristicWithData.opId error:error];
+    [self completeOp:queuedSubscription.opId error:error];
 
     [self handleNotifyCharacteristicQueue:queue];
 }
@@ -2065,65 +2220,59 @@ static NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length
     NSString *stateString = gmbt_manager_state_name(central.state);
     NSLog(@"[GMBluetooth] CBCentralManager state changed: %@ (%d)", stateString, (int)central.state);
 
-    if (central.state == CBManagerStatePoweredOn) {
-        // Deferred out of bt_init: CoreBluetooth rejects this before PoweredOn.
-        [self applyPoweredOnCentralOptions];
+    const CBManagerState previous = _centralState;
+    _centralState = central.state;
 
+    if (central.state == CBManagerStatePoweredOn) {
         if (_scanPendingPowerOn) {
             _scanPendingPowerOn = false;
             NSLog(@"[GMBluetooth] central reached PoweredOn - starting the scan deferred at request time");
             [self beginScan];
         }
+        [self handleOpenPeripheralQueue];
     }
-    else if (_scanPendingPowerOn && central.state != CBManagerStateUnknown &&
-             central.state != CBManagerStateResetting) {
-        // Unsupported / Unauthorized / PoweredOff are terminal for this request -
-        // holding the deferral would stall the caller indefinitely.
-        _scanPendingPowerOn = false;
-        NSLog(@"[GMBluetooth] central reached %@ - the deferred scan cannot start and has been dropped",
-              stateString);
-        [self notifyResult:@"bt_le_scan_start"
-                 errorCode:@((int)central.state)
-               extraParams:@{ @"state": stateString }];
-    }
+    // Unknown or Resetting before the central was ever PoweredOn: a deferred
+    // scan or connect keeps waiting. Otherwise the central has left PoweredOn
+    // or reached a final state, and nothing asked of it can go on.
+    else if (!gmbt_state_is_transient(central.state) || previous == CBManagerStatePoweredOn) {
+        std::string message;
+        const gmbluetooth::Error error = gmbt_unavailable_error(central.state, message);
 
-    if (central.state != CBManagerStatePoweredOn && _openedPeripherals.count > 0) {
-        // Every link is gone, and CoreBluetooth does not promise a
-        // didDisconnectPeripheral for each. Report each open peripheral once
-        // here; the later didDisconnectPeripheral, if any, finds it closed.
-        NSArray<CBPeripheral *> *lost = [_openedPeripherals allValues];
-        [_openedPeripherals removeAllObjects];
-        [_connectedPeripherals removeAllObjects];
-        [_peripheralQueues removeAllObjects];
-        NSString *message = [NSString stringWithFormat:@"Bluetooth became unavailable (%@)", stateString];
-        for (CBPeripheral *peripheral in lost) {
-            [self notifyOperation:@"bt_le_peripheral_disconnect"
-                      extraParams:@{ @"address": peripheral.identifier.UUIDString ? peripheral.identifier.UUIDString : @"",
-                                     @"error_code": @((int)central.state),
-                                     @"error": @((int)gmbluetooth::Error::Disconnected),
-                                     @"message": message }];
+        if (_isScanning || _scanPendingPowerOn) {
+            _isScanning = false;
+            _scanPendingPowerOn = false;
+            NSLog(@"[GMBluetooth] central reached %@ - the scan has ended", stateString);
+            [self notifyScanStopped:error message:message];
+        }
+
+        [self failQueuedOpens:error message:message];
+
+        // The peripherals a scan found are not valid across a power cycle.
+        [self forgetDiscoveredPeripherals];
+
+        if (_openedPeripherals.count > 0) {
+            // Every link is gone, and CoreBluetooth does not promise a
+            // didDisconnectPeripheral for each. Report each open peripheral once
+            // here; the later didDisconnectPeripheral, if any, finds it closed.
+            NSArray<CBPeripheral *> *lost = [_openedPeripherals allValues];
+            [_openedPeripherals removeAllObjects];
+            [_connectedPeripherals removeAllObjects];
+            [_peripheralQueues removeAllObjects];
+            NSString *lostMessage = [NSString stringWithFormat:@"Bluetooth became unavailable (%@)", stateString];
+            for (CBPeripheral *peripheral in lost) {
+                [self notifyOperation:@"bt_le_peripheral_disconnect"
+                          extraParams:@{ @"address": [self peripheralKey:peripheral],
+                                         @"error_code": @((int)central.state),
+                                         @"error": @((int)gmbluetooth::Error::Disconnected),
+                                         @"message": lostMessage }];
+            }
         }
     }
 
     [self notifyOperation:@"bt_state_changed"
               extraParams:@{ @"state": @((int)central.state), @"state_name": stateString }];
 
-    // Keep the legacy transport event for compatibility with existing diagnostics.
-    [self notifyOperation:@"bt_le_state_update"
-              extraParams:@{ @"success": @((int)central.state), @"state": stateString }];
-
     if (self.managerStateSink) self.managerStateSink();
-}
-
-- (void) centralManager:(CBCentralManager *)central willRestoreState:(NSDictionary<NSString *,id> *)dict {
-    NSArray *peripherals = dict[CBCentralManagerRestoredStatePeripheralsKey];
-    if (peripherals) {
-        for (CBPeripheral *peripheral in peripherals) {
-            _openedPeripherals[[peripheral.identifier UUIDString]] = peripheral;
-        }
-    }
-    
-    [self notifyOperation:@"bt_le_peripheral_restore_state" extraParams:nil];
 }
 
 - (void) peripheral:(CBPeripheral *)peripheral didReadRSSI:(NSNumber *)RSSI error:(NSError *)error {
@@ -2134,65 +2283,71 @@ static NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length
 	// We don't handle this
 }
 
+// Only an open peripheral's requests are failed here; nothing is reported to
+// the game and the peripheral's open state is left as it is.
 - (void) peripheral:(CBPeripheral *)peripheral didModifyServices:(NSArray<CBService *> *)invalidatedServices {
+    if (!_openedPeripherals[[self peripheralKey:peripheral]]) return;
+
     // The link stays up, so no disconnect will fail these: requests on an
     // invalidated service fail here, each with its own op id. Service
     // discovery is per peripheral and stays queued.
     GMBTPeripheralQueues *queues = [self queuesForPeripheral:peripheral create:NO];
-    if (queues) {
-        CBService *(^characteristicService)(id) = ^CBService *(id entry) {
-            return ((GMBTQueuedCharacteristic *)entry).characteristic.service;
-        };
-        CBService *(^descriptorService)(id) = ^CBService *(id entry) {
-            return ((GMBTQueuedDescriptor *)entry).descriptor.characteristic.service;
-        };
+    if (!queues) return;
 
-        NSMutableArray *q = queues.fetchCharacteristics;
-        [self failQueue:q
-                service:^CBService *(id entry) { return ((GMBTQueuedService *)entry).service; }
-            invalidated:invalidatedServices
-                reissue:^{ [self handleFetchCharacteristicsQueue:q]; }];
+    CBService *(^characteristicService)(id) = ^CBService *(id entry) {
+        return ((GMBTQueuedCharacteristic *)entry).characteristic.service;
+    };
+    CBService *(^descriptorService)(id) = ^CBService *(id entry) {
+        return ((GMBTQueuedDescriptor *)entry).descriptor.characteristic.service;
+    };
 
-        NSMutableArray *d = queues.fetchDescriptors;
-        [self failQueue:d
-                service:characteristicService
-            invalidated:invalidatedServices
-                reissue:^{ [self handleFetchDescriptorsQueue:d]; }];
+    NSMutableArray *q = queues.fetchCharacteristics;
+    [self failQueue:q
+            service:^CBService *(id entry) { return ((GMBTQueuedService *)entry).service; }
+        invalidated:invalidatedServices
+            reissue:^{ [self handleFetchCharacteristicsQueue:q]; }];
 
-        NSMutableArray *r = queues.readCharacteristic;
-        [self failQueue:r
-                service:characteristicService
-            invalidated:invalidatedServices
-                reissue:^{ [self handleReadCharacteristicQueue:r]; }];
+    NSMutableArray *d = queues.fetchDescriptors;
+    [self failQueue:d
+            service:characteristicService
+        invalidated:invalidatedServices
+            reissue:^{ [self handleFetchDescriptorsQueue:d]; }];
 
-        NSMutableArray *w = queues.writeCharacteristic;
-        [self failQueue:w
-                service:characteristicService
-            invalidated:invalidatedServices
-                reissue:^{ [self handleWriteCharacteristicQueue:w]; }];
+    NSMutableArray *r = queues.readCharacteristic;
+    [self failQueue:r
+            service:characteristicService
+        invalidated:invalidatedServices
+            reissue:^{ [self handleReadCharacteristicQueue:r]; }];
 
-        NSMutableArray *n = queues.notifyCharacteristic;
-        [self failQueue:n
-                service:characteristicService
-            invalidated:invalidatedServices
-                reissue:^{ [self handleNotifyCharacteristicQueue:n]; }];
+    NSMutableArray *w = queues.writeCharacteristic;
+    [self failQueue:w
+            service:characteristicService
+        invalidated:invalidatedServices
+            reissue:^{ [self handleWriteCharacteristicQueue:w]; }];
 
-        NSMutableArray *rd = queues.readDescriptor;
-        [self failQueue:rd
-                service:descriptorService
-            invalidated:invalidatedServices
-                reissue:^{ [self handleReadDescriptorQueue:rd]; }];
+    NSMutableArray *wn = queues.writeWithoutResponse;
+    [self failQueue:wn
+            service:characteristicService
+        invalidated:invalidatedServices
+            reissue:^{ [self sendWritesWithoutResponse:peripheral]; }];
 
-        NSMutableArray *wd = queues.writeDescriptor;
-        [self failQueue:wd
-                service:descriptorService
-            invalidated:invalidatedServices
-                reissue:^{ [self handleWriteDescriptorQueue:wd]; }];
-    }
+    NSMutableArray *n = queues.notifyCharacteristic;
+    [self failQueue:n
+            service:characteristicService
+        invalidated:invalidatedServices
+            reissue:^{ [self handleNotifyCharacteristicQueue:n]; }];
 
-	peripheral.delegate = self;
-    [_openedPeripherals setObject:peripheral forKey:peripheral.identifier.UUIDString];
-    [self notifyOperation:@"bt_le_peripheral_service_change" extraParams:@{ @"name": (peripheral.name ?: @""), @"address": peripheral.identifier.UUIDString }];
+    NSMutableArray *rd = queues.readDescriptor;
+    [self failQueue:rd
+            service:descriptorService
+        invalidated:invalidatedServices
+            reissue:^{ [self handleReadDescriptorQueue:rd]; }];
+
+    NSMutableArray *wd = queues.writeDescriptor;
+    [self failQueue:wd
+            service:descriptorService
+        invalidated:invalidatedServices
+            reissue:^{ [self handleWriteDescriptorQueue:wd]; }];
 }
 
 
@@ -2244,6 +2399,8 @@ static void gmbt_unpark(id object)
 @property (nonatomic, copy) void (^onOpenComplete)(IOReturn status);
 @property (nonatomic, copy) void (^onData)(NSData *data);
 @property (nonatomic, copy) void (^onClose)(void);
+// The writeAsync: in flight finished; the next chunk goes from here.
+@property (nonatomic, copy) void (^onWriteComplete)(IOReturn status);
 @end
 
 @implementation GMBTClassicChannelDelegate
@@ -2256,6 +2413,9 @@ static void gmbt_unpark(id object)
 - (void)rfcommChannelClosed:(IOBluetoothRFCOMMChannel *)rfcommChannel {
     if (self.onClose) self.onClose();
 }
+- (void)rfcommChannelWriteComplete:(IOBluetoothRFCOMMChannel *)rfcommChannel refcon:(void *)refcon status:(IOReturn)error {
+    if (self.onWriteComplete) self.onWriteComplete(error);
+}
 @end
 
 @interface GMBTClassicInquiryDelegate : NSObject <IOBluetoothDeviceInquiryDelegate>
@@ -2265,6 +2425,11 @@ static void gmbt_unpark(id object)
 
 @implementation GMBTClassicInquiryDelegate
 - (void)deviceInquiryDeviceFound:(IOBluetoothDeviceInquiry *)sender device:(IOBluetoothDevice *)device {
+    if (self.onDeviceFound) self.onDeviceFound(device);
+}
+// setUpdateNewDeviceNames: resolves names after the device was found; the
+// device is reported again so the core's entry gets the name.
+- (void)deviceInquiryDeviceNameUpdated:(IOBluetoothDeviceInquiry *)sender device:(IOBluetoothDevice *)device devicesRemaining:(uint32_t)devicesRemaining {
     if (self.onDeviceFound) self.onDeviceFound(device);
 }
 - (void)deviceInquiryComplete:(IOBluetoothDeviceInquiry *)sender error:(IOReturn)error aborted:(BOOL)aborted {
@@ -2317,16 +2482,7 @@ namespace gmbluetooth
 {
 namespace
 {
-    static std::string to_string(NSString* value)
-    {
-        return value ? std::string([value UTF8String]) : std::string{};
-    }
-
-    static NSString* to_ns(const std::string& value)
-    {
-        return [NSString stringWithUTF8String:value.c_str()];
-    }
-
+    // Never nil, so the result can always go into a collection.
     static id json_safe_value(id value)
     {
         if (!value || value == [NSNull null]) return [NSNull null];
@@ -2341,32 +2497,37 @@ namespace
         if ([value isKindOfClass:[NSArray class]])
         {
             NSMutableArray* out = [NSMutableArray array];
-            for (id item in (NSArray*)value) [out addObject:json_safe_value(item) ?: [NSNull null]];
+            for (id item in (NSArray*)value) [out addObject:json_safe_value(item)];
             return out;
         }
         if ([value isKindOfClass:[NSDictionary class]])
         {
             NSMutableDictionary* out = [NSMutableDictionary dictionary];
             for (id key in (NSDictionary*)value)
-                out[[key description]] = json_safe_value(((NSDictionary*)value)[key]) ?: [NSNull null];
+            {
+                NSString* name = [key description];
+                if (name) out[name] = json_safe_value(((NSDictionary*)value)[key]);
+            }
             return out;
         }
-        return [value description];
+        NSString* text = [value description];
+        if (!text) return [NSNull null];
+        return text;
     }
 
     static std::string json_string(NSDictionary* dictionary)
     {
-        NSDictionary* safe = (NSDictionary*)json_safe_value(dictionary ?: @{});
+        NSDictionary* safe = (NSDictionary*)json_safe_value(dictionary ? dictionary : @{});
         NSError* error = nil;
         NSData* data = [NSJSONSerialization dataWithJSONObject:safe options:0 error:&error];
         if (!data || error) return "{}";
         NSString* text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        return to_string(text);
+        return gmbt_string(text);
     }
 
     static std::string normalized_event_type(NSString* oldType)
     {
-        std::string type = to_string(oldType);
+        std::string type = gmbt_string(oldType);
         if (type.rfind("bt_", 0) == 0)
             return "bluetooth_" + type.substr(3);
         return type;
@@ -2470,6 +2631,29 @@ namespace
         bool pairing_is_supported(const DiscoveredDevice&) const override { return false; }
 #endif
 
+        // The core answers LeCentral, LeAdvertise, LeServer, Classic and
+        // ClassicServer from the supports_* calls. Of the rest, CoreBluetooth
+        // advertises only the name and service UUIDs (always connectable, no
+        // TX power), never scans passively, hands the app no descriptor
+        // requests, signed writes or connection events, and pairs on its own
+        // when an attribute asks for it; macOS pairs Classic devices through
+        // IOBluetooth and cannot be made discoverable.
+        bool feature_supported(std::int32_t feature) const override
+        {
+            switch (feature)
+            {
+                case kFeatureLeAdvertiseName:
+                case kFeatureLeAdvertiseServiceUuids:
+                    return supports_le_advertise();
+                case kFeatureClassicPairing:
+                    return supports_classic();
+                case kFeaturePermissionRequest:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
         std::int32_t current_bluetooth_state() const override
         {
             if (!transport_)
@@ -2528,21 +2712,19 @@ namespace
             return Error::Ok;
         }
 
+        // active is a hint CoreBluetooth has no switch for: every scan is
+        // active (LePassiveScan).
         Error le_scan_start(bool, std::string& message) override
         {
             if (const Error e = require_managers(message); e != Error::Ok) return e;
-            const double r = [transport_ bt_le_scan_start];
-            if (r < 0) { message = "BLE scan could not start"; return Error::OperationFailed; }
-            message.clear(); return Error::Ok;
+            return [transport_ bt_le_scan_start:message];
         }
         Error le_scan_stop(std::string& message) override
         {
-            const double r = [transport_ bt_le_scan_stop];
-            if (r < 0) { message = "BLE scan could not stop"; return Error::OperationFailed; }
-            BackendEvent ev; ev.type=BackendEventType::ScanStopped; ev.transport=Transport::LowEnergy; hooks_.push_event(std::move(ev));
-            message.clear(); return Error::Ok;
+            if (const Error e = require_managers(message); e != Error::Ok) return e;
+            return [transport_ bt_le_scan_stop:message];
         }
-        bool le_scan_is_running() const override { return transport_ && [transport_ bt_le_scan_is_active] > 0.5; }
+        bool le_scan_is_running() const override { return transport_ && [transport_ bt_le_scan_is_active]; }
 
         Error le_connect(std::uint64_t connection, const DiscoveredDevice& device, std::string& message) override
         {
@@ -2551,36 +2733,44 @@ namespace
             if (identifier.empty()) { message="BLE device identifier is unavailable"; return Error::InvalidArgument; }
             {
                 std::scoped_lock lock(mutex_);
+                // One link per peripheral: an entry is removed when its link
+                // ends or its connect fails.
+                if (le_id_to_connection_.count(identifier) != 0) { message="The device already has a connection"; return Error::Busy; }
                 le_connection_to_id_[connection]=identifier;
                 le_id_to_connection_[identifier]=connection;
             }
-            const double r=[transport_ bt_le_peripheral_open:to_ns(identifier)];
-            if(r<0){ remove_connection(connection); message="BLE connection could not start"; return Error::ConnectionFailed; }
-            message.clear(); return Error::Ok;
+            const Error e=[transport_ bt_le_peripheral_open:gmbt_ns(identifier) message:message];
+            if (e != Error::Ok) remove_connection(connection);
+            return e;
         }
         Error le_disconnect(std::uint64_t connection,std::string& message) override
         {
             const std::string id=id_for_connection(connection); if(id.empty())return invalid_connection(message);
-            const double r=[transport_ bt_le_peripheral_close:to_ns(id)];
-            if(r<0){message="BLE disconnect failed";return Error::OperationFailed;}
-            remove_connection(connection); message.clear(); return Error::Ok;
+            const Error e=[transport_ bt_le_peripheral_close:gmbt_ns(id) message:message];
+            remove_connection(connection);
+            return e;
         }
         bool le_connection_is_connected(std::uint64_t connection) const override
         {
-            const std::string id=id_for_connection(connection); return !id.empty() && [transport_ bt_le_peripheral_is_connected:to_ns(id)]>0.5;
+            const std::string id=id_for_connection(connection); return !id.empty() && [transport_ bt_le_peripheral_is_connected:gmbt_ns(id)];
         }
         // The GATT calls, advertise start and add_service hand the core's op
         // id to the transport, which reports it on the completion.
-        Error le_services_discover(std::uint64_t op,std::uint64_t c,std::string& m) override { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return async_result([transport_ bt_le_peripheral_get_services:to_ns(id) opId:@(op)],"Service discovery could not start",m); }
-        Error le_characteristics_discover(std::uint64_t op,std::uint64_t c,const std::string&s,std::string&m) override { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return async_result([transport_ bt_le_service_get_characteristics:to_ns(id) service:to_ns(s) opId:@(op)],"Characteristic discovery could not start",m); }
-        Error le_descriptors_discover(std::uint64_t op,std::uint64_t c,const std::string&s,const std::string&ch,std::string&m) override { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return async_result([transport_ bt_le_characteristic_get_descriptors:to_ns(id) service:to_ns(s) characteristic:to_ns(ch) opId:@(op)],"Descriptor discovery could not start",m); }
-        Error le_characteristic_read(std::uint64_t op,std::uint64_t c,const std::string&s,const std::string&ch,std::string&m) override { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return async_result([transport_ bt_le_characteristic_read:to_ns(id) service:to_ns(s) characteristic:to_ns(ch) opId:@(op)],"Characteristic read could not start",m); }
+        Error le_services_discover(std::uint64_t op,std::uint64_t c,std::string& m) override { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return [transport_ bt_le_peripheral_get_services:gmbt_ns(id) opId:@(op) message:m]; }
+        Error le_characteristics_discover(std::uint64_t op,std::uint64_t c,const std::string&s,std::string&m) override { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return [transport_ bt_le_service_get_characteristics:gmbt_ns(id) service:gmbt_ns(s) opId:@(op) message:m]; }
+        Error le_descriptors_discover(std::uint64_t op,std::uint64_t c,const std::string&s,const std::string&ch,std::string&m) override { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return [transport_ bt_le_characteristic_get_descriptors:gmbt_ns(id) service:gmbt_ns(s) characteristic:gmbt_ns(ch) opId:@(op) message:m]; }
+        Error le_characteristic_read(std::uint64_t op,std::uint64_t c,const std::string&s,const std::string&ch,std::string&m) override { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return [transport_ bt_le_characteristic_read:gmbt_ns(id) service:gmbt_ns(s) characteristic:gmbt_ns(ch) opId:@(op) message:m]; }
         Error le_characteristic_write(std::uint64_t op,std::uint64_t c,const std::string&s,const std::string&ch,const std::string&v,bool with_response,std::string&m) override
-        { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); double r=with_response?[transport_ bt_le_characteristic_write_request:to_ns(id) service:to_ns(s) characteristic:to_ns(ch) value:to_ns(v) opId:@(op)]:[transport_ bt_le_characteristic_write_command:to_ns(id) service:to_ns(s) characteristic:to_ns(ch) value:to_ns(v) opId:@(op)]; return async_result(r,"Characteristic write could not start",m); }
+        {
+            auto id=id_for_connection(c); if(id.empty())return invalid_connection(m);
+            if (with_response)
+                return [transport_ bt_le_characteristic_write_request:gmbt_ns(id) service:gmbt_ns(s) characteristic:gmbt_ns(ch) value:gmbt_ns(v) opId:@(op) message:m];
+            return [transport_ bt_le_characteristic_write_command:gmbt_ns(id) service:gmbt_ns(s) characteristic:gmbt_ns(ch) value:gmbt_ns(v) opId:@(op) message:m];
+        }
         Error le_characteristic_subscribe(std::uint64_t op,std::uint64_t c,const std::string&s,const std::string&ch,std::int32_t mode,std::string&m) override
-        { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); double r=mode==0?[transport_ bt_le_characteristic_unsubscribe:to_ns(id) service:to_ns(s) characteristic:to_ns(ch) opId:@(op)]:mode==2?[transport_ bt_le_characteristic_indicate:to_ns(id) service:to_ns(s) characteristic:to_ns(ch) opId:@(op)]:[transport_ bt_le_characteristic_notify:to_ns(id) service:to_ns(s) characteristic:to_ns(ch) opId:@(op)]; return async_result(r,"Characteristic subscription could not start",m); }
-        Error le_descriptor_read(std::uint64_t op,std::uint64_t c,const std::string&s,const std::string&ch,const std::string&d,std::string&m) override { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return async_result([transport_ bt_le_descriptor_read:to_ns(id) service:to_ns(s) characteristic:to_ns(ch) descriptor:to_ns(d) opId:@(op)],"Descriptor read could not start",m); }
-        Error le_descriptor_write(std::uint64_t op,std::uint64_t c,const std::string&s,const std::string&ch,const std::string&d,const std::string&v,std::string&m) override { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return async_result([transport_ bt_le_descriptor_write:to_ns(id) service:to_ns(s) characteristic:to_ns(ch) descriptor:to_ns(d) value:to_ns(v) opId:@(op)],"Descriptor write could not start",m); }
+        { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return [transport_ bt_le_characteristic_subscribe:gmbt_ns(id) service:gmbt_ns(s) characteristic:gmbt_ns(ch) mode:mode opId:@(op) message:m]; }
+        Error le_descriptor_read(std::uint64_t op,std::uint64_t c,const std::string&s,const std::string&ch,const std::string&d,std::string&m) override { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return [transport_ bt_le_descriptor_read:gmbt_ns(id) service:gmbt_ns(s) characteristic:gmbt_ns(ch) descriptor:gmbt_ns(d) opId:@(op) message:m]; }
+        Error le_descriptor_write(std::uint64_t op,std::uint64_t c,const std::string&s,const std::string&ch,const std::string&d,const std::string&v,std::string&m) override { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return [transport_ bt_le_descriptor_write:gmbt_ns(id) service:gmbt_ns(s) characteristic:gmbt_ns(ch) descriptor:gmbt_ns(d) value:gmbt_ns(v) opId:@(op) message:m]; }
 
         // CoreBluetooth advertises the local name and service UUIDs only, and
         // always connectable: anything else asked for is NotSupported here,
@@ -2601,34 +2791,51 @@ namespace
             }
 
             NSMutableArray<NSString*>* uuids = [NSMutableArray arrayWithCapacity:data.service_uuids.size()];
-            for (const auto& uuid : data.service_uuids) [uuids addObject:to_ns(uuid)];
-            return async_result([transport_ bt_le_advertise_start:data.include_name serviceUUIDs:uuids opId:@(op)],"BLE advertising could not start",m);
+            for (const auto& uuid : data.service_uuids) [uuids addObject:gmbt_ns(uuid)];
+            return [transport_ bt_le_advertise_start:data.include_name serviceUUIDs:uuids opId:@(op) message:m];
         }
-        Error le_advertise_stop(std::string&m) override { return async_result([transport_ bt_le_advertise_stop],"BLE advertising could not stop",m); }
-        bool le_advertise_is_running() const override { return transport_ && [transport_ bt_le_advertise_is_active] > 0.5; }
+        // Stopping, clearing and closing with no managers have nothing to undo.
+        Error le_advertise_stop(std::string&m) override
+        {
+            if (!managers_created()) { m.clear(); return Error::Ok; }
+            return [transport_ bt_le_advertise_stop:m];
+        }
+        bool le_advertise_is_running() const override { return transport_ && [transport_ bt_le_advertise_is_active]; }
         Error le_server_start(std::string&m) override
         {
             if (const Error e = require_managers(m); e != Error::Ok) return e;
-            return async_result([transport_ bt_le_server_open],"GATT server could not start",m);
+            return [transport_ bt_le_server_open:m];
         }
-        Error le_server_stop(std::string&m) override { return async_result([transport_ bt_le_server_close],"GATT server could not stop",m); }
+        Error le_server_stop(std::string&m) override
+        {
+            if (!managers_created()) { m.clear(); return Error::Ok; }
+            return [transport_ bt_le_server_close:m];
+        }
         bool le_server_is_running() const override { return _isServerOpen; }
         Error le_server_add_service(std::uint64_t op,const std::string&j,std::string&m) override
         {
             if (const Error e = require_managers(m); e != Error::Ok) return e;
-            const double r=[transport_ bt_le_server_add_service:to_ns(j) opId:@(op)];
-            if(r==-3){m="Apple has no signed-write permission";return Error::NotSupported;}
-            return async_result(r,"GATT service could not be added",m);
+            return [transport_ bt_le_server_add_service:gmbt_ns(j) opId:@(op) message:m];
         }
-        Error le_server_clear_services(std::string&m) override { return async_result([transport_ bt_le_server_clear_services],"GATT services could not be cleared",m); }
-        Error le_server_respond_read(std::int32_t r,std::int32_t st,const std::string&v,std::string&m) override { double x=[transport_ bt_le_server_respond_read:r status:st value:to_ns(v)]; if(x>0){m.clear();return Error::Ok;}m="GATT read response failed";return Error::OperationFailed; }
-        Error le_server_respond_write(std::int32_t r,std::int32_t st,std::string&m) override { double x=[transport_ bt_le_server_respond_write:r status:st]; if(x>0){m.clear();return Error::Ok;}m="GATT write response failed";return Error::OperationFailed; }
+        Error le_server_clear_services(std::string&m) override
+        {
+            if (!managers_created()) { m.clear(); return Error::Ok; }
+            return [transport_ bt_le_server_clear_services:m];
+        }
+        Error le_server_respond_read(std::int32_t r,std::int32_t st,const std::string&v,std::string&m) override
+        {
+            if (const Error e = require_managers(m); e != Error::Ok) return e;
+            return [transport_ bt_le_server_respond_read:r status:st value:gmbt_ns(v) message:m];
+        }
+        Error le_server_respond_write(std::int32_t r,std::int32_t st,std::string&m) override
+        {
+            if (const Error e = require_managers(m); e != Error::Ok) return e;
+            return [transport_ bt_le_server_respond_write:r status:st message:m];
+        }
         Error le_server_notify_value(const std::string&s,const std::string&ch,const std::string&central,const std::string&v,std::string&m) override
         {
             if (const Error e = require_managers(m); e != Error::Ok) return e;
-            const double r=[transport_ bt_le_server_notify_value:to_ns(s) characteristicUuid:to_ns(ch) central:to_ns(central) value:to_ns(v)];
-            if(r==-2){m="That central is not subscribed to the characteristic";return Error::NotFound;}
-            return async_result(r,"GATT notification could not start",m);
+            return [transport_ bt_le_server_notify_value:gmbt_ns(s) characteristicUuid:gmbt_ns(ch) central:gmbt_ns(central) value:gmbt_ns(v) message:m];
         }
 
 #if TARGET_OS_OSX
@@ -2647,7 +2854,7 @@ namespace
                 CFRunLoopGetCurrent() == CFRunLoopGetMain() ? 1 : 0);
             GMBT_LOG("Classic inquiry start: controller powered=%d address=%s",
                 [[IOBluetoothHostController defaultController] powerState] == kBluetoothHCIPowerStateON ? 1 : 0,
-                to_string([[IOBluetoothHostController defaultController] addressAsString]).c_str());
+                gmbt_string([[IOBluetoothHostController defaultController] addressAsString]).c_str());
 
             GMBTClassicInquiryDelegate* delegate = [GMBTClassicInquiryDelegate new];
             AppleBackend* self = this;
@@ -2717,7 +2924,7 @@ namespace
             // they already hold the requested service: a fresh SDP query can
             // stall without ever calling back.
             BluetoothRFCOMMChannelID cachedChannel = 0;
-            if (classic_find_rfcomm_channel(btDevice, service_uuid, false, cachedChannel))
+            if (classic_find_rfcomm_channel(btDevice, service_uuid, cachedChannel))
             {
                 GMBT_LOG("Classic connect: using cached SDP record, RFCOMM channel %d", (int)cachedChannel);
                 classic_open_rfcomm(connection, btDevice, cachedChannel);
@@ -2769,26 +2976,24 @@ namespace
         {
             std::shared_ptr<ClassicConnectionState> state;
             GMBTSDPQueryHandler* sdp = nil;
-            bool connecting = false;
             {
                 std::scoped_lock lock(classic_mutex_);
                 auto it = classic_connections_.find(connection);
                 if (it == classic_connections_.end()) return invalid_connection(message);
                 state = it->second;
 
-                // A connect still in SDP or opening is cancelled: its record
-                // goes now, so a late SDP or open completion finds nothing, and
-                // the core fires the connect callback once as cancelled.
-                connecting = !state->connected;
-                if (connecting)
+                // The game is done with the handle, so its record goes now and
+                // the channel is detached before it closes: a late SDP, open,
+                // data or close callback finds nothing and reports nothing,
+                // and unread bytes go with it. A connect still in SDP or
+                // opening is cancelled; the core fires its callback once.
+                classic_connections_.erase(it);
+                state->connected = false;
+                auto pending = classic_pending_sdp_.find(connection);
+                if (pending != classic_pending_sdp_.end())
                 {
-                    classic_connections_.erase(it);
-                    auto pending = classic_pending_sdp_.find(connection);
-                    if (pending != classic_pending_sdp_.end())
-                    {
-                        sdp = pending->second;
-                        classic_pending_sdp_.erase(pending);
-                    }
+                    sdp = pending->second;
+                    classic_pending_sdp_.erase(pending);
                 }
             }
 
@@ -2797,10 +3002,8 @@ namespace
                 sdp.onComplete = nil;
                 gmbt_park(sdp);
             }
-            if (connecting)
-                classic_detach_channel(state->channel, state->delegate);
-            else
-                [state->channel closeChannel];
+            classic_drop_writes(*state);
+            classic_detach_channel(state->channel, state->delegate);
             message.clear();
             return Error::Ok;
         }
@@ -2825,15 +3028,31 @@ namespace
             auto state = find_classic_connection(connection);
             if (!state) return invalid_connection(message);
             if (!state->connected) { message = "Classic connection is not open"; return Error::Disconnected; }
+            if (size == 0) { message.clear(); return Error::Ok; }
 
-            const BluetoothRFCOMMMTU mtu = [state->channel getMTU];
-            std::size_t offset = 0;
-            while (offset < size)
+            // Queued here and written from the main queue, where IOBluetooth
+            // calls back, one MTU-sized writeAsync at a time.
+            bool start = false;
             {
-                const std::size_t chunk = std::min<std::size_t>(mtu > 0 ? mtu : size, size - offset);
-                const IOReturn status = [state->channel writeSync:(void*)(data + offset) length:(UInt16)chunk];
-                if (status != kIOReturnSuccess) { message = "Classic write failed"; return Error::OperationFailed; }
-                offset += chunk;
+                std::scoped_lock lock(state->send_mutex);
+                if (state->send_pending + size > kClassicSendCap)
+                {
+                    message = "The connection's send queue would pass 1 MiB; send less at a time";
+                    return Error::Busy;
+                }
+                state->outbound.insert(state->outbound.end(), data, data + size);
+                state->send_pending += size;
+                start = !state->writing;
+                if (start) state->writing = true;
+            }
+            if (start)
+            {
+                AppleBackend* self = this;
+                std::weak_ptr<int> alive = lifetime_;
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if (alive.expired()) return;
+                    self->classic_write_next(connection);
+                });
             }
             message.clear();
             return Error::Ok;
@@ -2843,10 +3062,25 @@ namespace
         {
             auto state = find_classic_connection(connection);
             if (!state) return 0;
-            std::scoped_lock lock(state->receive_mutex);
-            const std::size_t n = std::min(max_size, state->received.size());
-            std::copy(state->received.begin(), state->received.begin() + n, out);
-            state->received.erase(state->received.begin(), state->received.begin() + n);
+            std::size_t n = 0;
+            bool drained = false;
+            {
+                std::scoped_lock lock(state->receive_mutex);
+                n = std::min(max_size, state->received.size());
+                std::copy(state->received.begin(), state->received.begin() + n, out);
+                state->received.erase(state->received.begin(), state->received.begin() + n);
+                // The next data to arrive is announced again.
+                state->data_pending = false;
+                drained = state->finished && state->received.empty();
+            }
+            // The last bytes of a connection that has ended: nothing is left
+            // to keep it registered for.
+            if (drained)
+            {
+                std::scoped_lock lock(classic_mutex_);
+                auto it = classic_connections_.find(connection);
+                if (it != classic_connections_.end() && it->second == state) classic_connections_.erase(it);
+            }
             return n;
         }
 
@@ -2857,6 +3091,9 @@ namespace
 
             IOBluetoothSDPUUID* uuid = classic_uuid_from_string(service_uuid);
             if (!uuid) { message = "Invalid service UUID"; return Error::InvalidArgument; }
+
+            NSString* serviceName = [NSString stringWithUTF8String:name.c_str()];
+            if (!serviceName) { message = "The service name is not valid UTF-8"; return Error::InvalidArgument; }
 
             // Laid out like Apple's SerialPortDictionary.plist. The RFCOMM
             // channel must be an explicit 1-byte unsigned integer: a bare
@@ -2877,7 +3114,7 @@ namespace
                 ],
                 // Public Browse Root, so SDP browsing clients list the service too.
                 @"0005 - BrowseGroupList" : @[ [IOBluetoothSDPUUID uuid16:kBluetoothSDPUUID16ServiceClassPublicBrowseGroup] ],
-                @"0100 - ServiceName" : to_ns(name),
+                @"0100 - ServiceName" : serviceName,
             };
 
             IOBluetoothSDPServiceRecord* record = [IOBluetoothSDPServiceRecord publishedServiceRecordWithDictionary:serviceDict];
@@ -2889,7 +3126,7 @@ namespace
             [record getServiceRecordHandle:&recordHandle];
             GMBT_LOG("Classic server: record published, handle=0x%08x RFCOMM channel=%d IOReturn=0x%08x uuid=%s local_address=%s",
                 (unsigned)recordHandle, (int)channelID, channelStatus, service_uuid.c_str(),
-                to_string([[IOBluetoothHostController defaultController] addressAsString]).c_str());
+                gmbt_string([[IOBluetoothHostController defaultController] addressAsString]).c_str());
             if (channelStatus != kIOReturnSuccess)
             {
                 [record removeServiceRecord];
@@ -3049,8 +3286,13 @@ namespace
 
         static constexpr double kPermissionPollSeconds = 0.5;
 
-        static Error async_result(double value,const char* failure,std::string&message)
-        { if(value<0){message=failure;return Error::OperationFailed;}message.clear();return Error::Ok; }
+        // BluetoothFeature raw values from spec.gmidl that feature_supported
+        // answers itself.
+        static constexpr std::int32_t kFeatureLeAdvertiseName = 3;
+        static constexpr std::int32_t kFeatureLeAdvertiseServiceUuids = 4;
+        static constexpr std::int32_t kFeatureClassicPairing = 17;
+        static constexpr std::int32_t kFeaturePermissionRequest = 20;
+
         static Error invalid_connection(std::string&message){message="Invalid connection handle";return Error::InvalidHandle;}
 
         // The managers exist once authorization was decided at initialize or
@@ -3105,8 +3347,17 @@ namespace
 
         std::string id_for_connection(std::uint64_t c) const
         { std::scoped_lock lock(mutex_); auto it=le_connection_to_id_.find(c); return it==le_connection_to_id_.end()?std::string{}:it->second; }
+        // The id entry goes only while it still names c: a later connect to
+        // the same peripheral may have taken it.
         void remove_connection(std::uint64_t c)
-        { std::scoped_lock lock(mutex_); auto it=le_connection_to_id_.find(c); if(it!=le_connection_to_id_.end()){le_id_to_connection_.erase(it->second);le_connection_to_id_.erase(it);} }
+        {
+            std::scoped_lock lock(mutex_);
+            auto it=le_connection_to_id_.find(c);
+            if(it==le_connection_to_id_.end()) return;
+            auto id=le_id_to_connection_.find(it->second);
+            if(id!=le_id_to_connection_.end() && id->second==c) le_id_to_connection_.erase(id);
+            le_connection_to_id_.erase(it);
+        }
         std::uint64_t connection_for_id(const std::string&id) const
         { std::scoped_lock lock(mutex_); auto it=le_id_to_connection_.find(id); return it==le_id_to_connection_.end()?0:it->second; }
 
@@ -3127,8 +3378,31 @@ namespace
             GMBTClassicChannelDelegate* delegate = nil;
             std::mutex receive_mutex;
             std::deque<std::uint8_t> received;
+            // Under receive_mutex. A ClassicDataAvailable went out and the
+            // game has not read since; the next one waits for
+            // classic_receive_bytes.
+            bool data_pending = false;
+            // Under receive_mutex. The channel is gone; the state stays
+            // registered only while it holds bytes the game has not read.
+            bool finished = false;
             std::atomic_bool connected{false};
+
+            // classic_send_bytes queues here; the main queue writes it out.
+            std::mutex send_mutex;
+            std::deque<std::uint8_t> outbound;
+            // Queued plus the chunk in flight.
+            std::size_t send_pending = 0;
+            // Writing has been started on the main queue and has not yet run
+            // out of queued bytes.
+            bool writing = false;
+            // The bytes of the writeAsync in flight, kept until it completes.
+            NSMutableData* in_flight = nil;
         };
+
+        // Bytes a connection may hold waiting to be sent, and waiting to be
+        // read by the game.
+        static constexpr std::size_t kClassicSendCap = 1024 * 1024;
+        static constexpr std::size_t kClassicReceiveCap = 1024 * 1024;
 
         mutable std::mutex classic_mutex_;
         std::unordered_map<std::uint64_t, std::shared_ptr<ClassicConnectionState>> classic_connections_;
@@ -3180,7 +3454,7 @@ namespace
 
         static std::string classic_format_address(NSString* addressString)
         {
-            std::string s = to_string(addressString);
+            std::string s = gmbt_string(addressString);
             for (auto& c : s) c = (c == '-') ? ':' : static_cast<char>(::toupper(static_cast<unsigned char>(c)));
             return s;
         }
@@ -3191,7 +3465,7 @@ namespace
         static IOBluetoothSDPUUID* classic_uuid_from_string(const std::string& text)
         {
             if (text.empty()) return nil;
-            CBUUID* cb = [CBUUID UUIDWithString:to_ns(text)];
+            CBUUID* cb = [CBUUID UUIDWithString:gmbt_ns(text)];
             if (!cb || !cb.data) return nil;
             return [IOBluetoothSDPUUID uuidWithBytes:cb.data.bytes length:(int)cb.data.length];
         }
@@ -3207,7 +3481,7 @@ namespace
             DiscoveredDevice d;
             d.transport = Transport::Classic;
             d.id = "apple:classic:" + address;
-            d.name = to_string([device name]);
+            d.name = gmbt_string([device name]);
             d.address = address;
             d.address_available = true;
             d.connectable = true;
@@ -3236,23 +3510,14 @@ namespace
         static constexpr double kClassicSdpTimeoutSeconds = 15.0;
 
         // Finds the RFCOMM channel for service_uuid in the device's current SDP
-        // records. With allow_any_rfcomm, falls back to the first record that
-        // has an RFCOMM channel when the UUID is not listed.
+        // records. Another service's channel is never used in its place.
         static bool classic_find_rfcomm_channel(IOBluetoothDevice* device, const std::string& service_uuid,
-                                                bool allow_any_rfcomm, BluetoothRFCOMMChannelID& channelID)
+                                                BluetoothRFCOMMChannelID& channelID)
         {
             IOBluetoothSDPUUID* uuid = classic_uuid_from_string(service_uuid);
-            if (uuid)
-            {
-                IOBluetoothSDPServiceRecord* record = [device getServiceRecordForUUID:uuid];
-                if (record && [record getRFCOMMChannelID:&channelID] == kIOReturnSuccess) return true;
-            }
-            if (!allow_any_rfcomm && uuid) return false;
-            for (IOBluetoothSDPServiceRecord* record in [device services])
-            {
-                if ([record getRFCOMMChannelID:&channelID] == kIOReturnSuccess) return true;
-            }
-            return false;
+            if (!uuid) return false;
+            IOBluetoothSDPServiceRecord* record = [device getServiceRecordForUUID:uuid];
+            return record && [record getRFCOMMChannelID:&channelID] == kIOReturnSuccess;
         }
 
         void handle_classic_sdp_timeout(std::uint64_t connection)
@@ -3290,9 +3555,9 @@ namespace
             }
 
             BluetoothRFCOMMChannelID channelID = 0;
-            if (!classic_find_rfcomm_channel(device, service_uuid, true, channelID))
+            if (!classic_find_rfcomm_channel(device, service_uuid, channelID))
             {
-                complete_classic_connect(connection, Error::NotFound, "No RFCOMM service was found on the device");
+                complete_classic_connect(connection, Error::NotFound, "service " + service_uuid + " not found");
                 return;
             }
             classic_open_rfcomm(connection, device, channelID);
@@ -3314,6 +3579,10 @@ namespace
             delegate.onClose = ^{
                 if (alive.expired()) return;
                 self->handle_classic_channel_closed(connection);
+            };
+            delegate.onWriteComplete = ^(IOReturn writeStatus) {
+                if (alive.expired()) return;
+                self->handle_classic_write_complete(connection, writeStatus);
             };
 
             IOBluetoothRFCOMMChannel* channel = nil;
@@ -3359,7 +3628,7 @@ namespace
             complete_classic_connect(connection, Error::Ok, "");
         }
 
-        void complete_classic_connect(std::uint64_t connection, Error error, const char* message)
+        void complete_classic_connect(std::uint64_t connection, Error error, const std::string& message)
         {
             if (error != Error::Ok)
             {
@@ -3377,7 +3646,7 @@ namespace
             ev.transport = Transport::Classic;
             ev.connection = connection;
             ev.error = error;
-            ev.message = message ? message : "";
+            ev.message = message;
             hooks_.push_event(std::move(ev));
         }
 
@@ -3419,6 +3688,7 @@ namespace
                 delegate.onOpenComplete = nil;
                 delegate.onData = nil;
                 delegate.onClose = nil;
+                delegate.onWriteComplete = nil;
             }
             if (channel)
             {
@@ -3427,6 +3697,21 @@ namespace
             }
             gmbt_release_after_callback(channel);
             gmbt_release_after_callback(delegate);
+        }
+
+        // Forgets what was queued to send. The chunk IOBluetooth may still be
+        // writing is let go no sooner than its channel.
+        static void classic_drop_writes(ClassicConnectionState& state)
+        {
+            NSMutableData* in_flight = nil;
+            {
+                std::scoped_lock lock(state.send_mutex);
+                state.outbound.clear();
+                state.send_pending = 0;
+                in_flight = state.in_flight;
+                state.in_flight = nil;
+            }
+            gmbt_release_after_callback(in_flight);
         }
 
         void handle_pair_timeout(std::uint64_t device_handle, std::uint64_t generation)
@@ -3479,37 +3764,84 @@ namespace
             hooks_.push_event(std::move(ev));
         }
 
+        // Data is announced once, and again only after the game has read. A
+        // channel cannot be paused, so bytes that would take the queue past
+        // 1 MiB end the connection instead; what fit stays readable.
         void handle_classic_channel_data(std::uint64_t connection, NSData* data)
         {
             auto state = find_classic_connection(connection);
-            if (!state) return;
-            std::int32_t available;
+            if (!state || !state->connected) return;
+            std::int32_t available = 0;
+            bool announce = false;
+            bool full = false;
             {
                 std::scoped_lock lock(state->receive_mutex);
                 const std::uint8_t* bytes = static_cast<const std::uint8_t*>(data.bytes);
-                state->received.insert(state->received.end(), bytes, bytes + data.length);
+                const std::size_t room = kClassicReceiveCap - std::min(kClassicReceiveCap, state->received.size());
+                const std::size_t taken = std::min<std::size_t>(room, data.length);
+                if (bytes && taken > 0) state->received.insert(state->received.end(), bytes, bytes + taken);
+                full = taken < data.length;
                 available = static_cast<std::int32_t>(state->received.size());
+                announce = taken > 0 && !state->data_pending;
+                if (announce) state->data_pending = true;
             }
-            BackendEvent ev;
-            ev.type = BackendEventType::ClassicDataAvailable;
-            ev.transport = Transport::Classic;
-            ev.connection = connection;
-            ev.value = available;
-            hooks_.push_event(std::move(ev));
+            if (announce)
+            {
+                BackendEvent ev;
+                ev.type = BackendEventType::ClassicDataAvailable;
+                ev.transport = Transport::Classic;
+                ev.connection = connection;
+                ev.value = available;
+                hooks_.push_event(std::move(ev));
+            }
+            if (full) classic_end_connection(connection, Error::Disconnected, "receive buffer full", true);
         }
 
         void handle_classic_channel_closed(std::uint64_t connection)
         {
+            classic_end_connection(connection, Error::Disconnected, "RFCOMM channel closed", false);
+        }
+
+        // Ends a connection and reports it once. close_channel is for an end
+        // this backend decides; a channel IOBluetooth closed itself is only
+        // let go. The state stays registered while it holds bytes the game has
+        // not read, and classic_receive_bytes removes it once they are.
+        void classic_end_connection(std::uint64_t connection, Error error, const std::string& message, bool close_channel)
+        {
+            std::shared_ptr<ClassicConnectionState> state;
+            IOBluetoothRFCOMMChannel* channel = nil;
+            GMBTClassicChannelDelegate* delegate = nil;
             bool wasConnected = false;
             {
                 std::scoped_lock lock(classic_mutex_);
                 auto it = classic_connections_.find(connection);
                 if (it == classic_connections_.end()) return;
-                wasConnected = it->second->connected;
-                gmbt_release_after_callback(it->second->channel);
-                gmbt_release_after_callback(it->second->delegate);
-                classic_connections_.erase(it);
+                state = it->second;
+                wasConnected = state->connected.exchange(false);
+                channel = state->channel;
+                delegate = state->delegate;
+                state->channel = nil;
+                state->delegate = nil;
+                bool keep = false;
+                if (wasConnected)
+                {
+                    std::scoped_lock receive_lock(state->receive_mutex);
+                    state->finished = true;
+                    keep = !state->received.empty();
+                }
+                if (!keep) classic_connections_.erase(it);
             }
+            classic_drop_writes(*state);
+            if (close_channel)
+            {
+                classic_detach_channel(channel, delegate);
+            }
+            else
+            {
+                gmbt_release_after_callback(channel);
+                gmbt_release_after_callback(delegate);
+            }
+
             // A channel that closes before it ever finished opening is reported
             // through the ClassicConnected completion path instead, not here.
             if (!wasConnected) return;
@@ -3517,9 +3849,69 @@ namespace
             ev.type = BackendEventType::ClassicDisconnected;
             ev.transport = Transport::Classic;
             ev.connection = connection;
-            ev.error = Error::Disconnected;
-            ev.message = "RFCOMM channel closed";
+            ev.error = error;
+            ev.message = message;
             hooks_.push_event(std::move(ev));
+        }
+
+        // Starts the next writeAsync unless one is in flight or nothing is
+        // queued. Main queue only, where IOBluetooth calls back. A write takes
+        // at most the channel's MTU (RFCOMM's default 127 while it reports
+        // none) and a UInt16 length.
+        void classic_write_next(std::uint64_t connection)
+        {
+            auto state = find_classic_connection(connection);
+            if (!state) return;
+            IOBluetoothRFCOMMChannel* channel = state->channel;
+            NSMutableData* chunk = nil;
+            {
+                std::scoped_lock lock(state->send_mutex);
+                if (state->in_flight) return;
+                if (!state->connected || !channel || state->outbound.empty())
+                {
+                    state->writing = false;
+                    return;
+                }
+                const BluetoothRFCOMMMTU mtu = [channel getMTU];
+                const std::size_t limit = mtu == 0 ? 127 : std::min<std::size_t>(mtu, 65535);
+                const std::size_t size = std::min(limit, state->outbound.size());
+                chunk = [NSMutableData dataWithLength:size];
+                std::copy(state->outbound.begin(), state->outbound.begin() + size, static_cast<std::uint8_t*>(chunk.mutableBytes));
+                state->outbound.erase(state->outbound.begin(), state->outbound.begin() + size);
+                state->in_flight = chunk;
+            }
+            const IOReturn status = [channel writeAsync:chunk.mutableBytes length:(UInt16)chunk.length refcon:nullptr];
+            if (status != kIOReturnSuccess) classic_write_failed(connection, status);
+        }
+
+        void handle_classic_write_complete(std::uint64_t connection, IOReturn status)
+        {
+            auto state = find_classic_connection(connection);
+            if (!state) return;
+            {
+                std::scoped_lock lock(state->send_mutex);
+                if (state->in_flight)
+                {
+                    state->send_pending -= std::min<std::size_t>(state->send_pending, state->in_flight.length);
+                    state->in_flight = nil;
+                }
+            }
+            if (status != kIOReturnSuccess)
+            {
+                classic_write_failed(connection, status);
+                return;
+            }
+            classic_write_next(connection);
+        }
+
+        // A send the game was told had been queued cannot go out: the
+        // connection ends, and classic_disconnected says why.
+        void classic_write_failed(std::uint64_t connection, IOReturn status)
+        {
+            char text[64];
+            std::snprintf(text, sizeof(text), "Classic write failed (IOReturn 0x%08x)", status);
+            GMBT_LOG("%s (connection %llu)", text, static_cast<unsigned long long>(connection));
+            classic_end_connection(connection, Error::OperationFailed, text, true);
         }
 
         void handle_classic_server_channel_opened(IOBluetoothRFCOMMChannel* channel)
@@ -3527,11 +3919,11 @@ namespace
             IOBluetoothDevice* device = [channel getDevice];
             const std::string address = classic_format_address([device addressString]);
             GMBT_LOG("Classic server: incoming RFCOMM channel %d from %s (%s)",
-                (int)[channel getChannelID], address.c_str(), to_string([device name]).c_str());
+                (int)[channel getChannelID], address.c_str(), gmbt_string([device name]).c_str());
             DiscoveredDevice d;
             d.transport = Transport::Classic;
             d.id = "apple:classic:" + address;
-            d.name = to_string([device name]);
+            d.name = gmbt_string([device name]);
             d.address = address;
             d.address_available = true;
             d.connectable = true;
@@ -3552,6 +3944,10 @@ namespace
             delegate.onClose = ^{
                 if (alive.expired()) return;
                 self->handle_classic_channel_closed(connection);
+            };
+            delegate.onWriteComplete = ^(IOReturn writeStatus) {
+                if (alive.expired()) return;
+                self->handle_classic_write_complete(connection, writeStatus);
             };
             [channel setDelegate:delegate];
             state->channel = channel;
@@ -3602,6 +3998,7 @@ namespace
             for (auto& [connection, state] : connections)
             {
                 (void)connection;
+                classic_drop_writes(*state);
                 classic_detach_channel(state->channel, state->delegate);
             }
             for (auto& [connection, handler] : pending_sdp)
@@ -3643,76 +4040,82 @@ namespace
             hooks_.push_event(std::move(ev));
         }
 
+        // The transport events the core routes as LE events. Anything else is
+        // not forwarded.
+        static bool is_routed_event(NSString* type)
+        {
+            static NSSet<NSString*>* routed = [NSSet setWithArray:@[
+                @"bt_state_changed",
+                @"bt_le_peripheral_open",
+                @"bt_le_peripheral_disconnect",
+                @"bt_le_characteristic_value_changed",
+                @"bt_le_server_connection_state_changed",
+                @"bt_le_server_characteristic_read_request",
+                @"bt_le_server_characteristic_write_request",
+                @"bt_le_server_services_reset",
+            ]];
+            return [routed containsObject:type];
+        }
+
+        void upsert_scan_result(NSDictionary* params)
+        {
+            NSString* address = [params[@"address"] isKindOfClass:[NSString class]] ? params[@"address"] : nil;
+            if (!address) return;
+            NSString* name = [params[@"name"] isKindOfClass:[NSString class]] ? params[@"name"] : nil;
+            NSNumber* rssi = [params[@"raw_signal"] isKindOfClass:[NSNumber class]] ? params[@"raw_signal"] : nil;
+            NSNumber* connectable = [params[@"is_connectable"] isKindOfClass:[NSNumber class]] ? params[@"is_connectable"] : nil;
+
+            DiscoveredDevice d;
+            d.transport=Transport::LowEnergy;
+            d.id="apple:ble:"+gmbt_string(address);
+            d.name=gmbt_string(name);
+            // Apple exposes a stable CoreBluetooth identifier, not a public MAC.
+            d.address_available=false;
+            d.rssi_available=rssi!=nil;
+            d.rssi=rssi ? rssi.intValue : 0;
+            d.connectable=connectable ? connectable.boolValue : true;
+            hooks_.upsert_device(d);
+        }
+
         void on_event(NSString* type, NSDictionary* params)
         {
-            if (!type)
+            if (!type) return;
+
+            // Scan results only feed the device cache; device_found is the
+            // core's to fire.
+            if ([type isEqualToString:@"bt_le_scan_result"])
             {
-                GMBT_LOG("transport raised an event with no type - ignored");
+                upsert_scan_result(params);
                 return;
             }
-            GMBT_LOG("transport event '%s' -> normalized '%s'",
-                to_string(type).c_str(), normalized_event_type(type).c_str());
 
-            // bt_le_scan_start can fail asynchronously: the transport defers the
-            // request while CBCentralManager's state is still Unknown/Resetting,
-            // then reports failure later from centralManagerDidUpdateState: if the
-            // central lands on a terminal non-PoweredOn state. That failure has no
-            // caller waiting on the original synchronous return value anymore, and
-            // BackendEventType::LeEvent has no GML callback wired up in the core
-            // - so without this, the scan silently never starts and no GML callback
-            // ever fires. Re-signal it on the ScanStopped channel instead, which is
-            // already wired to bluetooth_set_callback_scan_stopped for both scan types.
-            if ([type isEqualToString:@"bt_le_scan_start"] &&
-                params[@"success"] && ![params[@"success"] boolValue])
+            if ([type isEqualToString:@"bt_le_scan_stopped"])
             {
                 BackendEvent ev;
                 ev.type = BackendEventType::ScanStopped;
                 ev.transport = Transport::LowEnergy;
-                switch (static_cast<CBManagerState>([params[@"error_code"] intValue]))
-                {
-                    case CBManagerStateUnsupported:
-                        ev.error = Error::NotSupported;
-                        ev.message = "Bluetooth LE is not supported on this device";
-                        break;
-                    case CBManagerStateUnauthorized:
-                        ev.error = Error::PermissionDenied;
-                        ev.message = "Bluetooth permission was denied";
-                        break;
-                    case CBManagerStatePoweredOff:
-                        ev.error = Error::BluetoothDisabled;
-                        ev.message = "Bluetooth is powered off";
-                        break;
-                    default:
-                        ev.error = Error::OperationFailed;
-                        ev.message = "BLE scan could not start";
-                        break;
-                }
+                ev.error = static_cast<Error>([params[@"error"] intValue]);
+                ev.message = gmbt_string([params[@"message"] isKindOfClass:[NSString class]] ? params[@"message"] : nil);
                 hooks_.push_event(std::move(ev));
                 return;
             }
 
-            NSString* address = [params[@"address"] isKindOfClass:[NSString class]] ? params[@"address"] : nil;
-            if ([type isEqualToString:@"bt_le_scan_result"] && address)
-            {
-                DiscoveredDevice d;
-                const std::string id=to_string(address);
-                d.transport=Transport::LowEnergy;
-                d.id="apple:ble:"+id;
-                d.name=to_string(params[@"name"]);
-                // Apple exposes a stable CoreBluetooth identifier, not a public MAC.
-                d.address_available=false;
-                d.rssi=[params[@"raw_signal"] intValue];
-                d.rssi_available=params[@"raw_signal"]!=nil;
-                d.connectable=params[@"is_connectable"]?[params[@"is_connectable"] boolValue]:true;
-                hooks_.upsert_device(d);
-            }
+            if (!is_routed_event(type)) return;
 
-            NSMutableDictionary* decorated=[NSMutableDictionary dictionaryWithDictionary:params?:@{}];
+            NSString* address = [params[@"address"] isKindOfClass:[NSString class]] ? params[@"address"] : nil;
+            NSMutableDictionary* decorated=[NSMutableDictionary dictionaryWithDictionary:params ? params : @{}];
+            std::uint64_t c=0;
             if(address)
             {
-                const std::uint64_t c=connection_for_id(to_string(address));
+                c=connection_for_id(gmbt_string(address));
                 if(c!=0) decorated[@"connection"]=@(c);
             }
+
+            // The link is gone or never came up, so the peripheral may be
+            // connected again, from this event's own callback too.
+            const bool ended = [type isEqualToString:@"bt_le_peripheral_disconnect"] ||
+                ([type isEqualToString:@"bt_le_peripheral_open"] && params[@"error_code"] != nil);
+            if (c != 0 && ended) remove_connection(c);
 
             BackendEvent ev;
             ev.type=BackendEventType::LeEvent;

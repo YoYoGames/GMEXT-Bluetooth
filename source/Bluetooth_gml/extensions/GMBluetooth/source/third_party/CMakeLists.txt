@@ -23,9 +23,10 @@ target_include_directories(ext_third_party
 # Windows
 # -----------------------------------------------------------------------------
 if(WIN32)
+    # The core is in the src/ glob of native/*.cpp; the backend sits one
+    # folder down, which that glob does not reach.
     target_sources(${EXT_MAIN_TARGET}
         PRIVATE
-            "${_GMBLUETOOTH_COMMON_CPP}"
             "${_GMBLUETOOTH_NATIVE_DIR}/windows/GMBluetooth_windows.cpp")
 
     target_link_libraries(ext_third_party

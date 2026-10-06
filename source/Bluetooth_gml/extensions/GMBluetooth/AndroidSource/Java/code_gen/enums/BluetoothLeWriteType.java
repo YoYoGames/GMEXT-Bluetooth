@@ -25,7 +25,7 @@ public enum BluetoothLeWriteType
             case 1:
                 return BluetoothLeWriteType.WithoutResponse;
             default:
-                throw new IllegalArgumentException("Unknown BluetoothLeWriteType value: " + v);
+                return null;
         }
     }
 }

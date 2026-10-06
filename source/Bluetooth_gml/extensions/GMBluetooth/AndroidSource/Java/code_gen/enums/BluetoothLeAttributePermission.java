@@ -46,7 +46,7 @@ public enum BluetoothLeAttributePermission
             case 256:
                 return BluetoothLeAttributePermission.WriteSignedMitm;
             default:
-                throw new IllegalArgumentException("Unknown BluetoothLeAttributePermission value: " + v);
+                return null;
         }
     }
 }

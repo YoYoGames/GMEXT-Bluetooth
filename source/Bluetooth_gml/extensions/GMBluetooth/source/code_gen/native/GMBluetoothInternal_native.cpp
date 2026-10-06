@@ -91,6 +91,17 @@ GMEXPORT double __EXT_NATIVE__bluetooth_classic_server_is_supported()
     return static_cast<double>(__result);
 }
 
+GMEXPORT double __EXT_NATIVE__bluetooth_feature_is_supported(char* __arg_buffer, double __arg_buffer_length)
+{
+    gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};
+
+    // field: feature, type: enum BluetoothFeature
+    gm_enums::BluetoothFeature feature = gm::wire::codec::readValue<gm_enums::BluetoothFeature>(__br);
+
+    auto&& __result = bluetooth_feature_is_supported(feature);
+    return static_cast<double>(__result);
+}
+
 GMEXPORT double __EXT_NATIVE__bluetooth_permission_get_status(char* __ret_buffer, double __ret_buffer_length)
 {
     auto&& __result = bluetooth_permission_get_status();

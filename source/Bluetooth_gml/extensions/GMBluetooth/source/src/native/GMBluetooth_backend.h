@@ -259,6 +259,15 @@ namespace gmbluetooth
             return false;
         }
 
+        // BluetoothFeature raw values from spec.gmidl. The core answers LeCentral,
+        // LeAdvertise, LeServer, Classic and ClassicServer from the supports_*
+        // calls above and asks this for the rest; false for anything unknown.
+        virtual bool feature_supported(std::int32_t feature) const
+        {
+            (void)feature;
+            return false;
+        }
+
         // BluetoothState raw values from spec.gmidl. Backends that can observe
         // adapter/manager state should override this and emit
         // bluetooth_state_changed LeEvent events on subsequent transitions.

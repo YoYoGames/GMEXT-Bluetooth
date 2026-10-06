@@ -128,6 +128,31 @@ namespace gm_enums
         PoweredOn = 5
     };
 
+    enum class BluetoothFeature : std::int32_t
+    {
+        LeCentral = 0,
+        LePassiveScan = 1,
+        LeAdvertise = 2,
+        LeAdvertiseName = 3,
+        LeAdvertiseServiceUuids = 4,
+        LeAdvertiseServiceData = 5,
+        LeAdvertiseManufacturerData = 6,
+        LeAdvertiseTxPower = 7,
+        LeAdvertiseIncludeTxPower = 8,
+        LeAdvertiseNonConnectable = 9,
+        LeServer = 10,
+        LeServerDescriptorRequests = 11,
+        LeServerSignedWrite = 12,
+        LeServerConnectionEvents = 13,
+        LePairing = 14,
+        Classic = 15,
+        ClassicServer = 16,
+        ClassicPairing = 17,
+        ClassicDiscoverable = 18,
+        ClassicDiscoverableStop = 19,
+        PermissionRequest = 20
+    };
+
 }
 
 
@@ -379,6 +404,7 @@ bool bluetooth_le_advertise_is_supported();
 bool bluetooth_le_server_is_supported();
 bool bluetooth_classic_is_supported();
 bool bluetooth_classic_server_is_supported();
+bool bluetooth_feature_is_supported(gm_enums::BluetoothFeature feature);
 gm_enums::BluetoothPermissionStatus bluetooth_permission_get_status();
 gm_enums::BluetoothError bluetooth_permission_request(const gm::wire::GMFunction& callback);
 gm_enums::BluetoothError bluetooth_le_scan_start(bool active);

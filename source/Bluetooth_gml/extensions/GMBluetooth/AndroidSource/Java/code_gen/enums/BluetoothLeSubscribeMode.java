@@ -28,7 +28,7 @@ public enum BluetoothLeSubscribeMode
             case 2:
                 return BluetoothLeSubscribeMode.Indicate;
             default:
-                throw new IllegalArgumentException("Unknown BluetoothLeSubscribeMode value: " + v);
+                return null;
         }
     }
 }

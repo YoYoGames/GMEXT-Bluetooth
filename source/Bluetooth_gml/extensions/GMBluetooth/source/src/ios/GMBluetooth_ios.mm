@@ -18,6 +18,7 @@
 
 - (bool)bluetooth_classic_is_supported { return ::bluetooth_classic_is_supported(); }
 - (bool)bluetooth_classic_server_is_supported { return ::bluetooth_classic_server_is_supported(); }
+- (bool)bluetooth_feature_is_supported:(gm_enums::BluetoothFeature)feature { return ::bluetooth_feature_is_supported(feature); }
 
 - (gm_enums::BluetoothPermissionStatus)bluetooth_permission_get_status { return ::bluetooth_permission_get_status(); }
 - (gm_enums::BluetoothError)bluetooth_permission_request:(gm::wire::GMFunction)callback { return ::bluetooth_permission_request(callback); }

@@ -46,7 +46,7 @@ public enum BluetoothLeCharacteristicProperty
             case 128:
                 return BluetoothLeCharacteristicProperty.ExtendedProperties;
             default:
-                throw new IllegalArgumentException("Unknown BluetoothLeCharacteristicProperty value: " + v);
+                return null;
         }
     }
 }

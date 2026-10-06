@@ -37,7 +37,7 @@ public enum BluetoothState
             case 5:
                 return BluetoothState.PoweredOn;
             default:
-                throw new IllegalArgumentException("Unknown BluetoothState value: " + v);
+                return null;
         }
     }
 }

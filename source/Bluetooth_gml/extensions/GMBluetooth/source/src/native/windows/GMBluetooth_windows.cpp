@@ -491,12 +491,16 @@ namespace gmbluetooth
         }
 
         // The central fields every GATT server event carries: the key the core
-        // maps to a server connection, and the device address when known.
+        // maps to a server connection, and the device address when known,
+        // with the id a scan result for the same peer has (R1-155).
         std::string server_central_json(const std::string& central, const std::string& address)
         {
             std::string out = "\"central\":\"" + json_escape(central) + "\"";
             if (!address.empty())
+            {
                 out += ",\"address\":\"" + json_escape(address) + "\"";
+                out += ",\"device_id\":\"win:ble:" + json_escape(address) + "\"";
+            }
             return out;
         }
 
@@ -990,6 +994,9 @@ namespace gmbluetooth
 
                 if (received == 0)
                 {
+                    // A peer that hung up is a disconnect the game did not ask
+                    // for, as on Android and macOS (R1-77).
+                    error = Error::Disconnected;
                     message = "Remote device disconnected";
                 }
                 else
@@ -1341,6 +1348,10 @@ namespace gmbluetooth
                 return scan->generation.load() == generation && shared->alive->load();
             };
 
+            // An inquiry that could not run is reported as such, not as a scan
+            // that found nothing (R1-68).
+            Error scan_error = Error::Ok;
+            std::string scan_message;
             if (current())
             {
                 BLUETOOTH_DEVICE_SEARCH_PARAMS search{};
@@ -1385,6 +1396,11 @@ namespace gmbluetooth
 
                     BluetoothFindDeviceClose(finder);
                 }
+                else if (const DWORD find_error = GetLastError(); find_error != ERROR_NO_MORE_ITEMS)
+                {
+                    scan_error = Error::OperationFailed;
+                    scan_message = system_error_message("BluetoothFindFirstDevice", find_error);
+                }
             }
 
             // The end of a scan nobody stopped is this thread's to report.
@@ -1403,7 +1419,8 @@ namespace gmbluetooth
                 BackendEvent event;
                 event.type = BackendEventType::ScanStopped;
                 event.transport = Transport::Classic;
-                event.error = Error::Ok;
+                event.error = scan_error;
+                event.message = std::move(scan_message);
                 shared->hooks.push_event(std::move(event));
             }
         }
@@ -2279,10 +2296,17 @@ namespace gmbluetooth
             // An uncached GATT query is intentional here. Microsoft
             // documents that creating BluetoothLEDevice alone does not
             // necessarily initiate a physical connection; an uncached
-            // GATT operation does.
-            const auto services_result =
-                remote.GetGattServicesAsync(
-                    WDB::BluetoothCacheMode::Uncached).get();
+            // GATT operation does. The probe is bounded by the 15 s every
+            // platform documents for a connect (R1-66).
+            const auto services_query =
+                remote.GetGattServicesAsync(WDB::BluetoothCacheMode::Uncached);
+            if (services_query.wait_for(std::chrono::seconds(15)) == winrt::Windows::Foundation::AsyncStatus::Started)
+            {
+                services_query.Cancel();
+                fail_open(133, Error::Timeout, "The Bluetooth LE device did not answer within 15 seconds");
+                return;
+            }
+            const auto services_result = services_query.GetResults();
 
             if (services_result.Status() !=
                 WDBG::GattCommunicationStatus::Success)
@@ -3463,6 +3487,35 @@ namespace gmbluetooth
             return device.transport == Transport::Classic;
         }
 
+        // BluetoothFeature raw values from spec.gmidl (R1-79). The name, service
+        // UUIDs and service data go out through a registered GATT service, so
+        // they are there whenever advertising is.
+        bool feature_supported(std::int32_t feature) const override
+        {
+            const bool le = le_->ble_supported.load();
+            const bool advertise = supports_le_advertise();
+            const bool server = supports_le_server();
+            const bool classic = le_->classic_supported.load();
+            switch (feature)
+            {
+                case 1: return le;              // LePassiveScan
+                case 3:                         // LeAdvertiseName
+                case 4:                         // LeAdvertiseServiceUuids
+                case 5:                         // LeAdvertiseServiceData
+                case 6:                         // LeAdvertiseManufacturerData
+                case 7:                         // LeAdvertiseTxPower
+                case 8:                         // LeAdvertiseIncludeTxPower
+                case 9: return advertise;       // LeAdvertiseNonConnectable
+                case 11: return server;         // LeServerDescriptorRequests
+                case 17:                        // ClassicPairing
+                case 18:                        // ClassicDiscoverable
+                case 19: return classic;        // ClassicDiscoverableStop
+                default: return false;          // signed writes, live server
+                                                // connection events, LE pairing,
+                                                // a permission prompt
+            }
+        }
+
         std::int32_t current_bluetooth_state() const
         {
             return le_->bluetooth_state.load();
@@ -3641,12 +3694,7 @@ namespace gmbluetooth
                 return Error::NotInitialized;
             }
 
-            if (device.transport != Transport::LowEnergy)
-            {
-                message = "Expected a Bluetooth LE device";
-                return Error::InvalidArgument;
-            }
-
+            // The core has checked the handle and the transport (R1-67).
             if (!device.address_available || device.address.empty())
             {
                 message = "Bluetooth LE device has no usable address";
@@ -4748,8 +4796,8 @@ namespace gmbluetooth
         {
             if (!le_server_open_.load())
             {
-                message = "BLE GATT server is not open";
-                return Error::InvalidHandle;
+                message = "The LE server is not running; call bluetooth_le_server_start first";
+                return Error::OperationFailed;
             }
 
             LocalServiceDefinition definition;

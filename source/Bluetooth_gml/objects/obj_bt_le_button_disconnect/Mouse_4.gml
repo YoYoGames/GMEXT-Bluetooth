@@ -11,8 +11,8 @@ if (_r != BluetoothError.Ok)
     exit;
 }
 
-// Not every backend fires le_disconnected for a disconnect we asked for, so
-// tear the connection UI down here. Its CleanUp resets global.ble_conn, which
-// unlocks the device list again. A late le_disconnected is then a no-op.
+// A disconnect we asked for fires no le_disconnected, so tear the connection
+// UI down here. Its CleanUp resets global.ble_conn, which unlocks the device
+// list again.
 show_debug_message("[GML] disconnected by user");
 instance_destroy(owner);

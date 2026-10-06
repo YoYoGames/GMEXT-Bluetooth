@@ -73,7 +73,7 @@ public enum BluetoothAttError
             case 17:
                 return BluetoothAttError.InsufficientResources;
             default:
-                throw new IllegalArgumentException("Unknown BluetoothAttError value: " + v);
+                return null;
         }
     }
 }

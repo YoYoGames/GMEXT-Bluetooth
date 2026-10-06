@@ -19,6 +19,7 @@ GMEXPORT double __EXT_NATIVE__bluetooth_le_advertise_is_supported();
 GMEXPORT double __EXT_NATIVE__bluetooth_le_server_is_supported();
 GMEXPORT double __EXT_NATIVE__bluetooth_classic_is_supported();
 GMEXPORT double __EXT_NATIVE__bluetooth_classic_server_is_supported();
+GMEXPORT double __EXT_NATIVE__bluetooth_feature_is_supported(char* __arg_buffer, double __arg_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_permission_get_status(char* __ret_buffer, double __ret_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_permission_request(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_le_scan_start(double active, char* __ret_buffer, double __ret_buffer_length);

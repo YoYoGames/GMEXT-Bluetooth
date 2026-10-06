@@ -189,6 +189,18 @@ static void GMInjectSelectorsIntoSubclass(Class subclass, Class base)
     return static_cast<double>(__result);
 }
 
+- (double)__EXT_NATIVE__bluetooth_feature_is_supported:(char*)__arg_buffer arg1:(double)__arg_buffer_length
+{
+    gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};
+
+    // field: feature, type: enum BluetoothFeature
+    gm_enums::BluetoothFeature feature = gm::wire::codec::readValue<gm_enums::BluetoothFeature>(__br);
+
+    bool __result = [__impl bluetooth_feature_is_supported:feature];
+
+    return static_cast<double>(__result);
+}
+
 - (double)__EXT_NATIVE__bluetooth_permission_get_status:(char*)__ret_buffer arg1:(double)__ret_buffer_length
 {
     gm_enums::BluetoothPermissionStatus __result = [__impl bluetooth_permission_get_status];

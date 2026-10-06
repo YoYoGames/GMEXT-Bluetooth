@@ -28,7 +28,7 @@ public enum BluetoothTransport
             case 2:
                 return BluetoothTransport.LowEnergy;
             default:
-                throw new IllegalArgumentException("Unknown BluetoothTransport value: " + v);
+                return null;
         }
     }
 }

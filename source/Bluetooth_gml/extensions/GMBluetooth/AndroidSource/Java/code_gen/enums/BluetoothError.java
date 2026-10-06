@@ -67,7 +67,7 @@ public enum BluetoothError
             case 15:
                 return BluetoothError.InsufficientSecurity;
             default:
-                throw new IllegalArgumentException("Unknown BluetoothError value: " + v);
+                return null;
         }
     }
 }

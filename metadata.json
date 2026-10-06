@@ -12,7 +12,26 @@
             "packageFormat": "LTS22",
             "includeFolders": null,
             "includeResources": null,
-            "excludeResources": null
+            "excludeResources": null,
+            "excludeFolders": null,
+            "postRemovals": [
+                "**/.vs/",
+                "**/.vsc/",
+                "**/*.exp",
+                "**/*.ilk",
+                "**/*.lib",
+                "**/*.pdb",
+                "**/*.exe",
+                "**/Debug/",
+                "**/Release/",
+                ".DS_Store",
+                "*.user",
+                "xcuserdata/",
+                "**/extensions/**/source/out/",
+                "**/extensions/**/AndroidSource/libs/",
+                "**/extensions/**/AndroidSource/libs-aar/",
+                "/Build/"
+            ]
         }
     ]
 }
