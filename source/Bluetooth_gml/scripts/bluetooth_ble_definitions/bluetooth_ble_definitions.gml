@@ -4,10 +4,6 @@
 #macro DEMO_CHAR_TX_UUID   "6e400003-b5a3-f393-e0a9-e50e24dcca9e"  // server notifies here, client receives
 #macro DEMO_CHAR_INFO_UUID "6e400004-b5a3-f393-e0a9-e50e24dcca9e"  // client reads demo/server info
 
-// GATT permission bitmasks used by the demo service definition.
-#macro GATT_PERMISSION_WRITE 0x10
-#macro GATT_PERMISSION_READ  0x01
-
 /// @func ble_bytes_to_string(buffer, size)
 /// @desc Reads the first `size` bytes of a buffer as plain ASCII text.
 function ble_bytes_to_string(_buf, _n)

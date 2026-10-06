@@ -200,9 +200,14 @@ static void GMInjectSelectorsIntoSubclass(Class subclass, Class base)
     return 0;
 }
 
-- (double)__EXT_NATIVE__bluetooth_permission_request:(char*)__ret_buffer arg1:(double)__ret_buffer_length
+- (double)__EXT_NATIVE__bluetooth_permission_request:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length
 {
-    gm_enums::BluetoothError __result = [__impl bluetooth_permission_request];
+    gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};
+
+    // field: callback, type: Function
+    gm::wire::GMFunction callback = gm::wire::codec::readFunction(__br, &__dispatch_queue);
+
+    gm_enums::BluetoothError __result = [__impl bluetooth_permission_request:callback];
 
     gm::byteio::BufferWriter __bw{__ret_buffer, static_cast<size_t>(__ret_buffer_length)};
 
@@ -1190,8 +1195,8 @@ static void GMInjectSelectorsIntoSubclass(Class subclass, Class base)
     // field: request_id, type: Int32
     std::int32_t request_id = gm::wire::codec::readValue<std::int32_t>(__br);
 
-    // field: error_code, type: Int32
-    std::int32_t error_code = gm::wire::codec::readValue<std::int32_t>(__br);
+    // field: error_code, type: enum BluetoothAttError
+    gm_enums::BluetoothAttError error_code = gm::wire::codec::readValue<gm_enums::BluetoothAttError>(__br);
 
     // field: data, type: Buffer
     gm::wire::GMBuffer data = __buffer_queue.front();
@@ -1212,9 +1217,17 @@ static void GMInjectSelectorsIntoSubclass(Class subclass, Class base)
     return 0;
 }
 
-- (double)__EXT_NATIVE__bluetooth_le_server_respond_write:(double)request_id arg1:(double)error_code arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length
+- (double)__EXT_NATIVE__bluetooth_le_server_respond_write:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length
 {
-    gm_enums::BluetoothError __result = [__impl bluetooth_le_server_respond_write:request_id error_code:static_cast<std::int32_t>(error_code)];
+    gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};
+
+    // field: request_id, type: Int32
+    std::int32_t request_id = gm::wire::codec::readValue<std::int32_t>(__br);
+
+    // field: error_code, type: enum BluetoothAttError
+    gm_enums::BluetoothAttError error_code = gm::wire::codec::readValue<gm_enums::BluetoothAttError>(__br);
+
+    gm_enums::BluetoothError __result = [__impl bluetooth_le_server_respond_write:request_id error_code:error_code];
 
     gm::byteio::BufferWriter __bw{__ret_buffer, static_cast<size_t>(__ret_buffer_length)};
 

@@ -30,7 +30,31 @@ namespace gm_enums
         NotFound = 10,
         ConnectionFailed = 11,
         Disconnected = 12,
-        OperationFailed = 13
+        OperationFailed = 13,
+        NotPermitted = 14,
+        InsufficientSecurity = 15
+    };
+
+    enum class BluetoothAttError : std::int32_t
+    {
+        Success = 0,
+        InvalidHandle = 1,
+        ReadNotPermitted = 2,
+        WriteNotPermitted = 3,
+        InvalidPdu = 4,
+        InsufficientAuthentication = 5,
+        RequestNotSupported = 6,
+        InvalidOffset = 7,
+        InsufficientAuthorization = 8,
+        PrepareQueueFull = 9,
+        AttributeNotFound = 10,
+        AttributeNotLong = 11,
+        InsufficientEncryptionKeySize = 12,
+        InvalidAttributeValueLength = 13,
+        UnlikelyError = 14,
+        InsufficientEncryption = 15,
+        UnsupportedGroupType = 16,
+        InsufficientResources = 17
     };
 
     enum class BluetoothTransport : std::int32_t
@@ -65,6 +89,19 @@ namespace gm_enums
         Indicate = 32,
         AuthenticatedSignedWrites = 64,
         ExtendedProperties = 128
+    };
+
+    enum class BluetoothLeAttributePermission : std::int32_t
+    {
+        None = 0,
+        Read = 1,
+        ReadEncrypted = 2,
+        ReadEncryptedMitm = 4,
+        Write = 16,
+        WriteEncrypted = 32,
+        WriteEncryptedMitm = 64,
+        WriteSigned = 128,
+        WriteSignedMitm = 256
     };
 
     enum class BluetoothLeWriteType : std::int32_t
@@ -132,7 +169,7 @@ namespace gm_structs
         std::string uuid;
         std::int32_t properties;
         std::int32_t permissions;
-        std::optional<std::string> value;
+        std::vector<std::uint8_t> value;
         std::vector<gm_structs::BluetoothLeDescriptorDefinition> descriptors;
     };
 
@@ -234,7 +271,7 @@ namespace gm::wire::codec
         obj.uuid = gm::wire::codec::readValue<std::string>(_buf);
         obj.properties = gm::wire::codec::readValue<std::int32_t>(_buf);
         obj.permissions = gm::wire::codec::readValue<std::int32_t>(_buf);
-        obj.value = gm::wire::codec::readOptional<std::string>(_buf);
+        obj.value = gm::wire::codec::readVector<std::uint8_t>(_buf);
         obj.descriptors = gm::wire::codec::readVector<gm_structs::BluetoothLeDescriptorDefinition>(_buf);
         return obj;
     }
@@ -343,7 +380,7 @@ bool bluetooth_le_server_is_supported();
 bool bluetooth_classic_is_supported();
 bool bluetooth_classic_server_is_supported();
 gm_enums::BluetoothPermissionStatus bluetooth_permission_get_status();
-gm_enums::BluetoothError bluetooth_permission_request();
+gm_enums::BluetoothError bluetooth_permission_request(const gm::wire::GMFunction& callback);
 gm_enums::BluetoothError bluetooth_le_scan_start(bool active);
 gm_enums::BluetoothError bluetooth_le_scan_stop();
 bool bluetooth_le_scan_is_running();
@@ -412,8 +449,8 @@ gm_enums::BluetoothError bluetooth_le_server_stop();
 bool bluetooth_le_server_is_running();
 gm_enums::BluetoothError bluetooth_le_server_add_service(const gm_structs::BluetoothLeServiceDefinition& service, const gm::wire::GMFunction& callback);
 gm_enums::BluetoothError bluetooth_le_server_clear_services();
-gm_enums::BluetoothError bluetooth_le_server_respond_read(std::int32_t request_id, std::int32_t error_code, gm::wire::GMBuffer data, std::uint32_t offset, std::uint32_t size);
-gm_enums::BluetoothError bluetooth_le_server_respond_write(std::int32_t request_id, std::int32_t error_code);
+gm_enums::BluetoothError bluetooth_le_server_respond_read(std::int32_t request_id, gm_enums::BluetoothAttError error_code, gm::wire::GMBuffer data, std::uint32_t offset, std::uint32_t size);
+gm_enums::BluetoothError bluetooth_le_server_respond_write(std::int32_t request_id, gm_enums::BluetoothAttError error_code);
 std::int32_t bluetooth_le_server_write_request_get_value(std::int32_t request_id, gm::wire::GMBuffer out_data, std::uint32_t offset, std::uint32_t max_size);
 gm_enums::BluetoothError bluetooth_le_server_notify_value(std::string_view service_uuid, std::string_view characteristic_uuid, std::uint64_t connection, gm::wire::GMBuffer data, std::uint32_t offset, std::uint32_t size);
 bool bluetooth_set_callback_state_changed(const gm::wire::GMFunction& callback);

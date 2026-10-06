@@ -83,6 +83,30 @@ namespace
     std::mutex g_pending_pair_mutex;
     std::unordered_map<std::uint64_t, GMFunction> g_pending_pair_callbacks;
 
+    // Every permission_request callback waiting for the answer; one answer
+    // fires them all, so a second request while the prompt is up just waits.
+    std::mutex g_pending_permission_mutex;
+    std::uint64_t g_next_permission_request = 1;
+    std::map<std::uint64_t, GMFunction> g_pending_permission_callbacks;
+
+    void fire_permission_callbacks(Error error, const std::string& message, PermissionStatus status)
+    {
+        std::map<std::uint64_t, GMFunction> callbacks;
+        { std::scoped_lock lock(g_pending_permission_mutex); callbacks.swap(g_pending_permission_callbacks); }
+        for (const auto& [request, callback] : callbacks)
+        {
+            try
+            {
+                // callback(error_code, message, status)
+                callback.call(static_cast<double>(error), message, static_cast<double>(status));
+            }
+            catch (const std::exception& e)
+            {
+                GMBT_LOG("Error dispatching permission_request callback: %s", e.what());
+            }
+        }
+    }
+
     // Device handles count up and are never reused: clear() forgets every
     // device, and one found again afterwards gets a new handle, so a handle a
     // connection or a pending pair still holds can never name another device.
@@ -969,6 +993,21 @@ namespace
 
     // The pre-flight for respond_*: the id names a waiting request of the
     // kind being answered. Nothing is consumed, so a bad call can be retried.
+    // Only the declared BluetoothAttError members go on the air: every
+    // platform sends the code as the ATT error byte.
+    bool check_att_error(BluetoothAttError error_code, const char* function_name)
+    {
+        const auto value = static_cast<std::int32_t>(error_code);
+        if (value >= static_cast<std::int32_t>(BluetoothAttError::Success) &&
+            value <= static_cast<std::int32_t>(BluetoothAttError::InsufficientResources))
+            return true;
+
+        g_last_error = Error::InvalidArgument;
+        g_last_error_message = std::string(function_name) + ": error_code " + std::to_string(value) +
+            " is not a BluetoothAttError member";
+        return false;
+    }
+
     bool check_le_server_request(std::int32_t request_id, bool is_write, const char* other_function)
     {
         std::scoped_lock lock(g_pending_le_server_requests_mutex);
@@ -1121,6 +1160,19 @@ namespace
         return field ? field->as_int(0) : 0;
     }
 
+    // The BluetoothError a backend already mapped ("error"), or fallback when
+    // the event does not carry one.
+    Error le_event_error(const json::Value& root, Error fallback)
+    {
+        const auto* field = root.find("error");
+        if (!field)
+            return fallback;
+        const std::int32_t value = field->as_int(static_cast<std::int32_t>(fallback));
+        if (value < static_cast<std::int32_t>(Error::Ok) || value > static_cast<std::int32_t>(Error::InsufficientSecurity))
+            return fallback;
+        return static_cast<Error>(value);
+    }
+
     std::uint64_t le_event_connection(const json::Value& root)
     {
         const auto* field = root.find("connection");
@@ -1221,10 +1273,10 @@ namespace
             out += ",\"properties\":" + std::to_string(characteristic.properties);
             out += ",\"permissions\":" + std::to_string(characteristic.permissions);
 
-            if (characteristic.value.has_value())
+            if (!characteristic.value.empty())
             {
                 out += ",\"value\":";
-                append_json_string(out, *characteristic.value);
+                append_json_string(out, json::base64_encode(characteristic.value.data(), characteristic.value.size()));
             }
 
             out += ",\"descriptors\":[";
@@ -1299,7 +1351,8 @@ namespace
             }
             const bool failed = le_event_has_error(root);
             const Error error = !failed ? Error::Ok
-                : (le_event_error_code(root) == 133 ? Error::Timeout : Error::ConnectionFailed);
+                : le_event_error(root, le_event_error_code(root) == 133 ? Error::Timeout : Error::ConnectionFailed);
+            const std::string message = failed ? le_event_string(root, "message") : std::string();
             const std::uint64_t device = g_le_connection_manager.get_device(connection);
             if (failed)
             {
@@ -1309,7 +1362,7 @@ namespace
             try
             {
                 // callback(error_code, message, connection, device)
-                callback.call(static_cast<double>(error), std::string(), static_cast<double>(connection), static_cast<double>(device));
+                callback.call(static_cast<double>(error), message, static_cast<double>(connection), static_cast<double>(device));
             }
             catch (const std::exception& e)
             {
@@ -1320,8 +1373,15 @@ namespace
         {
             // Apple: the backend resolves the peripheral's address to its
             // connection. 0 only if the peripheral was never connected through
-            // bluetooth_le_connect, and then there is nothing to retire.
+            // bluetooth_le_connect. A connection already retired - by
+            // bluetooth_le_disconnect, or by the other of the two events Apple
+            // can send for one drop - has had its disconnect.
             const std::uint64_t connection = le_event_connection(root);
+            if (!g_le_connection_manager.is_valid(connection))
+            {
+                g_dropped_events++;
+                return;
+            }
             retire_le_connection(connection);
 
             GMFunction callback;
@@ -1330,8 +1390,9 @@ namespace
             {
                 try
                 {
-                    // callback(connection, error_code, message)
-                    callback.call(static_cast<double>(connection), static_cast<double>(Error::Disconnected), std::string());
+                    // callback(error_code, message, connection)
+                    callback.call(static_cast<double>(le_event_error(root, Error::Disconnected)), le_event_string(root, "message"),
+                        static_cast<double>(connection));
                 }
                 catch (const std::exception& e)
                 {
@@ -1354,7 +1415,13 @@ namespace
                 return;
             }
 
+            // As above: only a connection still live gets its disconnect.
             const std::uint64_t connection = le_event_connection(root);
+            if (!g_le_connection_manager.is_valid(connection))
+            {
+                g_dropped_events++;
+                return;
+            }
             retire_le_connection(connection);
 
             GMFunction callback;
@@ -1363,7 +1430,9 @@ namespace
             {
                 try
                 {
-                    callback.call(static_cast<double>(connection), static_cast<double>(Error::Disconnected), std::string());
+                    // callback(error_code, message, connection)
+                    callback.call(static_cast<double>(le_event_error(root, Error::Disconnected)), le_event_string(root, "message"),
+                        static_cast<double>(connection));
                 }
                 catch (const std::exception& e)
                 {
@@ -1487,6 +1556,8 @@ namespace
             const std::string descriptor_uuid = canonical_uuid(le_event_string(root, "descriptor_uuid"));
             const auto* response_needed_field = root.find("response_needed");
             const bool response_needed = !response_needed_field || response_needed_field->as_bool(true);
+            const auto* offset_field = root.find("offset");
+            const std::int32_t offset = offset_field ? offset_field->as_int(0) : 0;
             const std::uint64_t connection = note_server_central(le_event_string(root, "central"), le_server_event_device(root));
 
             GMFunction callback;
@@ -1520,9 +1591,10 @@ namespace
 
             try
             {
-                // callback(request_id, connection, service_uuid, characteristic_uuid, descriptor_uuid_or_empty)
+                // callback(request_id, connection, service_uuid, characteristic_uuid, descriptor_uuid_or_empty,
+                //          offset, response_needed)
                 callback.call(static_cast<double>(request_id), static_cast<double>(connection), service_uuid, characteristic_uuid,
-                    descriptor_uuid);
+                    descriptor_uuid, static_cast<double>(offset), response_needed);
             }
             catch (const std::exception& e)
             {
@@ -1673,6 +1745,12 @@ namespace
                 return;
             }
 
+            if (event.type == BackendEventType::PermissionResult)
+            {
+                fire_permission_callbacks(Error::Ok, std::string(), static_cast<PermissionStatus>(event.value));
+                return;
+            }
+
             if (event.type == BackendEventType::LeEvent)
             {
                 dispatch_le_event(event);
@@ -1717,8 +1795,8 @@ namespace
                     switch (event.type)
                     {
                     case BackendEventType::ScanStopped:
-                        // callback(error_code, message)
-                        callback.call(static_cast<double>(event.error), event.message);
+                        // callback(error_code, message, transport)
+                        callback.call(static_cast<double>(event.error), event.message, static_cast<double>(event.transport));
                         break;
                     case BackendEventType::ClassicDataAvailable:
                         // callback(connection, available_bytes)
@@ -1729,8 +1807,8 @@ namespace
                         callback.call(static_cast<double>(event.connection), static_cast<double>(event.device));
                         break;
                     case BackendEventType::ClassicDisconnected:
-                        // callback(connection, error_code, message)
-                        callback.call(static_cast<double>(event.connection), static_cast<double>(event.error), event.message);
+                        // callback(error_code, message, connection)
+                        callback.call(static_cast<double>(event.error), event.message, static_cast<double>(event.connection));
                         break;
                     default:
                         break;
@@ -1850,6 +1928,8 @@ void bluetooth_shutdown()
         }
     }
 
+    fire_permission_callbacks(Error::NotInitialized, message, PermissionStatus::Unknown);
+
     {
         std::scoped_lock lock(g_pending_le_server_requests_mutex);
         g_pending_le_server_requests.clear();
@@ -1924,7 +2004,7 @@ BluetoothPermissionStatus bluetooth_permission_get_status()
     return static_cast<BluetoothPermissionStatus>(status);
 }
 
-BluetoothError bluetooth_permission_request()
+BluetoothError bluetooth_permission_request(const gm::wire::GMFunction& callback)
 {
     if (!g_backend)
     {
@@ -1934,9 +2014,23 @@ BluetoothError bluetooth_permission_request()
         return to_gm(Error::NotInitialized);
     }
 
+    // Registered before the backend is asked, which may answer at once; taken
+    // back out on a pre-flight failure, which never fires it.
+    std::uint64_t request = 0;
+    {
+        std::scoped_lock lock(g_pending_permission_mutex);
+        request = g_next_permission_request++;
+        g_pending_permission_callbacks.emplace(request, callback);
+    }
+
     std::string message;
     const Error error = g_backend->permission_request(message);
     set_last_error(error, message);
+    if (error != Error::Ok)
+    {
+        std::scoped_lock lock(g_pending_permission_mutex);
+        g_pending_permission_callbacks.erase(request);
+    }
     GMBT_LOG("permission request -> error=%d message='%s' status now %d",
         static_cast<int>(error),
         message.c_str(),
@@ -2301,7 +2395,11 @@ std::uint64_t bluetooth_classic_connection_get_device(std::uint64_t connection)
 std::int32_t bluetooth_classic_receive_available(std::uint64_t connection)
 {
     if (!g_backend)
+    {
+        g_last_error = Error::NotInitialized;
+        g_last_error_message = "Bluetooth backend is not initialized";
         return 0;
+    }
     const std::int32_t available = g_backend->classic_receive_available(connection);
     if (available == 0)
         retire_classic_connection_if_drained(connection);
@@ -2330,7 +2428,11 @@ BluetoothError bluetooth_classic_send(std::uint64_t connection, struct gm::wire:
 std::int32_t bluetooth_classic_receive(std::uint64_t connection, struct gm::wire::GMBuffer data, unsigned int offset, unsigned int max_size)
 {
     if (!g_backend)
+    {
+        g_last_error = Error::NotInitialized;
+        g_last_error_message = "Bluetooth backend is not initialized";
         return 0;
+    }
 
     if (!buffer_range_valid(data, offset, max_size, "bluetooth_classic_receive"))
         return 0;
@@ -2352,6 +2454,15 @@ BluetoothError bluetooth_classic_server_start(std::string_view name, std::string
 
     if (!check_uuid(service_uuid))
         return to_gm(Error::InvalidArgument);
+
+    // One answer on every platform, rather than a running server that quietly
+    // keeps its old name and UUID.
+    if (g_backend->classic_server_is_running())
+    {
+        g_last_error = Error::Busy;
+        g_last_error_message = "A Classic server is already running; stop it first";
+        return to_gm(Error::Busy);
+    }
 
     std::string message;
     const Error error = g_backend->classic_server_start(std::string(name), std::string(service_uuid), message);
@@ -3166,6 +3277,21 @@ BluetoothError bluetooth_le_server_add_service(const BluetoothLeServiceDefinitio
     {
         if (!check_uuid(characteristic.uuid))
             return to_gm(Error::InvalidArgument);
+        if ((characteristic.permissions & ~kPermissionAll) != 0)
+        {
+            g_last_error = Error::InvalidArgument;
+            g_last_error_message = "Characteristic " + characteristic.uuid + ": permissions " +
+                std::to_string(characteristic.permissions) + " has bits that are not BluetoothLeAttributePermission flags";
+            return to_gm(Error::InvalidArgument);
+        }
+        // The ATT limit on an attribute value.
+        if (characteristic.value.size() > 512)
+        {
+            g_last_error = Error::InvalidArgument;
+            g_last_error_message = "Characteristic " + characteristic.uuid + ": the initial value is " +
+                std::to_string(characteristic.value.size()) + " bytes; an attribute value holds at most 512";
+            return to_gm(Error::InvalidArgument);
+        }
         for (const auto& descriptor : characteristic.descriptors)
         {
             if (!check_uuid(descriptor.uuid))
@@ -3204,7 +3330,7 @@ BluetoothError bluetooth_le_server_clear_services()
     return to_gm(error);
 }
 
-BluetoothError bluetooth_le_server_respond_read(std::int32_t request_id, std::int32_t error_code, struct gm::wire::GMBuffer data, unsigned int offset, unsigned int size)
+BluetoothError bluetooth_le_server_respond_read(std::int32_t request_id, BluetoothAttError error_code, struct gm::wire::GMBuffer data, unsigned int offset, unsigned int size)
 {
     if (!g_backend)
     {
@@ -3212,29 +3338,34 @@ BluetoothError bluetooth_le_server_respond_read(std::int32_t request_id, std::in
         g_last_error_message = "Bluetooth backend is not initialized";
         return to_gm(Error::NotInitialized);
     }
+
+    if (!check_att_error(error_code, "bluetooth_le_server_respond_read"))
+        return to_gm(Error::InvalidArgument);
 
     // Checked before the request is erased, so a call with a bad id, kind or
     // range can be retried instead of leaving the remote central to time out.
     if (!check_le_server_request(request_id, false, "bluetooth_le_server_respond_write"))
         return to_gm(g_last_error);
 
-    if (error_code == static_cast<std::int32_t>(Error::Ok) && size > 0 &&
-        !buffer_range_valid(data, offset, size, "bluetooth_le_server_respond_read"))
+    // A refused read sends no value, so its buffer is never touched.
+    const bool success = error_code == BluetoothAttError::Success;
+    if (success && size > 0 && !buffer_range_valid(data, offset, size, "bluetooth_le_server_respond_read"))
         return to_gm(Error::InvalidArgument);
 
     if (!take_le_server_request(request_id))
         return to_gm(g_last_error);
 
-    const std::uint8_t* buffer = static_cast<const std::uint8_t*>(data.data()) + offset;
-    const std::string value_base64 = json::base64_encode(buffer, size);
+    std::string value_base64;
+    if (success && size > 0)
+        value_base64 = json::base64_encode(static_cast<const std::uint8_t*>(data.data()) + offset, size);
 
     std::string message;
-    const Error error = g_backend->le_server_respond_read(request_id, error_code, value_base64, message);
+    const Error error = g_backend->le_server_respond_read(request_id, static_cast<std::int32_t>(error_code), value_base64, message);
     set_last_error(error, message);
     return to_gm(error);
 }
 
-BluetoothError bluetooth_le_server_respond_write(std::int32_t request_id, std::int32_t error_code)
+BluetoothError bluetooth_le_server_respond_write(std::int32_t request_id, BluetoothAttError error_code)
 {
     if (!g_backend)
     {
@@ -3242,6 +3373,9 @@ BluetoothError bluetooth_le_server_respond_write(std::int32_t request_id, std::i
         g_last_error_message = "Bluetooth backend is not initialized";
         return to_gm(Error::NotInitialized);
     }
+
+    if (!check_att_error(error_code, "bluetooth_le_server_respond_write"))
+        return to_gm(Error::InvalidArgument);
 
     if (!check_le_server_request(request_id, true, "bluetooth_le_server_respond_read"))
         return to_gm(g_last_error);
@@ -3258,7 +3392,7 @@ BluetoothError bluetooth_le_server_respond_write(std::int32_t request_id, std::i
     }
 
     std::string message;
-    const Error error = g_backend->le_server_respond_write(request_id, error_code, message);
+    const Error error = g_backend->le_server_respond_write(request_id, static_cast<std::int32_t>(error_code), message);
     set_last_error(error, message);
     return to_gm(error);
 }
@@ -3270,8 +3404,18 @@ std::int32_t bluetooth_le_server_write_request_get_value(std::int32_t request_id
 
     std::scoped_lock lock(g_pending_le_server_requests_mutex);
     const auto it = g_pending_le_server_requests.find(request_id);
-    if (it == g_pending_le_server_requests.end() || !it->second.is_write)
+    if (it == g_pending_le_server_requests.end())
+    {
+        g_last_error = Error::InvalidHandle;
+        g_last_error_message = "Unknown or expired LE server request id " + std::to_string(request_id);
         return 0;
+    }
+    if (!it->second.is_write)
+    {
+        g_last_error = Error::InvalidArgument;
+        g_last_error_message = "LE server request " + std::to_string(request_id) + " is a read request; it has no written value";
+        return 0;
+    }
 
     const auto& value = it->second.write_value;
     const std::size_t n = std::min(static_cast<std::size_t>(max_size), value.size());

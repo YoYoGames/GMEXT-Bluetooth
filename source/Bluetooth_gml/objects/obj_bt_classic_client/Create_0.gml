@@ -44,7 +44,20 @@ bluetooth_request_permissions = function()
 {
     if (!bt_ready) return;
     if (bluetooth_permission_get_status() == BluetoothPermissionStatus.Granted) return;
-    bluetooth_permission_request();
+
+    var _error = bluetooth_permission_request(function(_error_code, _message, _status)
+    {
+        show_debug_message(
+            $"[GML] permission request: {_error_code} {_message}, status: {_status}"
+        );
+
+        if (auto_scan_after_permission && _status == BluetoothPermissionStatus.Granted)
+        {
+            auto_scan_after_permission = false;
+            bluetooth_start_classic_scan();
+        }
+    });
+    show_debug_message($"[GML] bluetooth_permission_request() = {_error}");
 };
 
 bluetooth_start_classic_scan = function()
@@ -95,8 +108,10 @@ bluetooth_set_callback_device_found(function(_device)
     });
 });
 
-bluetooth_set_callback_scan_stopped(function(_error, _message)
+bluetooth_set_callback_scan_stopped(function(_error, _message, _transport)
 {
+    if (_transport != BluetoothTransport.Classic) return;
+
     show_debug_message(
         $"[GML] classic scan stopped: {_error} {_message}, devices found: {array_length(devices)}"
     );
@@ -116,7 +131,7 @@ bluetooth_set_callback_classic_data(function(_connection, _available_bytes)
 });
 
 bluetooth_set_callback_classic_disconnected(
-    function(_connection, _error_code, _message)
+    function(_error_code, _message, _connection)
     {
         show_debug_message("[GML] classic disconnected: " + _message);
 

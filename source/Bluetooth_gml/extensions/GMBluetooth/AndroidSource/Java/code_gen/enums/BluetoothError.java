@@ -17,7 +17,9 @@ public enum BluetoothError
     NotFound((int)10),
     ConnectionFailed((int)11),
     Disconnected((int)12),
-    OperationFailed((int)13);
+    OperationFailed((int)13),
+    NotPermitted((int)14),
+    InsufficientSecurity((int)15);
 
     private final int value;
     private BluetoothError(int v)
@@ -60,6 +62,10 @@ public enum BluetoothError
                 return BluetoothError.Disconnected;
             case 13:
                 return BluetoothError.OperationFailed;
+            case 14:
+                return BluetoothError.NotPermitted;
+            case 15:
+                return BluetoothError.InsufficientSecurity;
             default:
                 throw new IllegalArgumentException("Unknown BluetoothError value: " + v);
         }

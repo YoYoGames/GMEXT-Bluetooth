@@ -104,9 +104,14 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         return 0;
     }
 
-    public double __EXT_NATIVE__bluetooth_permission_request(ByteBuffer __ret_buffer, double __ret_buffer_length)
+    public double __EXT_NATIVE__bluetooth_permission_request(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
-        BluetoothError __result = bluetooth_permission_request();
+        GMExtWire.order(__arg_buffer);
+
+        // field: callback, type: Function
+        GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
+
+        BluetoothError __result = bluetooth_permission_request(callback);
 
         GMExtWire.order(__ret_buffer);
         GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
@@ -1090,8 +1095,8 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         // field: request_id, type: Int32
         int request_id = GMExtWire.readI32(__arg_buffer);
 
-        // field: error_code, type: Int32
-        int error_code = GMExtWire.readI32(__arg_buffer);
+        // field: error_code, type: enum BluetoothAttError
+        BluetoothAttError error_code = BluetoothAttError.from(GMExtWire.readI32(__arg_buffer));
 
         // field: data, type: Buffer
         java.nio.ByteBuffer data = __buffer_queue.poll();
@@ -1112,9 +1117,17 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         return 0;
     }
 
-    public double __EXT_NATIVE__bluetooth_le_server_respond_write(double request_id, double error_code, ByteBuffer __ret_buffer, double __ret_buffer_length)
+    public double __EXT_NATIVE__bluetooth_le_server_respond_write(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
-        BluetoothError __result = bluetooth_le_server_respond_write((int)request_id, (int)error_code);
+        GMExtWire.order(__arg_buffer);
+
+        // field: request_id, type: Int32
+        int request_id = GMExtWire.readI32(__arg_buffer);
+
+        // field: error_code, type: enum BluetoothAttError
+        BluetoothAttError error_code = BluetoothAttError.from(GMExtWire.readI32(__arg_buffer));
+
+        BluetoothError __result = bluetooth_le_server_respond_write(request_id, error_code);
 
         GMExtWire.order(__ret_buffer);
         GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);

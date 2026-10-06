@@ -63,7 +63,7 @@ bluetooth_set_callback_classic_data(function(_connection, _available_bytes)
 });
 
 bluetooth_set_callback_classic_disconnected(
-    function(_connection, _error_code, _message)
+    function(_error_code, _message, _connection)
     {
         show_debug_message("[GML] classic client disconnected: " + _message);
 
@@ -86,7 +86,24 @@ start_classic_server_demo = function()
         if (!permission_request_sent)
         {
             permission_request_sent = true;
-            bluetooth_permission_request();
+
+            var _error = bluetooth_permission_request(function(_error_code, _message, _status)
+            {
+                show_debug_message(
+                    "[GML] permission request: " + string(_error_code)
+                    + " " + _message
+                    + ", status: " + string(_status)
+                );
+
+                if (_status == BluetoothPermissionStatus.Granted)
+                {
+                    start_classic_server_demo();
+                }
+            });
+
+            show_debug_message(
+                "[GML] bluetooth_permission_request = " + string(_error)
+            );
         }
 
         return;

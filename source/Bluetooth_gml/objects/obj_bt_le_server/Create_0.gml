@@ -144,13 +144,17 @@ bluetooth_set_callback_le_server_write_request(
         _connection,
         _service_uuid,
         _characteristic_uuid,
-        _descriptor_uuid
+        _descriptor_uuid,
+        _offset,
+        _response_needed
     )
     {
         show_debug_message(
             "[GML] LE WRITE request: service=" + _service_uuid
             + " characteristic=" + _characteristic_uuid
             + " descriptor=" + _descriptor_uuid
+            + " offset=" + string(_offset)
+            + " response_needed=" + string(_response_needed)
         );
 
         var _buf = buffer_create(512, buffer_grow, 1);
@@ -183,7 +187,7 @@ bluetooth_set_callback_le_server_write_request(
 
         bluetooth_le_server_respond_write(
             _request_id,
-            BluetoothError.Ok
+            BluetoothAttError.Success
         );
     }
 );
@@ -211,7 +215,7 @@ bluetooth_set_callback_le_server_read_request(
             var _empty = buffer_create(1, buffer_fixed, 1);
             bluetooth_le_server_respond_read(
                 _request_id,
-                BluetoothError.NotSupported,
+                BluetoothAttError.ReadNotPermitted,
                 _empty,
                 0,
                 0
@@ -240,7 +244,7 @@ bluetooth_set_callback_le_server_read_request(
 
         bluetooth_le_server_respond_read(
             _request_id,
-            BluetoothError.Ok,
+            BluetoothAttError.Success,
             _buf,
             _read_offset,
             _read_size
@@ -256,19 +260,22 @@ _rx.uuid = DEMO_CHAR_RX_UUID;
 _rx.properties =
     BluetoothLeCharacteristicProperty.Write
     | BluetoothLeCharacteristicProperty.WriteWithoutResponse;
-_rx.permissions = GATT_PERMISSION_WRITE;
+_rx.permissions = BluetoothLeAttributePermission.Write;
+_rx.value = [];
 _rx.descriptors = [];
 
 var _tx = new BluetoothLeCharacteristicDefinition();
 _tx.uuid = DEMO_CHAR_TX_UUID;
 _tx.properties = BluetoothLeCharacteristicProperty.Notify;
-_tx.permissions = 0;
+_tx.permissions = BluetoothLeAttributePermission.None;
+_tx.value = [];
 _tx.descriptors = [];
 
 var _info = new BluetoothLeCharacteristicDefinition();
 _info.uuid = DEMO_CHAR_INFO_UUID;
 _info.properties = BluetoothLeCharacteristicProperty.Read;
-_info.permissions = GATT_PERMISSION_READ;
+_info.permissions = BluetoothLeAttributePermission.Read;
+_info.value = [];
 _info.descriptors = [];
 
 service_definition = new BluetoothLeServiceDefinition();
@@ -293,7 +300,24 @@ start_le_server_demo = function()
         if (!permission_request_sent)
         {
             permission_request_sent = true;
-            bluetooth_permission_request();
+
+            var _error = bluetooth_permission_request(function(_error_code, _message, _status)
+            {
+                show_debug_message(
+                    "[GML] permission request: " + string(_error_code)
+                    + " " + _message
+                    + ", status: " + string(_status)
+                );
+
+                if (_status == BluetoothPermissionStatus.Granted)
+                {
+                    start_le_server_demo();
+                }
+            });
+
+            show_debug_message(
+                $"[GML] bluetooth_permission_request() = {_error}"
+            );
         }
 
         return;

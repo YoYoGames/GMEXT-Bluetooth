@@ -6,7 +6,6 @@ import java.nio.ByteBuffer;
 
 import ${YYAndroidPackageName}.GMExtWire;
 import ${YYAndroidPackageName}.GMExtWire.GMValue;
-import java.util.Optional;
 import java.util.List;
 import ${YYAndroidPackageName}.records.*;
 
@@ -22,12 +21,7 @@ public final class BluetoothLeCharacteristicDefinitionCodec {
 
         int permissions = GMExtWire.readI32(b);
 
-        java.util.Optional<String> value = java.util.Optional.empty();
-        if (GMExtWire.readBool(b))
-        {
-            String __opt_value = GMExtWire.readString(b);
-            value = java.util.Optional.of(__opt_value);
-        }
+        java.util.List<Byte> value = GMExtWire.readList(b, bb -> GMExtWire.readI8(bb));
 
         java.util.List<BluetoothLeDescriptorDefinition> descriptors = GMExtWire.readList(b, bb -> BluetoothLeDescriptorDefinitionCodec.read(bb));
 
@@ -42,11 +36,7 @@ public final class BluetoothLeCharacteristicDefinitionCodec {
 
         GMExtWire.writeI32(b, obj.permissions());
 
-        GMExtWire.writeBool(b, obj.value() != null && obj.value().isPresent());
-        if (obj.value() != null && obj.value().isPresent())
-        {
-            GMExtWire.writeString(b, obj.value().get());
-        }
+        GMExtWire.writeList(b, obj.value(), (bb, x) -> GMExtWire.writeI8(bb, x));
 
         GMExtWire.writeList(b, obj.descriptors(), (bb, x) -> BluetoothLeDescriptorDefinitionCodec.write(bb, x));
 

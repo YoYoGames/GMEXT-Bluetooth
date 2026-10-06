@@ -23,7 +23,31 @@ enum BluetoothError
     NotFound = 10,
     ConnectionFailed = 11,
     Disconnected = 12,
-    OperationFailed = 13
+    OperationFailed = 13,
+    NotPermitted = 14,
+    InsufficientSecurity = 15
+}
+
+enum BluetoothAttError
+{
+    Success = 0,
+    InvalidHandle = 1,
+    ReadNotPermitted = 2,
+    WriteNotPermitted = 3,
+    InvalidPdu = 4,
+    InsufficientAuthentication = 5,
+    RequestNotSupported = 6,
+    InvalidOffset = 7,
+    InsufficientAuthorization = 8,
+    PrepareQueueFull = 9,
+    AttributeNotFound = 10,
+    AttributeNotLong = 11,
+    InsufficientEncryptionKeySize = 12,
+    InvalidAttributeValueLength = 13,
+    UnlikelyError = 14,
+    InsufficientEncryption = 15,
+    UnsupportedGroupType = 16,
+    InsufficientResources = 17
 }
 
 enum BluetoothTransport
@@ -58,6 +82,19 @@ enum BluetoothLeCharacteristicProperty
     Indicate = 32,
     AuthenticatedSignedWrites = 64,
     ExtendedProperties = 128
+}
+
+enum BluetoothLeAttributePermission
+{
+    None = 0,
+    Read = 1,
+    ReadEncrypted = 2,
+    ReadEncryptedMitm = 4,
+    Write = 16,
+    WriteEncrypted = 32,
+    WriteEncryptedMitm = 64,
+    WriteSigned = 128,
+    WriteSignedMitm = 256
 }
 
 enum BluetoothLeWriteType
@@ -466,17 +503,14 @@ function __BluetoothLeCharacteristicDefinition_encode(_inst, _buffer, _offset, _
         if (!is_numeric(self.permissions)) show_error($"{_where} :: self.permissions expected number", true);
         buffer_write(_buffer, buffer_s32, self.permissions);
 
-        // field: value, type: optional<String>
-        if (is_undefined(self.value))
+        // field: value, type: UInt8[]
+        if (!is_array(self.value)) show_error($"{_where} :: self.value expected array", true);
+        var __length__ = array_length(self.value);
+        buffer_write(_buffer, buffer_u32, __length__);
+        for (var _i = 0; _i < __length__; ++_i)
         {
-            buffer_write(_buffer, buffer_bool, false);
-        }
-        else
-        {
-            buffer_write(_buffer, buffer_bool, true);
-            if (!is_string(self.value)) show_error($"{_where} :: self.value expected string", true);
-            buffer_write(_buffer, buffer_u32, string_byte_length(self.value));
-            buffer_write(_buffer, buffer_string, self.value);
+            if (!is_numeric(self.value[_i])) show_error($"{_where} :: self.value[_i] expected number", true);
+            buffer_write(_buffer, buffer_u8, self.value[_i]);
         }
 
         // field: descriptors, type: struct BluetoothLeDescriptorDefinition[]
@@ -516,15 +550,12 @@ function __BluetoothLeCharacteristicDefinition_decode(_buffer, _offset)
         // field: permissions, type: Int32
         self.permissions = buffer_read(_buffer, buffer_s32);
 
-        // field: value, type: optional<String>
-        if (buffer_read(_buffer, buffer_bool))
+        // field: value, type: UInt8[]
+        var __length__ = buffer_read(_buffer, buffer_u32);
+        self.value = array_create(__length__);
+        for (var _i = 0; _i < __length__; ++_i)
         {
-            buffer_read(_buffer, buffer_u32);
-            self.value = buffer_read(_buffer, buffer_string);
-        }
-        else
-        {
-            self.value = undefined;
+            self.value[_i] = buffer_read(_buffer, buffer_u8);
         }
 
         // field: descriptors, type: struct BluetoothLeDescriptorDefinition[]
@@ -773,16 +804,26 @@ function bluetooth_permission_get_status()
 }
 
 /**
+ * @param {Function} _callback
  * @returns {Enum.BluetoothError}
  */
-function bluetooth_permission_request()
+function bluetooth_permission_request(_callback)
 {
     var __available__ = __GMBluetooth_is_available();
     if (!__available__) return;
 
+    var __dispatcher__ = __GMBluetooth_get_dispatcher();
+
+    var __args_buffer__ = __ext_core_get_args_buffer();
+
+    // param: _callback, type: Function
+    if (!is_callable(_callback)) show_error($"{_GMFUNCTION_} :: _callback expected callable type", true);
+    var _callback_handle = __ext_core_function_register(_callback, __dispatcher__);
+    buffer_write(__args_buffer__, buffer_u64, _callback_handle);
+
     var __ret_buffer__ = __ext_core_get_ret_buffer();
 
-    var __return_value__ = __bluetooth_permission_request(buffer_get_address(__ret_buffer__), buffer_get_size(__ret_buffer__));
+    var __return_value__ = __bluetooth_permission_request(buffer_get_address(__args_buffer__), buffer_tell(__args_buffer__), buffer_get_address(__ret_buffer__), buffer_get_size(__ret_buffer__));
 
     var __result__ = undefined;
     __result__ = buffer_read(__ret_buffer__, buffer_s32);
@@ -2289,7 +2330,7 @@ function bluetooth_le_server_clear_services()
 
 /**
  * @param {Real} _request_id
- * @param {Real} _error_code
+ * @param {Enum.BluetoothAttError} _error_code
  * @param {Id.Buffer} _data
  * @param {Real} _offset
  * @param {Real} _size
@@ -2306,7 +2347,8 @@ function bluetooth_le_server_respond_read(_request_id, _error_code, _data, _offs
     if (!is_numeric(_request_id)) show_error($"{_GMFUNCTION_} :: _request_id expected number", true);
     buffer_write(__args_buffer__, buffer_s32, _request_id);
 
-    // param: _error_code, type: Int32
+    // param: _error_code, type: enum BluetoothAttError
+
     if (!is_numeric(_error_code)) show_error($"{_GMFUNCTION_} :: _error_code expected number", true);
     buffer_write(__args_buffer__, buffer_s32, _error_code);
 
@@ -2333,7 +2375,7 @@ function bluetooth_le_server_respond_read(_request_id, _error_code, _data, _offs
 
 /**
  * @param {Real} _request_id
- * @param {Real} _error_code
+ * @param {Enum.BluetoothAttError} _error_code
  * @returns {Enum.BluetoothError}
  */
 function bluetooth_le_server_respond_write(_request_id, _error_code)
@@ -2341,9 +2383,20 @@ function bluetooth_le_server_respond_write(_request_id, _error_code)
     var __available__ = __GMBluetooth_is_available();
     if (!__available__) return;
 
+    var __args_buffer__ = __ext_core_get_args_buffer();
+
+    // param: _request_id, type: Int32
+    if (!is_numeric(_request_id)) show_error($"{_GMFUNCTION_} :: _request_id expected number", true);
+    buffer_write(__args_buffer__, buffer_s32, _request_id);
+
+    // param: _error_code, type: enum BluetoothAttError
+
+    if (!is_numeric(_error_code)) show_error($"{_GMFUNCTION_} :: _error_code expected number", true);
+    buffer_write(__args_buffer__, buffer_s32, _error_code);
+
     var __ret_buffer__ = __ext_core_get_ret_buffer();
 
-    var __return_value__ = __bluetooth_le_server_respond_write(_request_id, _error_code, buffer_get_address(__ret_buffer__), buffer_get_size(__ret_buffer__));
+    var __return_value__ = __bluetooth_le_server_respond_write(buffer_get_address(__args_buffer__), buffer_tell(__args_buffer__), buffer_get_address(__ret_buffer__), buffer_get_size(__ret_buffer__));
 
     var __result__ = undefined;
     __result__ = buffer_read(__ret_buffer__, buffer_s32);
@@ -2752,4 +2805,4 @@ function __GMBluetooth_is_available()
 // # Exports
 // #####################################################################
 
-#export BluetoothError, BluetoothTransport, BluetoothPermissionStatus, BluetoothLeSubscribeMode, BluetoothLeCharacteristicProperty, BluetoothLeWriteType, BluetoothLeAdvertiseTxPower, BluetoothState, BluetoothLeDescriptorDefinition, BluetoothLeAdvertiseSettings, BluetoothLeAdvertiseServiceData, BluetoothLeAdvertiseManufacturerData, BluetoothLeCharacteristicDefinition, BluetoothLeAdvertiseData, BluetoothLeServiceDefinition, bluetooth_last_error_code, bluetooth_permission_get_status, bluetooth_permission_request, bluetooth_le_scan_start, bluetooth_le_scan_stop, bluetooth_classic_scan_start, bluetooth_classic_scan_stop, bluetooth_device_get_at, bluetooth_device_is_valid, bluetooth_device_get_transport, bluetooth_device_get_id, bluetooth_device_get_name, bluetooth_device_has_address, bluetooth_device_get_address, bluetooth_device_has_rssi, bluetooth_device_get_rssi, bluetooth_device_is_connectable, bluetooth_classic_connect, bluetooth_classic_disconnect, bluetooth_classic_connection_is_valid, bluetooth_classic_connection_is_connected, bluetooth_classic_connection_get_device, bluetooth_classic_receive_available, bluetooth_classic_send, bluetooth_classic_receive, bluetooth_classic_server_start, bluetooth_classic_server_stop, bluetooth_classic_discoverable_start, bluetooth_classic_discoverable_stop, bluetooth_pairing_is_supported, bluetooth_pair, bluetooth_device_is_paired, bluetooth_le_connect, bluetooth_le_disconnect, bluetooth_le_connection_is_valid, bluetooth_le_connection_is_connected, bluetooth_le_connection_get_device, bluetooth_le_services_discover, bluetooth_le_service_get_count, bluetooth_le_service_get_at, bluetooth_le_service_get_uuid, bluetooth_le_characteristics_discover, bluetooth_le_characteristic_get_count, bluetooth_le_characteristic_get_at, bluetooth_le_characteristic_get_uuid, bluetooth_le_characteristic_get_properties, bluetooth_le_descriptors_discover, bluetooth_le_descriptor_get_count, bluetooth_le_descriptor_get_at, bluetooth_le_descriptor_get_uuid, bluetooth_le_characteristic_read, bluetooth_le_characteristic_write, bluetooth_le_characteristic_subscribe, bluetooth_le_descriptor_read, bluetooth_le_descriptor_write, bluetooth_le_value_copy, bluetooth_le_value_release, bluetooth_le_advertise_start, bluetooth_le_advertise_stop, bluetooth_le_server_start, bluetooth_le_server_stop, bluetooth_le_server_add_service, bluetooth_le_server_clear_services, bluetooth_le_server_respond_read, bluetooth_le_server_respond_write, bluetooth_le_server_write_request_get_value, bluetooth_le_server_notify_value, bluetooth_set_callback_state_changed, bluetooth_set_callback_device_found, bluetooth_set_callback_scan_stopped, bluetooth_set_callback_classic_client_connected, bluetooth_set_callback_classic_data, bluetooth_set_callback_classic_disconnected, bluetooth_set_callback_le_disconnected, bluetooth_set_callback_le_characteristic_value_changed, bluetooth_set_callback_le_server_connection_state_changed, bluetooth_set_callback_le_server_read_request, bluetooth_set_callback_le_server_write_request
+#export BluetoothError, BluetoothAttError, BluetoothTransport, BluetoothPermissionStatus, BluetoothLeSubscribeMode, BluetoothLeCharacteristicProperty, BluetoothLeAttributePermission, BluetoothLeWriteType, BluetoothLeAdvertiseTxPower, BluetoothState, BluetoothLeDescriptorDefinition, BluetoothLeAdvertiseSettings, BluetoothLeAdvertiseServiceData, BluetoothLeAdvertiseManufacturerData, BluetoothLeCharacteristicDefinition, BluetoothLeAdvertiseData, BluetoothLeServiceDefinition, bluetooth_last_error_code, bluetooth_permission_get_status, bluetooth_permission_request, bluetooth_le_scan_start, bluetooth_le_scan_stop, bluetooth_classic_scan_start, bluetooth_classic_scan_stop, bluetooth_device_get_at, bluetooth_device_is_valid, bluetooth_device_get_transport, bluetooth_device_get_id, bluetooth_device_get_name, bluetooth_device_has_address, bluetooth_device_get_address, bluetooth_device_has_rssi, bluetooth_device_get_rssi, bluetooth_device_is_connectable, bluetooth_classic_connect, bluetooth_classic_disconnect, bluetooth_classic_connection_is_valid, bluetooth_classic_connection_is_connected, bluetooth_classic_connection_get_device, bluetooth_classic_receive_available, bluetooth_classic_send, bluetooth_classic_receive, bluetooth_classic_server_start, bluetooth_classic_server_stop, bluetooth_classic_discoverable_start, bluetooth_classic_discoverable_stop, bluetooth_pairing_is_supported, bluetooth_pair, bluetooth_device_is_paired, bluetooth_le_connect, bluetooth_le_disconnect, bluetooth_le_connection_is_valid, bluetooth_le_connection_is_connected, bluetooth_le_connection_get_device, bluetooth_le_services_discover, bluetooth_le_service_get_count, bluetooth_le_service_get_at, bluetooth_le_service_get_uuid, bluetooth_le_characteristics_discover, bluetooth_le_characteristic_get_count, bluetooth_le_characteristic_get_at, bluetooth_le_characteristic_get_uuid, bluetooth_le_characteristic_get_properties, bluetooth_le_descriptors_discover, bluetooth_le_descriptor_get_count, bluetooth_le_descriptor_get_at, bluetooth_le_descriptor_get_uuid, bluetooth_le_characteristic_read, bluetooth_le_characteristic_write, bluetooth_le_characteristic_subscribe, bluetooth_le_descriptor_read, bluetooth_le_descriptor_write, bluetooth_le_value_copy, bluetooth_le_value_release, bluetooth_le_advertise_start, bluetooth_le_advertise_stop, bluetooth_le_server_start, bluetooth_le_server_stop, bluetooth_le_server_add_service, bluetooth_le_server_clear_services, bluetooth_le_server_respond_read, bluetooth_le_server_respond_write, bluetooth_le_server_write_request_get_value, bluetooth_le_server_notify_value, bluetooth_set_callback_state_changed, bluetooth_set_callback_device_found, bluetooth_set_callback_scan_stopped, bluetooth_set_callback_classic_client_connected, bluetooth_set_callback_classic_data, bluetooth_set_callback_classic_disconnected, bluetooth_set_callback_le_disconnected, bluetooth_set_callback_le_characteristic_value_changed, bluetooth_set_callback_le_server_connection_state_changed, bluetooth_set_callback_le_server_read_request, bluetooth_set_callback_le_server_write_request

@@ -102,7 +102,19 @@ bluetooth_set_callback_state_changed(function(_state)
 if (global.bt_permission_status != BluetoothPermissionStatus.Granted)
 {
     show_debug_message("[GML] Requesting Bluetooth permission...");
-    bluetooth_permission_request();
+    var _error = bluetooth_permission_request(function(_error_code, _message, _status)
+    {
+        show_debug_message(
+            "[GML] Bluetooth permission request: "
+            + string(_error_code)
+            + " "
+            + _message
+            + ", status: "
+            + bt_permission_name(_status)
+        );
+    });
+
+    show_debug_message("[GML] bluetooth_permission_request = " + string(_error));
 }
 
 room_goto(rm_bt_menu);

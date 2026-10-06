@@ -1,26 +1,68 @@
 [gml_api]
 module GMBluetooth;
 
+// Conventions
+//
+// Every call that can fail returns a BluetoothError, except bluetooth_classic_connect
+// and bluetooth_le_connect, which return the new connection handle so that
+// bluetooth_*_disconnect can cancel a connect still in progress; they return 0 when
+// the connect did not start. After any failed return, bluetooth_last_error_code()
+// and bluetooth_last_error_message() say why. A call that fails before it starts
+// never fires its callback.
+//
+// A callback that reports an outcome that can fail leads with (error_code, message),
+// followed by its data. An event that cannot fail carries data only, its subject first.
+
 // =============================================================================
 // Constants
 // =============================================================================
 
+/// NotPermitted: the remote device refused the attribute operation (ATT read/write
+/// not permitted, request not supported). InsufficientSecurity: it needs pairing,
+/// encryption or authorization first (ATT insufficient authentication, authorization,
+/// encryption or key size). The message names the ATT code.
 [global, bind = typed_gml]
 enum BluetoothError : int32 {
-    Ok                = 0,
-    Unknown           = 1,
-    NotSupported      = 2,
-    NotInitialized    = 3,
-    BluetoothDisabled = 4,
-    PermissionDenied  = 5,
-    InvalidArgument   = 6,
-    InvalidHandle     = 7,
-    Busy              = 8,
-    Timeout           = 9,
-    NotFound          = 10,
-    ConnectionFailed  = 11,
-    Disconnected      = 12,
-    OperationFailed   = 13
+    Ok                   = 0,
+    Unknown              = 1,
+    NotSupported         = 2,
+    NotInitialized       = 3,
+    BluetoothDisabled    = 4,
+    PermissionDenied     = 5,
+    InvalidArgument      = 6,
+    InvalidHandle        = 7,
+    Busy                 = 8,
+    Timeout              = 9,
+    NotFound             = 10,
+    ConnectionFailed     = 11,
+    Disconnected         = 12,
+    OperationFailed      = 13,
+    NotPermitted         = 14,
+    InsufficientSecurity = 15
+}
+
+/// ATT error codes (Bluetooth Core Specification, Vol 3, Part F, 3.4.1.1), used to
+/// answer a GATT server read or write request.
+[global, bind = typed_gml]
+enum BluetoothAttError : int32 {
+    Success                       = 0,
+    InvalidHandle                 = 1,
+    ReadNotPermitted              = 2,
+    WriteNotPermitted             = 3,
+    InvalidPdu                    = 4,
+    InsufficientAuthentication    = 5,
+    RequestNotSupported           = 6,
+    InvalidOffset                 = 7,
+    InsufficientAuthorization     = 8,
+    PrepareQueueFull              = 9,
+    AttributeNotFound             = 10,
+    AttributeNotLong              = 11,
+    InsufficientEncryptionKeySize = 12,
+    InvalidAttributeValueLength   = 13,
+    UnlikelyError                 = 14,
+    InsufficientEncryption        = 15,
+    UnsupportedGroupType          = 16,
+    InsufficientResources         = 17
 }
 
 [global, bind = typed_gml]
@@ -58,6 +100,22 @@ enum BluetoothLeCharacteristicProperty : int32 {
     Indicate                  = 32,
     AuthenticatedSignedWrites = 64,
     ExtendedProperties        = 128
+}
+
+/// GATT server attribute permission flags, combined with |. The values are Android's
+/// BluetoothGattCharacteristic.PERMISSION_* bits. Apple and Windows have no signed
+/// write permission: WriteSigned and WriteSignedMitm are NotSupported there.
+[global, bind = typed_gml]
+enum BluetoothLeAttributePermission : int32 {
+    None               = 0,
+    Read               = 1,
+    ReadEncrypted      = 2,
+    ReadEncryptedMitm  = 4,
+    Write              = 16,
+    WriteEncrypted     = 32,
+    WriteEncryptedMitm = 64,
+    WriteSigned        = 128,
+    WriteSignedMitm    = 256
 }
 
 [global, bind = typed_gml]
@@ -99,9 +157,9 @@ class `[[BluetoothLeDescriptorDefinition]]` prototype Object {
 }
 
 /// Characteristic definition used by BluetoothLeServiceDefinition.
-/// properties is a BluetoothLeCharacteristicProperty bitmask.
-/// permissions remains the existing integer permission bitmask for now.
-/// value is optional base64-encoded initial characteristic data.
+/// properties is a combination of BluetoothLeCharacteristicProperty flags.
+/// permissions is a combination of BluetoothLeAttributePermission flags.
+/// value is the initial value, at most 512 bytes; an empty array means none.
 [global]
 class `[[BluetoothLeCharacteristicDefinition]]` prototype Object {
     [field]
@@ -113,7 +171,7 @@ class `[[BluetoothLeCharacteristicDefinition]]` prototype Object {
     [field]
     property permissions : int32 { get; set; }
 
-    [field, type_hint=`string?`]
+    [field, type_hint=`uint8[]`]
     property value : gmval { get; set; }
 
     [field, type_hint=`BluetoothLeDescriptorDefinition[]`]
@@ -231,10 +289,14 @@ function bluetooth_classic_server_is_supported(): bool;
 [global, bind = typed_gml, type_hint=`BluetoothPermissionStatus`]
 function bluetooth_permission_get_status(): gmval;
 
-/// Android: starts the system permission request when needed.
-/// Windows: returns Ok immediately.
+/// Asks for the Bluetooth permissions the platform needs, showing the system prompt
+/// when the answer is not known yet. callback(error_code, message, status), status a
+/// BluetoothPermissionStatus, fires once: when the user answers, or at once when the
+/// answer is already known (always Granted on Windows). On Apple the prompt appears
+/// only here; until it has been answered, every call that uses Bluetooth returns
+/// PermissionDenied, as on Android without the runtime permissions.
 [global, bind = typed_gml, type_hint=`BluetoothError`]
-function bluetooth_permission_request(): gmval;
+function bluetooth_permission_request(callback: func): gmval;
 
 // =============================================================================
 // BLE discovery
@@ -309,7 +371,10 @@ function bluetooth_device_is_connectable([type_hint=`uint64`] device: gmval): bo
 // =============================================================================
 
 /// Starts an asynchronous RFCOMM connection.
-/// Returns a connection handle immediately, or 0 if the request cannot start.
+/// Returns a connection handle immediately, or 0 if the request cannot start, the
+/// reason then in bluetooth_last_error_code(). bluetooth_classic_disconnect on the
+/// handle cancels a connect still in progress. A connect that has not completed
+/// after 15 seconds fails with Timeout on Windows.
 /// callback(error_code, message, connection, device)
 [global, bind = typed_gml, type_hint=`uint64`]
 function bluetooth_classic_connect(
@@ -344,7 +409,11 @@ function bluetooth_classic_receive_available(
     [type_hint=`uint64`] connection: gmval
 ): int32;
 
-/// Sends bytes from a GameMaker buffer over the RFCOMM connection.
+/// Queues bytes from a GameMaker buffer to be sent over the RFCOMM connection and
+/// returns without waiting for them to go out. Busy when the bytes would take the
+/// connection's queue past 1 MiB, so send more than that in parts.
+/// A send that later fails ends the connection through the classic_disconnected
+/// callback.
 [global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_classic_send(
     [type_hint=`uint64`] connection: gmval,
@@ -366,7 +435,8 @@ function bluetooth_classic_receive(
 // Bluetooth Classic RFCOMM server
 // =============================================================================
 
-/// Starts an RFCOMM service using the supplied UUID.
+/// Starts an RFCOMM service using the supplied UUID. Busy while a server is already
+/// running: stop it first to change its name or UUID.
 [global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_classic_server_start(
     name: string,
@@ -443,7 +513,9 @@ function bluetooth_device_is_paired([type_hint=`uint64`] device: gmval): bool;
 // =============================================================================
 
 /// Starts an asynchronous GATT connection to a previously discovered LE device.
-/// Returns a connection handle immediately, or 0 if the request cannot start.
+/// Returns a connection handle immediately, or 0 if the request cannot start, the
+/// reason then in bluetooth_last_error_code(). bluetooth_le_disconnect on the handle
+/// cancels a connect still in progress.
 /// callback(error_code, message, connection, device)
 [global, bind = typed_gml, type_hint=`uint64`]
 function bluetooth_le_connect(
@@ -670,21 +742,23 @@ function bluetooth_le_server_add_service(
 [global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_le_server_clear_services(): gmval;
 
-/// Call from inside the characteristic/descriptor read-request callback.
+/// Answers a read request. error_code Success sends size bytes of data from offset;
+/// any other code refuses the read, and data, offset and size are ignored.
 [global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_le_server_respond_read(
     request_id: int32,
-    error_code: int32,
+    [type_hint=`BluetoothAttError`] error_code: gmval,
     [type_hint=buffer] data: gmval,
     offset: uint32,
     size: uint32
 ): gmval;
 
-/// Call from inside the characteristic/descriptor write-request callback.
+/// Answers a write request. Call it for every write request, including one whose
+/// response_needed was false: nothing is sent then, and the request is released.
 [global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_le_server_respond_write(
     request_id: int32,
-    error_code: int32
+    [type_hint=`BluetoothAttError`] error_code: gmval
 ): gmval;
 
 /// Copies the bytes a remote central wrote in a pending write request into out_data.
@@ -730,8 +804,8 @@ function bluetooth_set_callback_device_found(callback: func): bool;
 [global, bind = typed_gml]
 function bluetooth_remove_callback_device_found(): bool;
 
-/// callback(error_code, message)
-/// Used by both scan types; preserved from the first BLE milestone.
+/// callback(error_code, message, transport), transport a BluetoothTransport.
+/// Fired when an LE or a Classic scan stops, whether it was stopped or failed.
 [global, bind = typed_gml]
 function bluetooth_set_callback_scan_stopped(callback: func): bool;
 
@@ -748,20 +822,23 @@ function bluetooth_remove_callback_classic_client_connected(): bool;
 
 /// callback(connection, available_bytes)
 /// Bytes remain in a native queue until bluetooth_classic_receive() copies them.
+/// Fired once when bytes arrive and again only after bluetooth_classic_receive()
+/// has been called, so read with bluetooth_classic_receive_available(). On Windows
+/// the connection stops reading from the peer while 1 MiB is waiting.
 [global, bind = typed_gml]
 function bluetooth_set_callback_classic_data(callback: func): bool;
 
 [global, bind = typed_gml]
 function bluetooth_remove_callback_classic_data(): bool;
 
-/// callback(connection, error_code, message)
+/// callback(error_code, message, connection)
 [global, bind = typed_gml]
 function bluetooth_set_callback_classic_disconnected(callback: func): bool;
 
 [global, bind = typed_gml]
 function bluetooth_remove_callback_classic_disconnected(): bool;
 
-/// callback(connection, error_code, message)
+/// callback(error_code, message, connection)
 /// Fired when an established LE GATT connection drops asynchronously.
 [global, bind = typed_gml]
 function bluetooth_set_callback_le_disconnected(callback: func): bool;
@@ -800,8 +877,12 @@ function bluetooth_set_callback_le_server_read_request(callback: func): bool;
 [global, bind = typed_gml]
 function bluetooth_remove_callback_le_server_read_request(): bool;
 
-/// callback(request_id, connection, service_uuid, characteristic_uuid, descriptor_uuid)
+/// callback(request_id, connection, service_uuid, characteristic_uuid, descriptor_uuid,
+///          offset, response_needed)
 /// descriptor_uuid is an empty string for a characteristic-level write request.
+/// offset is where the bytes go in the attribute's value; a long write split by the
+/// central arrives assembled, at the offset of its first part. response_needed is
+/// false for a write without response; Apple does not say, and reports true.
 /// Use bluetooth_le_server_write_request_get_value() to read the written bytes,
 /// then respond with bluetooth_le_server_respond_write().
 [global, bind = typed_gml]

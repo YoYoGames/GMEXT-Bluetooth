@@ -21,7 +21,7 @@ public interface GMBluetoothInterface {
     public boolean bluetooth_classic_is_supported();
     public boolean bluetooth_classic_server_is_supported();
     public BluetoothPermissionStatus bluetooth_permission_get_status();
-    public BluetoothError bluetooth_permission_request();
+    public BluetoothError bluetooth_permission_request(GMFunction callback);
     public BluetoothError bluetooth_le_scan_start(boolean active);
     public BluetoothError bluetooth_le_scan_stop();
     public boolean bluetooth_le_scan_is_running();
@@ -90,8 +90,8 @@ public interface GMBluetoothInterface {
     public boolean bluetooth_le_server_is_running();
     public BluetoothError bluetooth_le_server_add_service(BluetoothLeServiceDefinition service, GMFunction callback);
     public BluetoothError bluetooth_le_server_clear_services();
-    public BluetoothError bluetooth_le_server_respond_read(int request_id, int error_code, java.nio.ByteBuffer data, int offset, int size);
-    public BluetoothError bluetooth_le_server_respond_write(int request_id, int error_code);
+    public BluetoothError bluetooth_le_server_respond_read(int request_id, BluetoothAttError error_code, java.nio.ByteBuffer data, int offset, int size);
+    public BluetoothError bluetooth_le_server_respond_write(int request_id, BluetoothAttError error_code);
     public int bluetooth_le_server_write_request_get_value(int request_id, java.nio.ByteBuffer out_data, int offset, int max_size);
     public BluetoothError bluetooth_le_server_notify_value(String service_uuid, String characteristic_uuid, long connection, java.nio.ByteBuffer data, int offset, int size);
     public boolean bluetooth_set_callback_state_changed(GMFunction callback);

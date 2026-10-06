@@ -1,6 +1,7 @@
 package ${YYAndroidPackageName};
 
 import ${YYAndroidPackageName}.GMExtWire.GMFunction;
+import ${YYAndroidPackageName}.enums.BluetoothAttError;
 import ${YYAndroidPackageName}.enums.BluetoothError;
 import ${YYAndroidPackageName}.enums.BluetoothLeAdvertiseTxPower;
 import ${YYAndroidPackageName}.enums.BluetoothLeSubscribeMode;
@@ -45,7 +46,6 @@ import android.location.LocationManager;
 import android.os.Build;
 import android.os.ParcelUuid;
 import android.provider.Settings;
-import android.util.Base64;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -103,6 +103,8 @@ public class GMBluetooth extends GMBluetoothInternal
     private static final BluetoothError CONNECTION_FAILED  = BluetoothError.ConnectionFailed;
     private static final BluetoothError DISCONNECTED       = BluetoothError.Disconnected;
     private static final BluetoothError OPERATION_FAILED   = BluetoothError.OperationFailed;
+    private static final BluetoothError NOT_PERMITTED      = BluetoothError.NotPermitted;
+    private static final BluetoothError INSUFFICIENT_SECURITY = BluetoothError.InsufficientSecurity;
 
     private static final int TRANSPORT_UNKNOWN = 0;
     private static final int TRANSPORT_CLASSIC = 1;
@@ -517,6 +519,10 @@ public class GMBluetooth extends GMBluetoothInternal
         BluetoothGattCharacteristic characteristic;
         BluetoothGattDescriptor descriptor;
         byte[] value = new byte[0];
+
+        // The first fragment's offset: the assembled write reaches GML as
+        // the bytes from here on, at this offset.
+        int offset = 0;
     }
 
     // A write without response needs no answer, so nothing else removes it.
@@ -529,6 +535,17 @@ public class GMBluetooth extends GMBluetoothInternal
 
     // The longest attribute value ATT allows.
     private static final int MAX_ATTRIBUTE_LENGTH = 512;
+
+    // Every BluetoothLeAttributePermission flag (Android's PERMISSION_* bits).
+    private static final int ATTRIBUTE_PERMISSION_ALL =
+        BluetoothGattCharacteristic.PERMISSION_READ |
+        BluetoothGattCharacteristic.PERMISSION_READ_ENCRYPTED |
+        BluetoothGattCharacteristic.PERMISSION_READ_ENCRYPTED_MITM |
+        BluetoothGattCharacteristic.PERMISSION_WRITE |
+        BluetoothGattCharacteristic.PERMISSION_WRITE_ENCRYPTED |
+        BluetoothGattCharacteristic.PERMISSION_WRITE_ENCRYPTED_MITM |
+        BluetoothGattCharacteristic.PERMISSION_WRITE_SIGNED |
+        BluetoothGattCharacteristic.PERMISSION_WRITE_SIGNED_MITM;
 
     // ATT error codes the extension answers with when GML does not.
     private static final int ATT_REQUEST_NOT_SUPPORTED = 0x06;
@@ -1014,7 +1031,7 @@ public class GMBluetooth extends GMBluetoothInternal
         if (error != OK)
             setLastError(error, safeMessage);
 
-        invoke(callbackScanStopped, error, safeMessage);
+        invoke(callbackScanStopped, error, safeMessage, transport);
     }
 
 
@@ -1058,9 +1075,9 @@ public class GMBluetooth extends GMBluetoothInternal
 
         invoke(
             callbackClassicDisconnected,
-            (double) connection,
             error,
-            safeMessage);
+            safeMessage,
+            (double) connection);
 
         // Bytes the game has not read yet outlive a remote hang-up: the entry
         // stays until bluetooth_classic_receive drains it,
@@ -1540,6 +1557,114 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     // =========================================================================
+    // GATT status mapping
+    // =========================================================================
+
+    // Statuses Android adds above the ATT codes.
+    private static final int GATT_STATUS_ERROR = 0x85;
+    private static final int GATT_STATUS_CONNECTION_CONGESTED = 0x8F;
+    private static final int GATT_STATUS_CONNECTION_TIMEOUT = 0x93;
+    private static final int GATT_STATUS_FAILURE = 0x101;
+
+    // The link-layer reason onConnectionStateChange reports for a
+    // supervision timeout.
+    private static final int HCI_CONNECTION_TIMEOUT = 0x08;
+
+    // A GATT status as the enum, as the native core maps an ATT error: the
+    // permission and security codes get their own members, the rest
+    // OperationFailed, and the message carries the code.
+    private static BluetoothError mapAttError(int status)
+    {
+        switch (status)
+        {
+            case 0x00:
+                return OK;
+            case 0x02:
+            case 0x03:
+            case 0x06:
+                return NOT_PERMITTED;
+            case 0x05:
+            case 0x08:
+            case 0x0C:
+            case 0x0F:
+                return INSUFFICIENT_SECURITY;
+            case GATT_STATUS_CONNECTION_CONGESTED:
+                return BUSY;
+            default:
+                return OPERATION_FAILED;
+        }
+    }
+
+
+    // "GATT status 0x05: insufficient authentication".
+    private static String attErrorMessage(int status)
+    {
+        String name;
+
+        switch (status)
+        {
+            case 0x01: name = "invalid handle"; break;
+            case 0x02: name = "read not permitted"; break;
+            case 0x03: name = "write not permitted"; break;
+            case 0x04: name = "invalid PDU"; break;
+            case 0x05: name = "insufficient authentication"; break;
+            case 0x06: name = "request not supported"; break;
+            case 0x07: name = "invalid offset"; break;
+            case 0x08: name = "insufficient authorization"; break;
+            case 0x09: name = "prepare queue full"; break;
+            case 0x0A: name = "attribute not found"; break;
+            case 0x0B: name = "attribute not long"; break;
+            case 0x0C: name = "insufficient encryption key size"; break;
+            case 0x0D: name = "invalid attribute value length"; break;
+            case 0x0E: name = "unlikely error"; break;
+            case 0x0F: name = "insufficient encryption"; break;
+            case 0x10: name = "unsupported group type"; break;
+            case 0x11: name = "insufficient resources"; break;
+            case GATT_STATUS_ERROR: name = "GATT error"; break;
+            case GATT_STATUS_CONNECTION_CONGESTED: name = "connection congested"; break;
+            case GATT_STATUS_FAILURE: name = "GATT failure"; break;
+            default:
+                name = status >= 0x80 && status <= 0x9F ? "application error" : "unknown error";
+                break;
+        }
+
+        return String.format("GATT status 0x%02X: %s", status, name);
+    }
+
+
+    // onConnectionStateChange reports a link-layer (HCI) reason or one of
+    // Android's GATT statuses, not an ATT error, so the common link reasons
+    // are named here before falling back to the GATT table.
+    private static String connectionStatusMessage(int status)
+    {
+        String name;
+
+        switch (status)
+        {
+            case HCI_CONNECTION_TIMEOUT: name = "connection timeout"; break;
+            case 0x13: name = "remote device terminated the connection"; break;
+            case 0x16: name = "connection terminated by the local host"; break;
+            case 0x22: name = "link layer response timeout"; break;
+            case 0x3E: name = "connection failed to be established"; break;
+            case GATT_STATUS_CONNECTION_TIMEOUT: name = "connection timeout"; break;
+            default:
+                return attErrorMessage(status);
+        }
+
+        return String.format("GATT status 0x%02X: %s", status, name);
+    }
+
+
+    // A failed connect: a timeout as Timeout, anything else ConnectionFailed.
+    private static BluetoothError connectError(int status)
+    {
+        return status == HCI_CONNECTION_TIMEOUT || status == GATT_STATUS_CONNECTION_TIMEOUT
+            ? TIMEOUT
+            : CONNECTION_FAILED;
+    }
+
+
+    // =========================================================================
     // BLE GATT dispatch helpers
     // =========================================================================
 
@@ -1547,7 +1672,7 @@ public class GMBluetooth extends GMBluetoothInternal
     {
         String safeMessage = message != null ? message : "";
 
-        invoke(callbackLeDisconnected, (double) connection, error, safeMessage);
+        invoke(callbackLeDisconnected, error, safeMessage, (double) connection);
 
         if (error != OK)
             setLastError(error, safeMessage);
@@ -1657,6 +1782,22 @@ public class GMBluetooth extends GMBluetoothInternal
         return new Object[0];
     }
 
+    // A uint8[] field, generated as a List<Byte>.
+    private static byte[] objectBytes(Object object, String name) throws Exception
+    {
+        Object[] elements = objectArray(object, name);
+        byte[] bytes = new byte[elements.length];
+
+        for (int i = 0; i < elements.length; i++)
+        {
+            if (!(elements[i] instanceof Number))
+                throw new IllegalArgumentException(name + "[" + i + "] is not a byte");
+            bytes[i] = ((Number) elements[i]).byteValue();
+        }
+
+        return bytes;
+    }
+
 
     // =========================================================================
     // Lifecycle
@@ -1759,6 +1900,9 @@ public class GMBluetooth extends GMBluetoothInternal
             pairDeviceHandles.clear();
             pairCallbacks.clear();
         }
+
+        // A dialog still up answers nobody: its result arrives after shutdown.
+        firePermissionCallbacks(NOT_INITIALIZED, "Bluetooth was shut down", PERMISSION_UNKNOWN);
 
         stopServerInternal();
         stopLeAdvertiseInternal();
@@ -2046,17 +2190,54 @@ public class GMBluetooth extends GMBluetoothInternal
         if (requestCode != REQUEST_CODE_BLUETOOTH || !initialized)
             return;
 
+        firePermissionCallbacks(OK, "", bluetooth_permission_get_status());
         invoke(callbackStateChanged, currentBluetoothState());
     }
 
 
+    // Every permission_request callback waiting for the dialog's answer; one
+    // answer fires them all, so a request while the dialog is up just waits.
+    private final Object permissionLock = new Object();
+    private final ArrayList<GMFunction> pendingPermissionCallbacks = new ArrayList<>();
+
+
+    private void firePermissionCallbacks(
+        BluetoothError error,
+        String message,
+        BluetoothPermissionStatus status)
+    {
+        ArrayList<GMFunction> callbacks;
+
+        synchronized (permissionLock)
+        {
+            callbacks = new ArrayList<>(pendingPermissionCallbacks);
+            pendingPermissionCallbacks.clear();
+        }
+
+        for (GMFunction callback : callbacks)
+            invoke(callback, error, message, status.value());
+    }
+
+
     @Override
-    public BluetoothError bluetooth_permission_request()
+    public BluetoothError bluetooth_permission_request(GMFunction callback)
     {
         if (!initialized)
             return result(
                 NOT_INITIALIZED,
                 "Bluetooth is not initialized");
+
+        if (bluetooth_permission_get_status() == PERMISSION_GRANTED)
+        {
+            // Already decided: answered at once, with anything still waiting.
+            synchronized (permissionLock)
+            {
+                pendingPermissionCallbacks.add(callback);
+            }
+
+            firePermissionCallbacks(OK, "", PERMISSION_GRANTED);
+            return OK;
+        }
 
         Activity current = activity();
 
@@ -2065,7 +2246,15 @@ public class GMBluetooth extends GMBluetoothInternal
                 NOT_INITIALIZED,
                 "Current Android Activity is unavailable");
 
-        if (bluetooth_permission_get_status() == PERMISSION_GRANTED)
+        boolean launch;
+
+        synchronized (permissionLock)
+        {
+            launch = pendingPermissionCallbacks.isEmpty();
+            pendingPermissionCallbacks.add(callback);
+        }
+
+        if (!launch)
             return OK;
 
         try
@@ -2091,11 +2280,22 @@ public class GMBluetooth extends GMBluetoothInternal
                     },
                     REQUEST_CODE_BLUETOOTH);
             }
+            else
+            {
+                // Granted at install time: no dialog will answer.
+                firePermissionCallbacks(OK, "", bluetooth_permission_get_status());
+            }
 
             return OK;
         }
         catch (Throwable throwable)
         {
+            // A pre-flight failure fires nothing.
+            synchronized (permissionLock)
+            {
+                pendingPermissionCallbacks.remove(callback);
+            }
+
             return result(
                 OPERATION_FAILED,
                 throwableMessage(throwable));
@@ -2276,10 +2476,10 @@ public class GMBluetooth extends GMBluetoothInternal
 
                     invoke(
                         connectCallback,
-                        status == BluetoothGatt.GATT_SUCCESS ? OK : CONNECTION_FAILED,
+                        status == BluetoothGatt.GATT_SUCCESS ? OK : connectError(status),
                         status == BluetoothGatt.GATT_SUCCESS
                             ? ""
-                            : ("GATT status " + status),
+                            : connectionStatusMessage(status),
                         (double) connection,
                         (double) entry.device);
 
@@ -2324,8 +2524,8 @@ public class GMBluetooth extends GMBluetoothInternal
                         // report the connect attempt itself as failed.
                         invoke(
                             pendingConnectCallback,
-                            CONNECTION_FAILED,
-                            "GATT status " + status,
+                            connectError(status),
+                            connectionStatusMessage(status),
                             (double) connection,
                             (double) entry.device);
                     }
@@ -2334,7 +2534,7 @@ public class GMBluetooth extends GMBluetoothInternal
                         dispatchLeDisconnected(
                             connection,
                             manual ? OK : DISCONNECTED,
-                            manual ? "Disconnected" : ("GATT status " + status));
+                            manual ? "Disconnected" : connectionStatusMessage(status));
                     }
 
                     eraseLeConnection(connection);
@@ -2374,8 +2574,8 @@ public class GMBluetooth extends GMBluetoothInternal
                 {
                     invoke(
                         callback,
-                        OPERATION_FAILED,
-                        "GATT status " + status,
+                        mapAttError(status),
+                        attErrorMessage(status),
                         (double) connection);
                 }
 
@@ -2427,7 +2627,7 @@ public class GMBluetooth extends GMBluetoothInternal
                     if (status == BluetoothGatt.GATT_SUCCESS)
                         dispatchReadValue(op, value);
                     else
-                        failOp(op, OPERATION_FAILED, "GATT status " + status);
+                        failOp(op, mapAttError(status), attErrorMessage(status));
                 }
 
                 completeGattOp(entry);
@@ -2456,8 +2656,8 @@ public class GMBluetooth extends GMBluetoothInternal
                     else
                         invoke(
                             op.callback,
-                            OPERATION_FAILED,
-                            "GATT status " + status,
+                            mapAttError(status),
+                            attErrorMessage(status),
                             (double) op.targetHandle);
                 }
 
@@ -2505,7 +2705,7 @@ public class GMBluetooth extends GMBluetoothInternal
                     if (status == BluetoothGatt.GATT_SUCCESS)
                         dispatchReadValue(op, value);
                     else
-                        failOp(op, OPERATION_FAILED, "GATT status " + status);
+                        failOp(op, mapAttError(status), attErrorMessage(status));
                 }
 
                 completeGattOp(entry);
@@ -2549,8 +2749,8 @@ public class GMBluetooth extends GMBluetoothInternal
                     {
                         invoke(
                             op.callback,
-                            OPERATION_FAILED,
-                            "GATT status " + status,
+                            mapAttError(status),
+                            attErrorMessage(status),
                             (double) op.targetHandle);
                     }
                 }
@@ -2562,8 +2762,8 @@ public class GMBluetooth extends GMBluetoothInternal
                 {
                     invoke(
                         op.callback,
-                        OPERATION_FAILED,
-                        "GATT status " + status,
+                        mapAttError(status),
+                        attErrorMessage(status),
                         (double) op.targetHandle);
                 }
 
@@ -3375,22 +3575,6 @@ public class GMBluetooth extends GMBluetoothInternal
     }
 
 
-    private static byte[] decodeBase64(String value)
-    {
-        if (value == null || value.isEmpty())
-            return new byte[0];
-
-        try
-        {
-            return Base64.decode(value, Base64.NO_WRAP);
-        }
-        catch (Throwable throwable)
-        {
-            return new byte[0];
-        }
-    }
-
-
     private static byte[] toBytes(java.util.List<Byte> values)
     {
         if (values == null)
@@ -3850,8 +4034,8 @@ public class GMBluetooth extends GMBluetoothInternal
                     else
                         invoke(
                             head.callback,
-                            OPERATION_FAILED,
-                            "onServiceAdded status " + status);
+                            mapAttError(status),
+                            attErrorMessage(status));
                 }
 
                 startNextServiceAdd();
@@ -3925,6 +4109,7 @@ public class GMBluetooth extends GMBluetoothInternal
                     characteristic,
                     "",
                     responseNeeded,
+                    offset,
                     value);
             }
 
@@ -4035,6 +4220,7 @@ public class GMBluetooth extends GMBluetoothInternal
                     parent,
                     descriptorUuid,
                     responseNeeded,
+                    offset,
                     value);
             }
 
@@ -4083,6 +4269,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
                 ArrayList<Integer> ids = new ArrayList<>();
                 ArrayList<LeServerRequestEntry> requests = new ArrayList<>();
+                ArrayList<Integer> offsets = new ArrayList<>();
 
                 synchronized (leServerRequestLock)
                 {
@@ -4099,11 +4286,16 @@ public class GMBluetooth extends GMBluetoothInternal
                             : "";
                         request.isWrite = true;
                         request.responseNeeded = true;
-                        request.writeValue = write.value;
                         request.batch = batch;
+
+                        // Fragments are laid out from 0; GML gets them from
+                        // the first fragment's offset, as a single write.
+                        int start = Math.min(write.offset, write.value.length);
+                        request.writeValue = Arrays.copyOfRange(write.value, start, write.value.length);
 
                         ids.add(storeLeServerRequest(request));
                         requests.add(request);
+                        offsets.add(start);
                     }
                 }
 
@@ -4116,7 +4308,9 @@ public class GMBluetooth extends GMBluetoothInternal
                         (double) connection,
                         request.serviceUuid,
                         request.characteristicUuid,
-                        request.descriptorUuid);
+                        request.descriptorUuid,
+                        offsets.get(i),
+                        true);
                 }
             }
         };
@@ -4199,6 +4393,7 @@ public class GMBluetooth extends GMBluetoothInternal
         BluetoothGattCharacteristic characteristic,
         String descriptorUuid,
         boolean responseNeeded,
+        int offset,
         byte[] value)
     {
         GMFunction callback = callbackLeServerWriteRequest;
@@ -4236,7 +4431,9 @@ public class GMBluetooth extends GMBluetoothInternal
             (double) connection,
             request.serviceUuid,
             request.characteristicUuid,
-            request.descriptorUuid);
+            request.descriptorUuid,
+            offset,
+            responseNeeded);
     }
 
 
@@ -4275,6 +4472,7 @@ public class GMBluetooth extends GMBluetoothInternal
                     prepared = new LeServerPreparedWrite();
                     prepared.characteristic = characteristic;
                     prepared.descriptor = descriptor;
+                    prepared.offset = offset;
                     writes.put(attribute, prepared);
                 }
 
@@ -4667,12 +4865,25 @@ public class GMBluetooth extends GMBluetoothInternal
                         properties,
                         permissions);
 
-                String initialValue = objectNullableString(characteristicObject, "value");
-                if (initialValue != null && !initialValue.isEmpty())
+                if ((permissions & ~ATTRIBUTE_PERMISSION_ALL) != 0)
+                    return result(
+                        INVALID_ARGUMENT,
+                        "Characteristic " + characteristicUuid + ": permissions " + permissions +
+                            " has bits that are not BluetoothLeAttributePermission flags");
+
+                // An empty array is no initial value.
+                byte[] initialValue = objectBytes(characteristicObject, "value");
+                if (initialValue.length > MAX_ATTRIBUTE_LENGTH)
+                    return result(
+                        INVALID_ARGUMENT,
+                        "Characteristic " + characteristicUuid + ": the initial value is " +
+                            initialValue.length + " bytes; an attribute value holds at most " +
+                            MAX_ATTRIBUTE_LENGTH);
+
+                if (initialValue.length > 0)
                 {
-                    byte[] bytes = decodeBase64(initialValue);
-                    characteristic.setValue(bytes);
-                    initialValues.put(characteristic, bytes);
+                    characteristic.setValue(initialValue);
+                    initialValues.put(characteristic, initialValue);
                 }
 
                 Object[] descriptors = objectArray(characteristicObject, "descriptors");
@@ -4776,13 +4987,16 @@ public class GMBluetooth extends GMBluetoothInternal
     @Override
     public BluetoothError bluetooth_le_server_respond_read(
         int request_id,
-        int error_code,
+        BluetoothAttError error_code,
         ByteBuffer data,
         int offset,
         int size)
     {
         if (!initialized)
             return result(NOT_INITIALIZED, "Bluetooth is not initialized");
+
+        if (error_code == null)
+            return result(INVALID_ARGUMENT, "error_code is not a BluetoothAttError");
 
         // Everything is checked before the request is removed, so a bad call
         // can be retried instead of leaving the central to time out.
@@ -4804,9 +5018,12 @@ public class GMBluetooth extends GMBluetoothInternal
         if (gattServer == null)
             return result(OPERATION_FAILED, "BLE server is not running");
 
-        byte[] payload = new byte[0];
+        // A failure answer carries no value, so the buffer is neither checked
+        // nor read.
+        boolean success = error_code == BluetoothAttError.Success;
+        byte[] payload = success ? new byte[0] : null;
 
-        if (error_code == OK.value() && size > 0)
+        if (success && size > 0)
         {
             if (bufferRangeInvalid(data, offset, size))
                 return result(
@@ -4826,9 +5043,8 @@ public class GMBluetooth extends GMBluetoothInternal
                 return result(INVALID_HANDLE, "Unknown or expired request_id");
         }
 
-        int status = error_code == OK.value()
-            ? BluetoothGatt.GATT_SUCCESS
-            : BluetoothGatt.GATT_FAILURE;
+        // The ATT code itself; Success is GATT_SUCCESS (0).
+        int status = error_code.value();
 
         BluetoothGattServer server = gattServer;
 
@@ -4851,10 +5067,13 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     @Override
-    public BluetoothError bluetooth_le_server_respond_write(int request_id, int error_code)
+    public BluetoothError bluetooth_le_server_respond_write(int request_id, BluetoothAttError error_code)
     {
         if (!initialized)
             return result(NOT_INITIALIZED, "Bluetooth is not initialized");
+
+        if (error_code == null)
+            return result(INVALID_ARGUMENT, "error_code is not a BluetoothAttError");
 
         LeServerRequestEntry request;
 
@@ -4884,9 +5103,8 @@ public class GMBluetooth extends GMBluetoothInternal
         if (!request.responseNeeded)
             return OK;
 
-        int status = error_code == OK.value()
-            ? BluetoothGatt.GATT_SUCCESS
-            : BluetoothGatt.GATT_FAILURE;
+        // The ATT code itself; Success is GATT_SUCCESS (0).
+        int status = error_code.value();
 
         if (request.batch != null)
         {
@@ -4901,7 +5119,12 @@ public class GMBluetooth extends GMBluetoothInternal
 
         try
         {
-            server.sendResponse(request.device, request.stackRequestId, status, 0, request.writeValue);
+            server.sendResponse(
+                request.device,
+                request.stackRequestId,
+                status,
+                0,
+                status == BluetoothGatt.GATT_SUCCESS ? request.writeValue : null);
             return OK;
         }
         catch (Throwable throwable)
@@ -6390,9 +6613,6 @@ public class GMBluetooth extends GMBluetoothInternal
                 BLUETOOTH_DISABLED,
                 "Bluetooth is disabled");
 
-        if (serverRunning.get())
-            return OK;
-
         if (service_uuid == null || service_uuid.isEmpty())
             return result(
                 INVALID_ARGUMENT,
@@ -6410,6 +6630,12 @@ public class GMBluetooth extends GMBluetoothInternal
                 INVALID_ARGUMENT,
                 "service_uuid is not a valid UUID");
         }
+
+        // A running server is not restarted with the new name and UUID.
+        if (serverRunning.get())
+            return result(
+                BUSY,
+                "A Classic server is already running; stop it first");
 
         try
         {

@@ -20,7 +20,7 @@
 - (bool)bluetooth_classic_server_is_supported { return ::bluetooth_classic_server_is_supported(); }
 
 - (gm_enums::BluetoothPermissionStatus)bluetooth_permission_get_status { return ::bluetooth_permission_get_status(); }
-- (gm_enums::BluetoothError)bluetooth_permission_request { return ::bluetooth_permission_request(); }
+- (gm_enums::BluetoothError)bluetooth_permission_request:(gm::wire::GMFunction)callback { return ::bluetooth_permission_request(callback); }
 
 - (gm_enums::BluetoothError)bluetooth_le_scan_start:(bool)active { return ::bluetooth_le_scan_start(active); }
 - (gm_enums::BluetoothError)bluetooth_le_scan_stop { return ::bluetooth_le_scan_stop(); }
@@ -97,8 +97,8 @@
 - (bool)bluetooth_le_server_is_running { return ::bluetooth_le_server_is_running(); }
 - (gm_enums::BluetoothError)bluetooth_le_server_add_service:(const gm_structs::BluetoothLeServiceDefinition&)service callback:(gm::wire::GMFunction)callback { return ::bluetooth_le_server_add_service(service, callback); }
 - (gm_enums::BluetoothError)bluetooth_le_server_clear_services { return ::bluetooth_le_server_clear_services(); }
-- (gm_enums::BluetoothError)bluetooth_le_server_respond_read:(std::int32_t)request_id error_code:(std::int32_t)error_code data:(gm::wire::GMBuffer)data offset:(std::uint32_t)offset size:(std::uint32_t)size { return ::bluetooth_le_server_respond_read(request_id, error_code, data, offset, size); }
-- (gm_enums::BluetoothError)bluetooth_le_server_respond_write:(std::int32_t)request_id error_code:(std::int32_t)error_code { return ::bluetooth_le_server_respond_write(request_id, error_code); }
+- (gm_enums::BluetoothError)bluetooth_le_server_respond_read:(std::int32_t)request_id error_code:(gm_enums::BluetoothAttError)error_code data:(gm::wire::GMBuffer)data offset:(std::uint32_t)offset size:(std::uint32_t)size { return ::bluetooth_le_server_respond_read(request_id, error_code, data, offset, size); }
+- (gm_enums::BluetoothError)bluetooth_le_server_respond_write:(std::int32_t)request_id error_code:(gm_enums::BluetoothAttError)error_code { return ::bluetooth_le_server_respond_write(request_id, error_code); }
 - (std::int32_t)bluetooth_le_server_write_request_get_value:(std::int32_t)request_id out_data:(gm::wire::GMBuffer)out_data offset:(std::uint32_t)offset max_size:(std::uint32_t)max_size { return ::bluetooth_le_server_write_request_get_value(request_id, out_data, offset, max_size); }
 - (gm_enums::BluetoothError)bluetooth_le_server_notify_value:(std::string_view)service_uuid characteristic_uuid:(std::string_view)characteristic_uuid connection:(std::uint64_t)connection data:(gm::wire::GMBuffer)data offset:(std::uint32_t)offset size:(std::uint32_t)size { return ::bluetooth_le_server_notify_value(service_uuid, characteristic_uuid, connection, data, offset, size); }
 

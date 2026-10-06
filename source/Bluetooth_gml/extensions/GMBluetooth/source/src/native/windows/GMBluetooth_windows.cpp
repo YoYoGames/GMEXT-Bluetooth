@@ -28,13 +28,16 @@
 #include <atomic>
 #include <cctype>
 #include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <deque>
 #include <memory>
 #include <optional>
 #include <mutex>
 #include <string>
+#include <system_error>
 #include <thread>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -213,31 +216,157 @@ namespace gmbluetooth
             }
         }
 
+        void trim_trailing_space(std::string& text)
+        {
+            while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())) != 0)
+                text.pop_back();
+        }
+
+        // "connect failed (10060): A connection attempt failed ...", the
+        // system text in UTF-8 without the CRLF FormatMessage ends it with.
         std::string wsa_message(const char* operation, int error)
         {
-            char* system_message = nullptr;
+            wchar_t* system_message = nullptr;
             const DWORD flags = FORMAT_MESSAGE_ALLOCATE_BUFFER |
                                 FORMAT_MESSAGE_FROM_SYSTEM |
                                 FORMAT_MESSAGE_IGNORE_INSERTS;
-            FormatMessageA(
+            FormatMessageW(
                 flags,
                 nullptr,
                 static_cast<DWORD>(error),
                 MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                reinterpret_cast<LPSTR>(&system_message),
+                reinterpret_cast<LPWSTR>(&system_message),
                 0,
                 nullptr);
 
-            std::string out(operation ? operation : "Bluetooth socket operation");
-            out += " failed (" + std::to_string(error) + ")";
+            std::string text;
             if (system_message)
             {
-                out += ": ";
-                out += system_message;
+                text = wide_to_utf8(system_message);
                 LocalFree(system_message);
+            }
+            trim_trailing_space(text);
+
+            std::string out(operation ? operation : "Bluetooth socket operation");
+            out += " failed (" + std::to_string(error) + ")";
+            if (!text.empty())
+            {
+                out += ": ";
+                out += text;
             }
             return out;
         }
+
+        // Worker threads can outlive a shutdown that stopped waiting for
+        // them; pinning keeps the code they return into mapped until the
+        // process exits, whatever the runner does with the DLL.
+        void pin_module()
+        {
+            static const char anchor = 0;
+            HMODULE module = nullptr;
+            if (!GetModuleHandleExW(
+                    GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                    reinterpret_cast<LPCWSTR>(&anchor),
+                    &module))
+            {
+                GMBT_LOG("Could not pin the extension module: error %lu", GetLastError());
+            }
+        }
+
+        // Every thread the backend starts is counted here, from before it
+        // starts until its body and everything the body captured are gone.
+        // Shutdown waits for the count to reach zero before it tears down
+        // Winsock and COM under them.
+        struct WorkerTracker
+        {
+            std::mutex mutex;
+            std::condition_variable idle;
+            std::size_t count = 0;
+        };
+
+        void worker_finished(WorkerTracker& tracker)
+        {
+            std::scoped_lock lock(tracker.mutex);
+            if (--tracker.count == 0)
+                tracker.idle.notify_all();
+        }
+
+        // True when every worker finished within timeout.
+        bool wait_for_workers(WorkerTracker& tracker, std::chrono::milliseconds timeout, std::size_t& remaining)
+        {
+            std::unique_lock lock(tracker.mutex);
+            const bool drained = tracker.idle.wait_for(lock, timeout, [&tracker]() { return tracker.count == 0; });
+            remaining = tracker.count;
+            return drained;
+        }
+
+        // Runs body on a new thread counted by tracker. The thread comes back
+        // joinable, or empty when Windows could not create it.
+        template <typename Body>
+        std::thread spawn_worker(const std::shared_ptr<WorkerTracker>& tracker, Body&& body)
+        {
+            auto task = std::make_unique<std::decay_t<Body>>(std::forward<Body>(body));
+            {
+                std::scoped_lock lock(tracker->mutex);
+                ++tracker->count;
+            }
+
+            try
+            {
+                return std::thread([tracker, task = std::move(task)]() mutable
+                {
+                    try
+                    {
+                        (*task)();
+                    }
+                    catch (const std::exception& error)
+                    {
+                        GMBT_LOG("Bluetooth worker thread failed: %s", error.what());
+                    }
+                    catch (...)
+                    {
+                        GMBT_LOG("Bluetooth worker thread failed");
+                    }
+
+                    // The captures go before the count drops, so nothing the
+                    // body held is released after shutdown stopped waiting.
+                    task.reset();
+                    worker_finished(*tracker);
+                });
+            }
+            catch (const std::system_error& error)
+            {
+                GMBT_LOG("Could not start a Bluetooth worker thread: %s", error.what());
+                worker_finished(*tracker);
+                return std::thread();
+            }
+        }
+
+        // spawn_worker for a thread nobody joins. False when it could not
+        // start.
+        template <typename Body>
+        bool spawn_detached_worker(const std::shared_ptr<WorkerTracker>& tracker, Body&& body)
+        {
+            std::thread thread = spawn_worker(tracker, std::forward<Body>(body));
+            if (!thread.joinable())
+                return false;
+            thread.detach();
+            return true;
+        }
+
+        // A thread handed to the worker that replaces it, which joins it
+        // first. If that worker never starts, it is let go instead of
+        // terminating the process; the tracker still counts it.
+        struct PreviousWorker
+        {
+            std::thread thread;
+
+            ~PreviousWorker()
+            {
+                if (thread.joinable())
+                    thread.detach();
+            }
+        };
 
 
         // The 36-character lowercase form. A 4- or 8-hex-digit SIG UUID ("180D")
@@ -379,41 +508,37 @@ namespace gmbluetooth
                 "\",\"descriptor_uuid\":\"" + json_escape(descriptor_uuid) +
                 "\",\"offset\":" + std::to_string(offset);
 
+            // A write request always says whether it waits for an answer.
             if (value)
             {
                 out += ",\"value\":\"";
                 out += json::base64_encode(value->data(), value->size());
                 out += "\"";
+                out += std::string(",\"response_needed\":") + (response_needed ? "true" : "false");
             }
-
-            if (!response_needed)
-                out += ",\"response_needed\":false";
 
             out += "}";
             return out;
         }
 
+        // BluetoothLeAttributePermission onto Windows protection levels. READ
+        // and WRITE are implied by the characteristic properties; the signed
+        // write bits never get here (le_server_add_service refuses them).
         WDBG::GattProtectionLevel read_protection_from_permissions(std::int32_t permissions)
         {
-            // Android-compatible permission bits retained by the public API:
-            // READ=1, READ_ENCRYPTED=2, READ_ENCRYPTED_MITM=4.
-            if ((permissions & 4) != 0)
+            if ((permissions & kPermissionReadEncryptedMitm) != 0)
                 return WDBG::GattProtectionLevel::EncryptionAndAuthenticationRequired;
-            if ((permissions & 2) != 0)
+            if ((permissions & kPermissionReadEncrypted) != 0)
                 return WDBG::GattProtectionLevel::EncryptionRequired;
             return WDBG::GattProtectionLevel::Plain;
         }
 
         WDBG::GattProtectionLevel write_protection_from_permissions(std::int32_t permissions)
         {
-            // WRITE=16, WRITE_ENCRYPTED=32, WRITE_ENCRYPTED_MITM=64,
-            // WRITE_SIGNED=128, WRITE_SIGNED_MITM=256.
-            if ((permissions & (64 | 256)) != 0)
+            if ((permissions & kPermissionWriteEncryptedMitm) != 0)
                 return WDBG::GattProtectionLevel::EncryptionAndAuthenticationRequired;
-            if ((permissions & 32) != 0)
+            if ((permissions & kPermissionWriteEncrypted) != 0)
                 return WDBG::GattProtectionLevel::EncryptionRequired;
-            if ((permissions & 128) != 0)
-                return WDBG::GattProtectionLevel::AuthenticationRequired;
             return WDBG::GattProtectionLevel::Plain;
         }
 
@@ -467,6 +592,15 @@ namespace gmbluetooth
             bool with_response = true;
         };
 
+        // At most this much received data waits for the game; past it the
+        // receive loop stops reading and RFCOMM flow control slows the peer.
+        constexpr std::size_t k_classic_receive_cap = 1024 * 1024;
+        // At most this much accepted data waits to be sent.
+        constexpr std::size_t k_classic_send_cap = 1024 * 1024;
+        constexpr std::size_t k_classic_send_chunk = 64 * 1024;
+        constexpr auto k_classic_connect_timeout = std::chrono::seconds(15);
+        constexpr auto k_classic_connect_slice = std::chrono::milliseconds(100);
+
         struct ClassicConnectionState
         {
             explicit ClassicConnectionState(std::uint64_t h, std::uint64_t d)
@@ -474,28 +608,66 @@ namespace gmbluetooth
             {
             }
 
+            // A writer nothing joined (its receive loop never started) is let
+            // go instead of terminating the process; the tracker counts it.
+            ~ClassicConnectionState()
+            {
+                if (writer.joinable())
+                    writer.detach();
+            }
+
             std::uint64_t handle = 0;
             std::uint64_t device = 0;
+
+            // Orders a connect's outcome against classic_disconnect: the
+            // connect reports, and turns connected, only while closing is
+            // still unset under this mutex, and classic_disconnect sets
+            // closing under it. A disconnect is then either a cancel (the
+            // core answers the game, the backend reports nothing) or a
+            // disconnect of an open connection, never both.
+            std::mutex connect_mutex;
+
             std::mutex socket_mutex;
             SOCKET socket = INVALID_SOCKET;
             std::atomic_bool connected{false};
             std::atomic_bool closing{false};
+
             std::mutex receive_mutex;
+            // Signalled when the game reads (room again) and when the
+            // connection must stop.
+            std::condition_variable receive_cv;
             std::deque<std::uint8_t> received;
+            // A ClassicDataAvailable went out and the game has not read
+            // since; the next one waits for classic_receive_bytes.
+            bool data_pending = false;
             // Set under receive_mutex when the receive loop has ended and the
             // socket is closed. A finished state stays registered only while
             // it holds bytes the game has not read.
             bool finished = false;
+
+            // classic_send_bytes queues here; the writer thread is the only
+            // caller of send() on the socket.
             std::mutex send_mutex;
+            std::condition_variable send_cv;
+            std::deque<std::uint8_t> outbound;
+            // Queued plus the chunk the writer is sending.
+            std::size_t send_pending = 0;
+            bool writer_stop = false;
+            bool send_failed = false;
+            // The writer's failure, reported by the disconnect.
+            Error send_error = Error::Ok;
+            std::string send_error_message;
+            // Joined by the receive loop before it closes the socket.
+            std::thread writer;
         };
 
         // The receive loop thread is the sole owner of closesocket() for a
         // connection: it only closes after its own blocking recv() has
-        // returned, so the handle can never be reused while still in flight.
-        // Every other caller (classic_disconnect, WindowsBackend::shutdown)
-        // must only ever request a shutdown() to unblock that recv() -
-        // never close the socket directly - or the handle can be double
-        // closed / reused out from under a concurrent send().
+        // returned and after it has joined the connection's writer, so the
+        // handle can never be reused while a call on it is in flight.
+        // Every other caller (classic_disconnect, WindowsBackend::shutdown,
+        // a failed send) must only ever request a shutdown() to unblock
+        // those calls - never close the socket directly.
         SOCKET connection_socket(const std::shared_ptr<ClassicConnectionState>& state)
         {
             std::scoped_lock lock(state->socket_mutex);
@@ -521,11 +693,34 @@ namespace gmbluetooth
                 closesocket(s);
         }
 
+        void wake_receive_loop(const std::shared_ptr<ClassicConnectionState>& state)
+        {
+            {
+                std::scoped_lock lock(state->receive_mutex);
+            }
+            state->receive_cv.notify_all();
+        }
+
+        // Asks a connection, connecting or open, to end: its threads notice
+        // within one connect slice, or at once when blocked in a socket call
+        // or waiting for room.
+        void connection_request_close(const std::shared_ptr<ClassicConnectionState>& state)
+        {
+            {
+                std::scoped_lock lock(state->connect_mutex);
+                state->closing.store(true);
+                state->connected.store(false);
+            }
+            connection_request_shutdown(state);
+            wake_receive_loop(state);
+        }
+
         struct SharedClassicState
         {
             CoreHooks hooks;
             std::shared_ptr<std::atomic_bool> alive =
                 std::make_shared<std::atomic_bool>(true);
+            std::shared_ptr<WorkerTracker> workers;
 
             mutable std::mutex connections_mutex;
             std::unordered_map<std::uint64_t, std::shared_ptr<ClassicConnectionState>> connections;
@@ -542,10 +737,9 @@ namespace gmbluetooth
 
         // Returns false (and inserts nothing) once the backend has started
         // shutting down. Sharing connections_mutex with the alive flip in
-        // WindowsBackend::shutdown() closes the race where a connect() that
-        // is completing concurrently with shutdown() could register a
-        // socket/receive-loop thread that nothing will ever ask to
-        // shutdown() again, leaking a blocked-forever thread.
+        // WindowsBackend::shutdown() closes the race where a connection
+        // registered concurrently with shutdown() would never be asked to
+        // close, leaving a thread blocked forever.
         bool register_connection_if_alive(
             const std::shared_ptr<SharedClassicState>& shared,
             const std::shared_ptr<ClassicConnectionState>& state)
@@ -565,92 +759,643 @@ namespace gmbluetooth
             shared->connections.erase(handle);
         }
 
-        void start_receive_loop(
-            const std::shared_ptr<SharedClassicState>& shared,
-            const std::shared_ptr<ClassicConnectionState>& state)
+        // The writer: takes what classic_send_bytes queued and sends it, a
+        // chunk at a time, so a slow peer stalls this thread and never the
+        // game. A failed send is recorded for the disconnect and shuts the
+        // socket down, which ends the receive loop.
+        void run_writer(const std::shared_ptr<ClassicConnectionState>& state)
         {
-            std::thread([shared, state]()
+            std::vector<std::uint8_t> chunk;
+            for (;;)
             {
-                std::vector<std::uint8_t> buffer(4096);
-
-                while (state->connected.load() && shared->alive->load())
                 {
-                    const int received = recv(
-                        connection_socket(state),
-                        reinterpret_cast<char*>(buffer.data()),
-                        static_cast<int>(buffer.size()),
-                        0);
-
-                    if (received > 0)
+                    std::unique_lock lock(state->send_mutex);
+                    state->send_cv.wait(lock, [&state]()
                     {
-                        std::int32_t available = 0;
-                        {
-                            std::scoped_lock lock(state->receive_mutex);
-                            state->received.insert(
-                                state->received.end(),
-                                buffer.begin(),
-                                buffer.begin() + received);
-                            available = static_cast<std::int32_t>(state->received.size());
-                        }
+                        return state->writer_stop || !state->outbound.empty();
+                    });
+                    if (state->writer_stop)
+                        return;
 
-                        if (shared->alive->load() && shared->hooks.push_event)
-                        {
-                            BackendEvent event;
-                            event.type = BackendEventType::ClassicDataAvailable;
-                            event.transport = Transport::Classic;
-                            event.connection = state->handle;
-                            event.device = state->device;
-                            event.value = available;
-                            shared->hooks.push_event(std::move(event));
-                        }
+                    const auto count = static_cast<std::ptrdiff_t>(
+                        std::min(state->outbound.size(), k_classic_send_chunk));
+                    chunk.assign(state->outbound.begin(), state->outbound.begin() + count);
+                    state->outbound.erase(state->outbound.begin(), state->outbound.begin() + count);
+                }
+
+                std::size_t sent_total = 0;
+                while (sent_total < chunk.size())
+                {
+                    const int sent = send(
+                        connection_socket(state),
+                        reinterpret_cast<const char*>(chunk.data() + sent_total),
+                        static_cast<int>(chunk.size() - sent_total),
+                        0);
+                    if (sent > 0)
+                    {
+                        sent_total += static_cast<std::size_t>(sent);
                         continue;
                     }
 
-                    const int error = received == 0 ? 0 : WSAGetLastError();
-                    state->connected.store(false);
+                    const int error = sent == 0 ? WSAECONNRESET : WSAGetLastError();
+                    bool report = false;
+                    {
+                        std::scoped_lock lock(state->send_mutex);
+                        state->send_failed = true;
+                        state->outbound.clear();
+                        state->send_pending = 0;
+                        // A send cut short by a disconnect the game or the
+                        // receive loop asked for is not a failure.
+                        report = !state->writer_stop && !state->closing.load();
+                        if (report)
+                        {
+                            state->send_error = map_wsa_error(error);
+                            state->send_error_message = wsa_message("send", error);
+                        }
+                    }
+                    if (report)
+                    {
+                        state->connected.store(false);
+                        connection_request_shutdown(state);
+                        wake_receive_loop(state);
+                    }
+                    return;
+                }
 
-                    if (shared->alive->load() && shared->hooks.push_event)
+                std::scoped_lock lock(state->send_mutex);
+                state->send_pending -= chunk.size();
+            }
+        }
+
+        bool start_writer(
+            const std::shared_ptr<SharedClassicState>& shared,
+            const std::shared_ptr<ClassicConnectionState>& state)
+        {
+            state->writer = spawn_worker(shared->workers, [state]()
+            {
+                run_writer(state);
+            });
+            return state->writer.joinable();
+        }
+
+        // Stops the connection's writer and waits for it. writer_stop goes
+        // first, so the failed send the shutdown causes is not reported, and
+        // the shutdown unblocks a writer stuck in send().
+        void stop_writer(const std::shared_ptr<ClassicConnectionState>& state)
+        {
+            {
+                std::scoped_lock lock(state->send_mutex);
+                state->writer_stop = true;
+            }
+            state->send_cv.notify_all();
+            connection_request_shutdown(state);
+            if (state->writer.joinable())
+                state->writer.join();
+        }
+
+        // The end of an open connection, on the thread that owns its socket:
+        // the writer is joined before the socket is closed, and the
+        // disconnect reports the writer's failure when it had one. error and
+        // message say why the receive side ended.
+        void end_connection(
+            const std::shared_ptr<SharedClassicState>& shared,
+            const std::shared_ptr<ClassicConnectionState>& state,
+            Error error,
+            std::string message)
+        {
+            state->connected.store(false);
+            stop_writer(state);
+
+            {
+                std::scoped_lock lock(state->send_mutex);
+                if (state->send_error != Error::Ok)
+                {
+                    error = state->send_error;
+                    message = state->send_error_message;
+                }
+            }
+
+            if (shared->alive->load() && shared->hooks.push_event)
+            {
+                BackendEvent event;
+                event.type = BackendEventType::ClassicDisconnected;
+                event.transport = Transport::Classic;
+                event.connection = state->handle;
+                event.device = state->device;
+
+                if (state->closing.load())
+                {
+                    event.error = Error::Ok;
+                    event.message = "Disconnected";
+                }
+                else
+                {
+                    event.error = error;
+                    event.message = std::move(message);
+                }
+
+                shared->hooks.push_event(std::move(event));
+            }
+
+            connection_close(state);
+
+            // Bytes the game has not read yet outlive a remote hang-up:
+            // the state stays registered until classic_receive drains it,
+            // classic_disconnect drops it or the backend shuts down.
+            bool keep = false;
+            {
+                std::scoped_lock lock(state->receive_mutex);
+                state->finished = true;
+                keep = !state->closing.load() &&
+                       shared->alive->load() &&
+                       !state->received.empty();
+            }
+            if (!keep)
+                unregister_connection(shared, state->handle);
+        }
+
+        // An open connection's receive side. It stops reading while
+        // k_classic_receive_cap bytes wait for the game, and announces data
+        // once until the game reads.
+        void run_receive_loop(
+            const std::shared_ptr<SharedClassicState>& shared,
+            const std::shared_ptr<ClassicConnectionState>& state)
+        {
+            std::vector<std::uint8_t> buffer(4096);
+            Error error = Error::Ok;
+            std::string message = "Disconnected";
+
+            const auto stopping = [&shared, &state]()
+            {
+                return !state->connected.load() ||
+                       state->closing.load() ||
+                       !shared->alive->load();
+            };
+
+            for (;;)
+            {
+                {
+                    std::unique_lock lock(state->receive_mutex);
+                    state->receive_cv.wait(lock, [&state, &stopping]()
+                    {
+                        return state->received.size() < k_classic_receive_cap || stopping();
+                    });
+                }
+                if (stopping())
+                    break;
+
+                const int received = recv(
+                    connection_socket(state),
+                    reinterpret_cast<char*>(buffer.data()),
+                    static_cast<int>(buffer.size()),
+                    0);
+
+                if (received > 0)
+                {
+                    std::int32_t available = 0;
+                    bool announce = false;
+                    {
+                        std::scoped_lock lock(state->receive_mutex);
+                        state->received.insert(
+                            state->received.end(),
+                            buffer.begin(),
+                            buffer.begin() + received);
+                        available = static_cast<std::int32_t>(state->received.size());
+                        announce = !state->data_pending;
+                        state->data_pending = true;
+                    }
+
+                    if (announce && shared->alive->load() && shared->hooks.push_event)
                     {
                         BackendEvent event;
-                        event.type = BackendEventType::ClassicDisconnected;
+                        event.type = BackendEventType::ClassicDataAvailable;
                         event.transport = Transport::Classic;
                         event.connection = state->handle;
                         event.device = state->device;
-
-                        if (state->closing.load() || received == 0)
-                        {
-                            event.error = Error::Ok;
-                            event.message = state->closing.load()
-                                ? "Disconnected"
-                                : "Remote device disconnected";
-                        }
-                        else
-                        {
-                            event.error = map_wsa_error(error);
-                            event.message = wsa_message("recv", error);
-                        }
-
+                        event.value = available;
                         shared->hooks.push_event(std::move(event));
                     }
-                    break;
+                    continue;
                 }
 
-                connection_close(state);
-
-                // Bytes the game has not read yet outlive a remote hang-up:
-                // the state stays registered until classic_receive drains it,
-                // classic_disconnect drops it or the backend shuts down.
-                bool keep = false;
+                if (received == 0)
                 {
-                    std::scoped_lock lock(state->receive_mutex);
-                    state->finished = true;
-                    keep = !state->closing.load() &&
-                           shared->alive->load() &&
-                           !state->received.empty();
+                    message = "Remote device disconnected";
                 }
-                if (!keep)
-                    unregister_connection(shared, state->handle);
-            }).detach();
+                else
+                {
+                    const int recv_error = WSAGetLastError();
+                    error = map_wsa_error(recv_error);
+                    message = wsa_message("recv", recv_error);
+                }
+                break;
+            }
+
+            end_connection(shared, state, error, std::move(message));
+        }
+
+        // Reports a connect's outcome unless classic_disconnect cancelled it
+        // first; on success the connection turns connected in the same step.
+        // False when it was cancelled (or the backend is shutting down) and
+        // nothing was reported.
+        bool complete_classic_connect(
+            const std::shared_ptr<SharedClassicState>& shared,
+            const std::shared_ptr<ClassicConnectionState>& state,
+            Error error,
+            std::string message)
+        {
+            std::scoped_lock lock(state->connect_mutex);
+            if (state->closing.load() || !shared->alive->load())
+                return false;
+
+            if (error == Error::Ok)
+                state->connected.store(true);
+
+            if (shared->hooks.push_event)
+            {
+                BackendEvent event;
+                event.type = BackendEventType::ClassicConnected;
+                event.transport = Transport::Classic;
+                event.connection = state->handle;
+                event.device = state->device;
+                event.error = error;
+                event.message = std::move(message);
+                shared->hooks.push_event(std::move(event));
+            }
+            return true;
+        }
+
+        // The connect worker. The state is registered (connecting) before
+        // this runs, so classic_disconnect can cancel it. The connect is
+        // non-blocking and polled in k_classic_connect_slice steps: a cancel
+        // or a shutdown ends it within one, and a peer that never answers
+        // fails after k_classic_connect_timeout. Once open, the connection's
+        // receive loop runs on this same thread.
+        void run_classic_connect(
+            const std::shared_ptr<SharedClassicState>& shared,
+            const std::shared_ptr<ClassicConnectionState>& state,
+            BTH_ADDR address,
+            GUID service_guid)
+        {
+            const auto abandon = [&shared, &state]()
+            {
+                stop_writer(state);
+                connection_close(state);
+                unregister_connection(shared, state->handle);
+            };
+            const auto fail = [&](Error error, std::string message)
+            {
+                complete_classic_connect(shared, state, error, std::move(message));
+                abandon();
+            };
+            const auto fail_wsa = [&](const char* operation, int error)
+            {
+                fail(map_wsa_error(error), wsa_message(operation, error));
+            };
+
+            if (state->closing.load() || !shared->alive->load())
+            {
+                abandon();
+                return;
+            }
+
+            const SOCKET socket_handle = socket(AF_BTH, SOCK_STREAM, BTHPROTO_RFCOMM);
+            if (socket_handle == INVALID_SOCKET)
+            {
+                fail_wsa("socket", WSAGetLastError());
+                return;
+            }
+            {
+                std::scoped_lock lock(state->socket_mutex);
+                state->socket = socket_handle;
+            }
+
+            u_long non_blocking = 1;
+            if (ioctlsocket(socket_handle, FIONBIO, &non_blocking) == SOCKET_ERROR)
+            {
+                fail_wsa("ioctlsocket", WSAGetLastError());
+                return;
+            }
+
+            SOCKADDR_BTH remote{};
+            remote.addressFamily = AF_BTH;
+            remote.btAddr = address;
+            remote.serviceClassId = service_guid;
+            remote.port = 0;
+
+            if (connect(
+                    socket_handle,
+                    reinterpret_cast<const sockaddr*>(&remote),
+                    sizeof(remote)) == SOCKET_ERROR)
+            {
+                const int error = WSAGetLastError();
+                if (error != WSAEWOULDBLOCK)
+                {
+                    fail_wsa("connect", error);
+                    return;
+                }
+
+                const auto deadline = std::chrono::steady_clock::now() + k_classic_connect_timeout;
+                for (;;)
+                {
+                    if (state->closing.load() || !shared->alive->load())
+                    {
+                        abandon();
+                        return;
+                    }
+
+                    fd_set writable;
+                    FD_ZERO(&writable);
+                    FD_SET(socket_handle, &writable);
+                    fd_set failed;
+                    FD_ZERO(&failed);
+                    FD_SET(socket_handle, &failed);
+
+                    timeval slice{};
+                    slice.tv_sec = 0;
+                    slice.tv_usec = static_cast<long>(
+                        std::chrono::duration_cast<std::chrono::microseconds>(k_classic_connect_slice).count());
+
+                    const int ready = select(0, nullptr, &writable, &failed, &slice);
+                    if (ready == SOCKET_ERROR)
+                    {
+                        fail_wsa("select", WSAGetLastError());
+                        return;
+                    }
+
+                    if (ready > 0 && FD_ISSET(socket_handle, &failed))
+                    {
+                        int connect_error = 0;
+                        int length = sizeof(connect_error);
+                        getsockopt(
+                            socket_handle,
+                            SOL_SOCKET,
+                            SO_ERROR,
+                            reinterpret_cast<char*>(&connect_error),
+                            &length);
+                        fail_wsa("connect", connect_error != 0 ? connect_error : WSAECONNREFUSED);
+                        return;
+                    }
+
+                    if (ready > 0 && FD_ISSET(socket_handle, &writable))
+                        break;
+
+                    if (std::chrono::steady_clock::now() >= deadline)
+                    {
+                        fail(Error::Timeout, "RFCOMM connect timed out");
+                        return;
+                    }
+                }
+            }
+
+            u_long blocking = 0;
+            if (ioctlsocket(socket_handle, FIONBIO, &blocking) == SOCKET_ERROR)
+            {
+                fail_wsa("ioctlsocket", WSAGetLastError());
+                return;
+            }
+
+            if (!start_writer(shared, state))
+            {
+                fail(Error::OperationFailed, "Could not start a thread for the Classic connection");
+                return;
+            }
+
+            if (!complete_classic_connect(shared, state, Error::Ok, std::string()))
+            {
+                abandon();
+                return;
+            }
+
+            run_receive_loop(shared, state);
+        }
+
+        // A client the RFCOMM server accepted: announced, then served by its
+        // own receive loop and writer.
+        void start_accepted_connection(
+            const std::shared_ptr<SharedClassicState>& shared,
+            SOCKET client,
+            std::uint64_t connection,
+            std::uint64_t device_handle)
+        {
+            auto state = std::make_shared<ClassicConnectionState>(
+                connection, device_handle);
+            state->socket = client;
+            state->connected.store(true);
+
+            if (!register_connection_if_alive(shared, state))
+            {
+                connection_close(state);
+                return;
+            }
+
+            const bool writer_started = start_writer(shared, state);
+
+            if (shared->hooks.push_event)
+            {
+                BackendEvent event;
+                event.type = BackendEventType::ClassicClientConnected;
+                event.transport = Transport::Classic;
+                event.connection = connection;
+                event.device = device_handle;
+                event.error = Error::Ok;
+                shared->hooks.push_event(std::move(event));
+            }
+
+            const bool loop_started = writer_started &&
+                spawn_detached_worker(shared->workers, [shared, state]()
+                {
+                    run_receive_loop(shared, state);
+                });
+            if (!loop_started)
+            {
+                end_connection(
+                    shared,
+                    state,
+                    Error::OperationFailed,
+                    "Could not start a thread for the Classic connection");
+            }
+        }
+
+        // One RFCOMM server's accept loop. The listening socket comes by
+        // value and is closed by classic_server_stop under mutex; running is
+        // this server's own flag, so a loop outliving its server never sees
+        // a newer one's.
+        struct ClassicServerState
+        {
+            std::mutex mutex;
+            std::condition_variable wake;
+            SOCKET listener = INVALID_SOCKET;
+            bool running = true;
+        };
+
+        void run_classic_accept_loop(
+            const std::shared_ptr<SharedClassicState>& shared,
+            const std::shared_ptr<ClassicServerState>& server,
+            SOCKET listener)
+        {
+            constexpr auto first_backoff = std::chrono::milliseconds(250);
+            constexpr auto max_backoff = std::chrono::milliseconds(2000);
+            auto backoff = first_backoff;
+
+            for (;;)
+            {
+                {
+                    std::scoped_lock lock(server->mutex);
+                    if (!server->running)
+                        return;
+                }
+
+                SOCKADDR_BTH remote{};
+                int remote_len = sizeof(remote);
+                const SOCKET client = accept(
+                    listener,
+                    reinterpret_cast<sockaddr*>(&remote),
+                    &remote_len);
+
+                if (client == INVALID_SOCKET)
+                {
+                    const std::string failure = wsa_message("accept", WSAGetLastError());
+
+                    std::unique_lock lock(server->mutex);
+                    if (!server->running)
+                        return;
+
+                    // Still meant to run: an error that repeats must not
+                    // spin, so wait before the next try.
+                    GMBT_LOG(
+                        "RFCOMM %s; retrying in %d ms",
+                        failure.c_str(),
+                        static_cast<int>(backoff.count()));
+                    server->wake.wait_for(lock, backoff, [&server]() { return !server->running; });
+                    if (!server->running)
+                        return;
+                    backoff = std::min(backoff * 2, max_backoff);
+                    continue;
+                }
+
+                backoff = first_backoff;
+
+                bool stopped = false;
+                {
+                    std::scoped_lock lock(server->mutex);
+                    stopped = !server->running;
+                }
+                if (stopped || !shared->alive->load())
+                {
+                    closesocket(client);
+                    return;
+                }
+
+                DiscoveredDevice device;
+                device.transport = Transport::Classic;
+                device.address = format_bluetooth_address(remote.btAddr);
+                device.id = "win:classic:" + device.address;
+                device.address_available = true;
+                device.connectable = true;
+
+                const std::uint64_t device_handle = shared->hooks.upsert_device
+                    ? shared->hooks.upsert_device(device)
+                    : 0;
+                const std::uint64_t connection = shared->hooks.create_classic_connection
+                    ? shared->hooks.create_classic_connection(device_handle)
+                    : 0;
+
+                if (!connection)
+                {
+                    closesocket(client);
+                    continue;
+                }
+
+                start_accepted_connection(shared, client, connection, device_handle);
+            }
+        }
+
+        // Classic discovery. A stop bumps the generation and reports the
+        // stop itself, so an inquiry thread whose generation is stale ends
+        // unobserved.
+        struct ClassicScanState
+        {
+            std::mutex mutex;
+            std::atomic<std::uint64_t> generation{0};
+            std::atomic_bool running{false};
+        };
+
+        void run_classic_inquiry(
+            const std::shared_ptr<SharedClassicState>& shared,
+            const std::shared_ptr<ClassicScanState>& scan,
+            std::uint64_t generation)
+        {
+            const auto current = [&shared, &scan, generation]()
+            {
+                return scan->generation.load() == generation && shared->alive->load();
+            };
+
+            if (current())
+            {
+                BLUETOOTH_DEVICE_SEARCH_PARAMS search{};
+                search.dwSize = sizeof(search);
+                search.fReturnAuthenticated = TRUE;
+                search.fReturnRemembered = TRUE;
+                search.fReturnUnknown = TRUE;
+                search.fReturnConnected = TRUE;
+                search.fIssueInquiry = TRUE;
+                search.cTimeoutMultiplier = 4; // ~5.12 seconds
+                search.hRadio = nullptr;
+
+                BLUETOOTH_DEVICE_INFO info{};
+                info.dwSize = sizeof(info);
+
+                HBLUETOOTH_DEVICE_FIND finder =
+                    BluetoothFindFirstDevice(&search, &info);
+
+                if (finder)
+                {
+                    do
+                    {
+                        if (!current())
+                            break;
+
+                        DiscoveredDevice device;
+                        device.transport = Transport::Classic;
+                        device.address = format_bluetooth_address(info.Address.ullLong);
+                        device.id = "win:classic:" + device.address;
+                        device.address_available = true;
+                        device.name = wide_to_utf8(info.szName);
+                        device.connectable = true;
+                        device.rssi_available = false;
+
+                        if (shared->hooks.upsert_device)
+                            shared->hooks.upsert_device(device);
+
+                        info = {};
+                        info.dwSize = sizeof(info);
+                    }
+                    while (BluetoothFindNextDevice(finder, &info));
+
+                    BluetoothFindDeviceClose(finder);
+                }
+            }
+
+            // The end of a scan nobody stopped is this thread's to report.
+            bool report = false;
+            {
+                std::scoped_lock lock(scan->mutex);
+                if (scan->generation.load() == generation)
+                {
+                    scan->running.store(false);
+                    report = true;
+                }
+            }
+
+            if (report && shared->alive->load() && shared->hooks.push_event)
+            {
+                BackendEvent event;
+                event.type = BackendEventType::ScanStopped;
+                event.transport = Transport::Classic;
+                event.error = Error::Ok;
+                shared->hooks.push_event(std::move(event));
+            }
         }
 
         // Server notifies leave the game thread in order: one NotifyValueAsync
@@ -889,38 +1634,72 @@ namespace gmbluetooth
         return std::string(buffer);
     }
 
-    Error map_gatt_status(WDBG::GattCommunicationStatus status)
+    // A GATT call's outcome as the core reports it: the BluetoothError and,
+    // on a failure, the message saying why.
+    struct GattOutcome
     {
-        switch (status)
-        {
-            case WDBG::GattCommunicationStatus::Success:
-                return Error::Ok;
-            case WDBG::GattCommunicationStatus::Unreachable:
-                return Error::Disconnected;
-            case WDBG::GattCommunicationStatus::AccessDenied:
-                return Error::PermissionDenied;
-            case WDBG::GattCommunicationStatus::ProtocolError:
-            default:
-                return Error::OperationFailed;
-        }
-    }
+        Error error = Error::Ok;
+        std::string message;
+    };
 
-    std::string gatt_status_message(WDBG::GattCommunicationStatus status)
+    // status is what the call returned; protocol_error is the ATT code
+    // Windows attaches to a ProtocolError, when it has one.
+    GattOutcome gatt_outcome(
+        WDBG::GattCommunicationStatus status,
+        const WF::IReference<std::uint8_t>& protocol_error = nullptr)
     {
         switch (status)
         {
             case WDBG::GattCommunicationStatus::Success:
                 return {};
             case WDBG::GattCommunicationStatus::Unreachable:
-                return "Windows GATT peer is unreachable";
+                return { Error::Disconnected, "The GATT peer is unreachable" };
             case WDBG::GattCommunicationStatus::AccessDenied:
-                return "Windows denied access to the GATT operation";
+                return { Error::PermissionDenied, "Windows denied access to the GATT operation" };
             case WDBG::GattCommunicationStatus::ProtocolError:
-                return "Windows GATT protocol error";
+                if (protocol_error)
+                {
+                    const int att = static_cast<int>(protocol_error.Value());
+                    const Error error = map_att_error(att);
+                    if (error != Error::Ok)
+                        return { error, att_error_message(att) };
+                }
+                return { Error::OperationFailed, "GATT protocol error with no ATT error code" };
             default:
-                return "Windows GATT operation failed";
+                return {
+                    Error::OperationFailed,
+                    "Windows GATT operation failed with status " + std::to_string(static_cast<int>(status)) };
         }
     }
+
+    // The outcome of a GATT result object (services, characteristics,
+    // descriptors, read or write result).
+    template <typename Result>
+    GattOutcome gatt_result_outcome(const Result& result)
+    {
+        return gatt_outcome(result.Status(), result.ProtocolError());
+    }
+
+    // An exception a GATT call threw. The device or session closing under
+    // the call is a disconnect; anything else fails with Windows' text and
+    // the HRESULT.
+    GattOutcome gatt_exception_outcome(const winrt::hresult_error& error)
+    {
+        char code[24]{};
+        std::snprintf(code, sizeof(code), "HRESULT 0x%08X", static_cast<unsigned>(error.code().value));
+
+        std::string message = winrt::to_string(error.message());
+        trim_trailing_space(message);
+        message = message.empty() ? std::string(code) : message + " (" + code + ")";
+
+        if (error.code() == winrt::hresult{RO_E_CLOSED})
+            return { Error::Disconnected, std::move(message) };
+        return { Error::OperationFailed, std::move(message) };
+    }
+
+    // What a worker's catch (...) reports.
+    constexpr const char* k_gatt_unexpected_failure =
+        "Windows GATT operation failed with an unexpected exception";
 
     void push_le_client_event(
         const std::shared_ptr<SharedLeClientState>& shared,
@@ -945,6 +1724,7 @@ namespace gmbluetooth
         const std::shared_ptr<SharedLeClientState>& shared,
         std::uint64_t op_id,
         Error error,
+        std::string message,
         LeOpResult result = {})
     {
         if (!shared || !shared->alive->load() || !shared->hooks.push_event)
@@ -955,25 +1735,39 @@ namespace gmbluetooth
         event.transport = Transport::LowEnergy;
         event.op_id = op_id;
         event.error = error;
+        event.message = std::move(message);
         event.result = std::move(result);
         shared->hooks.push_event(std::move(event));
     }
 
-    Error gatt_error(WDBG::GattCommunicationStatus status)
+    void push_le_op_completion(
+        const std::shared_ptr<SharedLeClientState>& shared,
+        std::uint64_t op_id,
+        GattOutcome outcome)
     {
-        return status == WDBG::GattCommunicationStatus::Success ? Error::Ok : Error::OperationFailed;
+        push_le_op_completion(shared, op_id, outcome.error, std::move(outcome.message));
     }
 
+    // A failed bluetooth_le_peripheral_open. error_code keeps the old
+    // status (133 for a peer that did not answer); error and message are
+    // what the core reports.
     std::string le_error_json(
         std::int32_t error_code,
-        std::uint64_t connection = 0)
+        std::uint64_t connection,
+        Error error,
+        const std::string& message)
     {
         std::string out = "{";
         if (connection != 0)
             out += "\"connection\":" + std::to_string(connection) + ",";
-        out += "\"error_code\":" + std::to_string(error_code) + "}";
+        out += "\"error_code\":" + std::to_string(error_code) +
+            ",\"error\":" + std::to_string(static_cast<std::int32_t>(error)) +
+            ",\"message\":\"" + json_escape(message) + "\"}";
         return out;
     }
+
+    constexpr const char* k_le_open_cancelled = "Connection cancelled by bluetooth_le_disconnect";
+    constexpr const char* k_le_worker_failed = "Could not start a thread for the BLE operation";
 
     std::shared_ptr<RemoteGattConnectionState> find_le_client_connection(
         const std::shared_ptr<SharedLeClientState>& shared,
@@ -1149,6 +1943,7 @@ namespace gmbluetooth
               le_client_(std::make_shared<SharedLeClientState>())
         {
             classic_->hooks = hooks_;
+            classic_->workers = workers_;
             le_client_->hooks = hooks_;
         }
 
@@ -1156,6 +1951,8 @@ namespace gmbluetooth
         {
             if (initialized_)
                 return Error::Ok;
+
+            pin_module();
 
             try
             {
@@ -1279,6 +2076,7 @@ namespace gmbluetooth
                 close_le_client_connection_noexcept(state);
             }
 
+            // With alive already false, none of these reports a stop.
             std::string ignored;
             le_scan_stop(ignored);
             le_advertise_stop(ignored);
@@ -1288,55 +2086,49 @@ namespace gmbluetooth
             classic_discoverable_stop(ignored);
 
             // Only request a shutdown() here - never close the socket
-            // directly. Each connection's own receive-loop thread is the
-            // sole owner of closesocket() (and of erasing itself from the
-            // map); it is kept alive by the shared_ptr it captured even
-            // after this WindowsBackend is destroyed, so it is safe to let
-            // it finish asynchronously instead of racing it here.
+            // directly. Each connection's own thread is the sole owner of
+            // closesocket() (and of erasing itself from the map); a
+            // connect still in progress gives up within one slice.
             for (const auto& state : connections)
-            {
-                state->closing.store(true);
-                state->connected.store(false);
-                connection_request_shutdown(state);
-            }
-
-            // Each receive-loop thread closes its own socket asynchronously
-            // once its recv() unblocks. Give them a bounded window to do
-            // that (and unregister themselves) before WSACleanup() runs -
-            // tearing down Winsock while another thread still has a socket
-            // call in flight is undefined behavior.
-            if (!connections.empty())
-            {
-                const auto deadline =
-                    std::chrono::steady_clock::now() + std::chrono::seconds(2);
-                for (;;)
-                {
-                    bool empty = false;
-                    {
-                        std::scoped_lock lock(classic_->connections_mutex);
-                        empty = classic_->connections.empty();
-                    }
-                    if (empty || std::chrono::steady_clock::now() >= deadline)
-                        break;
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                }
-            }
+                connection_request_close(state);
 
             release_watcher_noexcept();
             release_radio_noexcept();
 
-            if (winsock_initialized_)
+            // Everything is asked to stop; every thread the backend started
+            // gets a bounded window to finish. Tearing down Winsock or COM
+            // while a worker still has a call in flight is undefined
+            // behavior, so a worker still running past it leaves both up
+            // (the module is pinned, so its code stays mapped).
+            std::size_t remaining = 0;
+            const bool drained = wait_for_workers(*workers_, std::chrono::seconds(5), remaining);
+
+            if (classic_scan_thread_.joinable())
             {
-                WSACleanup();
-                winsock_initialized_ = false;
+                if (drained)
+                    classic_scan_thread_.join();
+                else
+                    classic_scan_thread_.detach();
             }
 
-            if (owns_apartment_)
+            if (drained)
             {
-                winrt::uninit_apartment();
-                owns_apartment_ = false;
+                if (winsock_initialized_)
+                    WSACleanup();
+
+                if (owns_apartment_)
+                    winrt::uninit_apartment();
+            }
+            else
+            {
+                GMBT_LOG(
+                    "Bluetooth shutdown: %zu worker thread(s) still running after 5 s; "
+                    "leaving Winsock and the COM apartment initialized",
+                    remaining);
             }
 
+            winsock_initialized_ = false;
+            owns_apartment_ = false;
             initialized_ = false;
         }
 
@@ -1363,8 +2155,18 @@ namespace gmbluetooth
             return PermissionStatus::Granted;
         }
 
+        // Windows asks a desktop app for no Bluetooth permission: the answer
+        // is known, so it goes out at once.
         Error permission_request(std::string& message) override
         {
+            if (hooks_.push_event)
+            {
+                BackendEvent event;
+                event.type = BackendEventType::PermissionResult;
+                event.value = static_cast<std::int32_t>(PermissionStatus::Granted);
+                hooks_.push_event(std::move(event));
+            }
+
             message.clear();
             return Error::Ok;
         }
@@ -1520,8 +2322,26 @@ namespace gmbluetooth
 
             const auto shared = le_client_;
 
-            std::thread(
-                [shared, state, address]()
+            // The failure of an open that got past the device lookup: what
+            // it opened is closed and the core told why.
+            const auto fail_open = [](
+                const std::shared_ptr<SharedLeClientState>& owner,
+                const std::shared_ptr<RemoteGattConnectionState>& opening,
+                Error failure,
+                const std::string& why)
+            {
+                opening->closing.store(true);
+                close_le_client_connection_noexcept(opening);
+                unregister_le_client_connection(owner, opening->handle);
+                push_le_client_event(
+                    owner,
+                    "bluetooth_le_peripheral_open",
+                    le_error_json(1, opening->handle, failure, why));
+            };
+
+            const bool started = spawn_detached_worker(
+                workers_,
+                [shared, state, address, fail_open]()
                 {
                     try
                     {
@@ -1540,7 +2360,11 @@ namespace gmbluetooth
                             push_le_client_event(
                                 shared,
                                 "bluetooth_le_peripheral_open",
-                                le_error_json(1, state->handle));
+                                le_error_json(
+                                    1,
+                                    state->handle,
+                                    Error::ConnectionFailed,
+                                    "Windows found no Bluetooth LE device at this address"));
                             return;
                         }
 
@@ -1574,6 +2398,9 @@ namespace gmbluetooth
                                             const bool was_connected =
                                                 current->connected.exchange(connected);
 
+                                            // Only a link the game did not
+                                            // close reports; Windows gives no
+                                            // reason for the loss.
                                             if (!connected &&
                                                 was_connected &&
                                                 !current->closing.load())
@@ -1583,7 +2410,10 @@ namespace gmbluetooth
                                                     "bluetooth_le_peripheral_connection_state_changed",
                                                     "{\"connection\":" +
                                                         std::to_string(current->handle) +
-                                                        ",\"is_connected\":false}");
+                                                        ",\"is_connected\":false" +
+                                                        ",\"error\":" +
+                                                        std::to_string(static_cast<std::int32_t>(Error::Disconnected)) +
+                                                        ",\"message\":\"The Bluetooth LE device disconnected\"}");
                                             }
                                         });
                                 state->connection_status_registered = true;
@@ -1602,7 +2432,7 @@ namespace gmbluetooth
                             push_le_client_event(
                                 shared,
                                 "bluetooth_le_peripheral_open",
-                                le_error_json(1, state->handle));
+                                le_error_json(1, state->handle, Error::ConnectionFailed, k_le_open_cancelled));
                             return;
                         }
 
@@ -1617,7 +2447,21 @@ namespace gmbluetooth
                         if (services_result.Status() !=
                             WDBG::GattCommunicationStatus::Success)
                         {
+                            // A peer that never answered is a timeout (the
+                            // old 133); a refusal keeps its ATT meaning.
                             const auto status = services_result.Status();
+                            const bool unreachable = status == WDBG::GattCommunicationStatus::Unreachable;
+                            GattOutcome outcome = gatt_result_outcome(services_result);
+                            if (unreachable)
+                            {
+                                outcome.error = Error::Timeout;
+                                outcome.message = "The Bluetooth LE device did not answer";
+                            }
+                            else if (outcome.error == Error::OperationFailed)
+                            {
+                                outcome.error = Error::ConnectionFailed;
+                            }
+
                             state->closing.store(true);
                             close_le_client_connection_noexcept(state);
                             unregister_le_client_connection(shared, state->handle);
@@ -1625,10 +2469,10 @@ namespace gmbluetooth
                                 shared,
                                 "bluetooth_le_peripheral_open",
                                 le_error_json(
-                                    status == WDBG::GattCommunicationStatus::Unreachable
-                                        ? 133
-                                        : 1,
-                                    state->handle));
+                                    unreachable ? 133 : 1,
+                                    state->handle,
+                                    outcome.error,
+                                    outcome.message));
                             return;
                         }
 
@@ -1665,7 +2509,7 @@ namespace gmbluetooth
                             push_le_client_event(
                                 shared,
                                 "bluetooth_le_peripheral_open",
-                                le_error_json(1, state->handle));
+                                le_error_json(1, state->handle, Error::ConnectionFailed, k_le_open_cancelled));
                             return;
                         }
 
@@ -1675,18 +2519,26 @@ namespace gmbluetooth
                             "{\"connection\":" +
                                 std::to_string(state->handle) + "}");
                     }
+                    catch (const winrt::hresult_error& error)
+                    {
+                        fail_open(shared, state, Error::ConnectionFailed, gatt_exception_outcome(error).message);
+                    }
                     catch (...)
                     {
-                        state->closing.store(true);
-                        close_le_client_connection_noexcept(state);
-                        unregister_le_client_connection(shared, state->handle);
-                        push_le_client_event(
+                        fail_open(
                             shared,
-                            "bluetooth_le_peripheral_open",
-                            le_error_json(1, state->handle));
+                            state,
+                            Error::ConnectionFailed,
+                            "Opening the Bluetooth LE device failed with an unexpected exception");
                     }
-                })
-                .detach();
+                });
+
+            if (!started)
+            {
+                unregister_le_client_connection(le_client_, connection);
+                message = "Could not start a thread for the Bluetooth LE connection";
+                return Error::OperationFailed;
+            }
 
             message.clear();
             return Error::Ok;
@@ -1742,7 +2594,8 @@ namespace gmbluetooth
             }
 
             const auto shared = le_client_;
-            std::thread(
+            const bool started = spawn_detached_worker(
+                workers_,
                 [shared, op_id, state, remote]()
                 {
                     try
@@ -1760,7 +2613,7 @@ namespace gmbluetooth
                             push_le_op_completion(
                                 shared,
                                 op_id,
-                                Error::OperationFailed);
+                                gatt_result_outcome(result));
                             return;
                         }
 
@@ -1798,17 +2651,31 @@ namespace gmbluetooth
                             shared,
                             op_id,
                             Error::Ok,
+                            std::string(),
                             std::move(found));
+                    }
+                    catch (const winrt::hresult_error& error)
+                    {
+                        push_le_op_completion(
+                            shared,
+                            op_id,
+                            gatt_exception_outcome(error));
                     }
                     catch (...)
                     {
                         push_le_op_completion(
                             shared,
                             op_id,
-                            Error::OperationFailed);
+                            Error::OperationFailed,
+                            k_gatt_unexpected_failure);
                     }
-                })
-                .detach();
+                });
+
+            if (!started)
+            {
+                message = k_le_worker_failed;
+                return Error::OperationFailed;
+            }
 
             message.clear();
             return Error::Ok;
@@ -1829,7 +2696,8 @@ namespace gmbluetooth
             }
 
             const auto shared = le_client_;
-            std::thread(
+            const bool started = spawn_detached_worker(
+                workers_,
                 [shared, op_id, state, service]()
                 {
                     try
@@ -1852,7 +2720,7 @@ namespace gmbluetooth
                             push_le_op_completion(
                                 shared,
                                 op_id,
-                                Error::OperationFailed);
+                                gatt_result_outcome(result));
                             return;
                         }
 
@@ -1898,17 +2766,31 @@ namespace gmbluetooth
                             shared,
                             op_id,
                             Error::Ok,
+                            std::string(),
                             std::move(found));
+                    }
+                    catch (const winrt::hresult_error& error)
+                    {
+                        push_le_op_completion(
+                            shared,
+                            op_id,
+                            gatt_exception_outcome(error));
                     }
                     catch (...)
                     {
                         push_le_op_completion(
                             shared,
                             op_id,
-                            Error::OperationFailed);
+                            Error::OperationFailed,
+                            k_gatt_unexpected_failure);
                     }
-                })
-                .detach();
+                });
+
+            if (!started)
+            {
+                message = k_le_worker_failed;
+                return Error::OperationFailed;
+            }
 
             message.clear();
             return Error::Ok;
@@ -1935,7 +2817,8 @@ namespace gmbluetooth
             }
 
             const auto shared = le_client_;
-            std::thread(
+            const bool started = spawn_detached_worker(
+                workers_,
                 [shared, op_id, state, characteristic]()
                 {
                     try
@@ -1952,7 +2835,7 @@ namespace gmbluetooth
                             push_le_op_completion(
                                 shared,
                                 op_id,
-                                Error::OperationFailed);
+                                gatt_result_outcome(result));
                             return;
                         }
 
@@ -1987,17 +2870,31 @@ namespace gmbluetooth
                             shared,
                             op_id,
                             Error::Ok,
+                            std::string(),
                             std::move(found));
+                    }
+                    catch (const winrt::hresult_error& error)
+                    {
+                        push_le_op_completion(
+                            shared,
+                            op_id,
+                            gatt_exception_outcome(error));
                     }
                     catch (...)
                     {
                         push_le_op_completion(
                             shared,
                             op_id,
-                            Error::OperationFailed);
+                            Error::OperationFailed,
+                            k_gatt_unexpected_failure);
                     }
-                })
-                .detach();
+                });
+
+            if (!started)
+            {
+                message = k_le_worker_failed;
+                return Error::OperationFailed;
+            }
 
             message.clear();
             return Error::Ok;
@@ -2024,7 +2921,8 @@ namespace gmbluetooth
             }
 
             const auto shared = le_client_;
-            std::thread(
+            const bool started = spawn_detached_worker(
+                workers_,
                 [shared, op_id, state, characteristic]()
                 {
                     try
@@ -2047,7 +2945,7 @@ namespace gmbluetooth
                             push_le_op_completion(
                                 shared,
                                 op_id,
-                                Error::OperationFailed);
+                                gatt_result_outcome(result));
                             return;
                         }
 
@@ -2057,17 +2955,31 @@ namespace gmbluetooth
                             shared,
                             op_id,
                             Error::Ok,
+                            std::string(),
                             std::move(read));
+                    }
+                    catch (const winrt::hresult_error& error)
+                    {
+                        push_le_op_completion(
+                            shared,
+                            op_id,
+                            gatt_exception_outcome(error));
                     }
                     catch (...)
                     {
                         push_le_op_completion(
                             shared,
                             op_id,
-                            Error::OperationFailed);
+                            Error::OperationFailed,
+                            k_gatt_unexpected_failure);
                     }
-                })
-                .detach();
+                });
+
+            if (!started)
+            {
+                message = k_le_worker_failed;
+                return Error::OperationFailed;
+            }
 
             message.clear();
             return Error::Ok;
@@ -2097,7 +3009,8 @@ namespace gmbluetooth
 
             const auto payload = json::base64_decode(value_base64);
             const auto shared = le_client_;
-            std::thread(
+            const bool started = spawn_detached_worker(
+                workers_,
                 [shared, op_id, state, characteristic, payload, with_response]()
                 {
                     try
@@ -2128,17 +3041,30 @@ namespace gmbluetooth
                         push_le_op_completion(
                             shared,
                             op_id,
-                            gatt_error(status));
+                            gatt_result_outcome(result));
+                    }
+                    catch (const winrt::hresult_error& error)
+                    {
+                        push_le_op_completion(
+                            shared,
+                            op_id,
+                            gatt_exception_outcome(error));
                     }
                     catch (...)
                     {
                         push_le_op_completion(
                             shared,
                             op_id,
-                            Error::OperationFailed);
+                            Error::OperationFailed,
+                            k_gatt_unexpected_failure);
                     }
-                })
-                .detach();
+                });
+
+            if (!started)
+            {
+                message = k_le_worker_failed;
+                return Error::OperationFailed;
+            }
 
             message.clear();
             return Error::Ok;
@@ -2177,7 +3103,8 @@ namespace gmbluetooth
             const std::string normalized_characteristic =
                 normalize_uuid(characteristic_uuid);
 
-            std::thread(
+            const bool started = spawn_detached_worker(
+                workers_,
                 [shared, op_id,
                  state,
                  characteristic,
@@ -2244,13 +3171,14 @@ namespace gmbluetooth
                                 ? WDBG::GattClientCharacteristicConfigurationDescriptorValue::Indicate
                                 : WDBG::GattClientCharacteristicConfigurationDescriptorValue::None;
 
-                        const auto status =
+                        // The WithResult form carries the ATT code of a refusal.
+                        const auto result =
                             characteristic->characteristic
-                                .WriteClientCharacteristicConfigurationDescriptorAsync(
+                                .WriteClientCharacteristicConfigurationDescriptorWithResultAsync(
                                     cccd_value)
                                 .get();
 
-                        if (status ==
+                        if (result.Status() ==
                                 WDBG::GattCommunicationStatus::Success &&
                             mode == 0)
                         {
@@ -2273,17 +3201,30 @@ namespace gmbluetooth
                         push_le_op_completion(
                             shared,
                             op_id,
-                            gatt_error(status));
+                            gatt_result_outcome(result));
+                    }
+                    catch (const winrt::hresult_error& error)
+                    {
+                        push_le_op_completion(
+                            shared,
+                            op_id,
+                            gatt_exception_outcome(error));
                     }
                     catch (...)
                     {
                         push_le_op_completion(
                             shared,
                             op_id,
-                            Error::OperationFailed);
+                            Error::OperationFailed,
+                            k_gatt_unexpected_failure);
                     }
-                })
-                .detach();
+                });
+
+            if (!started)
+            {
+                message = k_le_worker_failed;
+                return Error::OperationFailed;
+            }
 
             message.clear();
             return Error::Ok;
@@ -2311,7 +3252,8 @@ namespace gmbluetooth
             }
 
             const auto shared = le_client_;
-            std::thread(
+            const bool started = spawn_detached_worker(
+                workers_,
                 [shared, op_id, state, descriptor]()
                 {
                     try
@@ -2328,7 +3270,7 @@ namespace gmbluetooth
                             push_le_op_completion(
                                 shared,
                                 op_id,
-                                Error::OperationFailed);
+                                gatt_result_outcome(result));
                             return;
                         }
 
@@ -2338,17 +3280,31 @@ namespace gmbluetooth
                             shared,
                             op_id,
                             Error::Ok,
+                            std::string(),
                             std::move(read));
+                    }
+                    catch (const winrt::hresult_error& error)
+                    {
+                        push_le_op_completion(
+                            shared,
+                            op_id,
+                            gatt_exception_outcome(error));
                     }
                     catch (...)
                     {
                         push_le_op_completion(
                             shared,
                             op_id,
-                            Error::OperationFailed);
+                            Error::OperationFailed,
+                            k_gatt_unexpected_failure);
                     }
-                })
-                .detach();
+                });
+
+            if (!started)
+            {
+                message = k_le_worker_failed;
+                return Error::OperationFailed;
+            }
 
             message.clear();
             return Error::Ok;
@@ -2379,31 +3335,46 @@ namespace gmbluetooth
             const auto payload = json::base64_decode(value_base64);
             const auto shared = le_client_;
 
-            std::thread(
+            const bool started = spawn_detached_worker(
+                workers_,
                 [shared, op_id, state, descriptor, payload]()
                 {
                     try
                     {
                         WinrtWorkerApartment apartment;
                         std::scoped_lock operation_lock(state->operation_mutex);
-                        const auto status =
-                            descriptor->descriptor.WriteValueAsync(
+                        // The WithResult form carries the ATT code of a refusal.
+                        const auto result =
+                            descriptor->descriptor.WriteValueWithResultAsync(
                                 bytes_to_buffer(payload)).get();
 
                         push_le_op_completion(
                             shared,
                             op_id,
-                            gatt_error(status));
+                            gatt_result_outcome(result));
+                    }
+                    catch (const winrt::hresult_error& error)
+                    {
+                        push_le_op_completion(
+                            shared,
+                            op_id,
+                            gatt_exception_outcome(error));
                     }
                     catch (...)
                     {
                         push_le_op_completion(
                             shared,
                             op_id,
-                            Error::OperationFailed);
+                            Error::OperationFailed,
+                            k_gatt_unexpected_failure);
                     }
-                })
-                .detach();
+                });
+
+            if (!started)
+            {
+                message = k_le_worker_failed;
+                return Error::OperationFailed;
+            }
 
             message.clear();
             return Error::Ok;
@@ -2418,16 +3389,27 @@ namespace gmbluetooth
 
             auto push_event = hooks_.push_event;
 
-            std::thread(
-                [push_event = std::move(push_event), op_id]() mutable
+            const bool started = spawn_detached_worker(
+                workers_,
+                [push_event, op_id]()
                 {
                     BackendEvent event;
                     event.type = BackendEventType::LeOpCompleted;
                     event.transport = Transport::LowEnergy;
                     event.op_id = op_id;
                     push_event(std::move(event));
-                })
-                .detach();
+                });
+
+            // No thread: the core has registered the op already, so it can
+            // take the completion before the call returns.
+            if (!started)
+            {
+                BackendEvent event;
+                event.type = BackendEventType::LeOpCompleted;
+                event.transport = Transport::LowEnergy;
+                event.op_id = op_id;
+                hooks_.push_event(std::move(event));
+            }
         }
 
         // ===== BLE Advertiser =====
@@ -2856,6 +3838,25 @@ namespace gmbluetooth
                 return Error::InvalidArgument;
             }
 
+            // Refused before anything is created: Windows has no protection
+            // level for a signed write.
+            if (const auto* characteristics = root->find("characteristics"); characteristics && characteristics->is_array())
+            {
+                for (const auto& characteristic_value : characteristics->array_value)
+                {
+                    const auto* permissions_field = characteristic_value.is_object()
+                        ? characteristic_value.find("permissions")
+                        : nullptr;
+                    const std::int32_t permissions = permissions_field ? permissions_field->as_int(0) : 0;
+                    if ((permissions & (kPermissionWriteSigned | kPermissionWriteSignedMitm)) != 0)
+                    {
+                        message = "Windows has no signed-write permission: "
+                            "BluetoothLeAttributePermission.WriteSigned and WriteSignedMitm are not supported";
+                        return Error::NotSupported;
+                    }
+                }
+            }
+
             try
             {
                 const std::string service_uuid = normalize_uuid(uuid_field->string_value);
@@ -3268,10 +4269,12 @@ namespace gmbluetooth
                     pending.request.Offset(),
                     json::base64_decode(value_base64).size());
 
+                // status is a BluetoothAttError the core validated: the ATT
+                // code itself.
                 if (status == 0)
                     pending.request.RespondWithValue(bytes_to_buffer(json::base64_decode(value_base64)));
                 else
-                    pending.request.RespondWithProtocolError(static_cast<std::uint8_t>(std::clamp(status, 1, 255)));
+                    pending.request.RespondWithProtocolError(static_cast<std::uint8_t>(status));
 
                 if (pending.deferral)
                     pending.deferral.Complete();
@@ -3335,7 +4338,7 @@ namespace gmbluetooth
                     if (status == 0)
                         pending.request.Respond();
                     else
-                        pending.request.RespondWithProtocolError(static_cast<std::uint8_t>(std::clamp(status, 1, 255)));
+                        pending.request.RespondWithProtocolError(static_cast<std::uint8_t>(status));
                 }
 
                 if (pending.deferral)
@@ -3446,94 +4449,85 @@ namespace gmbluetooth
         Error classic_scan_start(std::string& message) override
         {
             if (!initialized_)
-                return Error::NotInitialized;
-
-            if (classic_scanning_.exchange(true))
             {
-                message.clear();
-                return Error::Ok;
+                message = "Bluetooth backend is not initialized";
+                return Error::NotInitialized;
             }
 
-            classic_scan_stop_requested_.store(false);
-            if (classic_scan_thread_.joinable())
-                classic_scan_thread_.join();
-
-            classic_scan_thread_ = std::thread([this]()
+            std::uint64_t generation = 0;
             {
-                BLUETOOTH_DEVICE_SEARCH_PARAMS search{};
-                search.dwSize = sizeof(search);
-                search.fReturnAuthenticated = TRUE;
-                search.fReturnRemembered = TRUE;
-                search.fReturnUnknown = TRUE;
-                search.fReturnConnected = TRUE;
-                search.fIssueInquiry = TRUE;
-                search.cTimeoutMultiplier = 4; // ~5.12 seconds
-                search.hRadio = nullptr;
-
-                BLUETOOTH_DEVICE_INFO info{};
-                info.dwSize = sizeof(info);
-
-                HBLUETOOTH_DEVICE_FIND finder =
-                    BluetoothFindFirstDevice(&search, &info);
-
-                if (finder)
+                std::scoped_lock lock(classic_scan_->mutex);
+                if (classic_scan_->running.load())
                 {
-                    do
-                    {
-                        if (classic_scan_stop_requested_.load())
-                            break;
-
-                        DiscoveredDevice device;
-                        device.transport = Transport::Classic;
-                        device.address = format_bluetooth_address(info.Address.ullLong);
-                        device.id = "win:classic:" + device.address;
-                        device.address_available = true;
-                        device.name = wide_to_utf8(info.szName);
-                        device.connectable = true;
-                        device.rssi_available = false;
-
-                        if (hooks_.upsert_device)
-                            hooks_.upsert_device(device);
-
-                        info = {};
-                        info.dwSize = sizeof(info);
-                    }
-                    while (BluetoothFindNextDevice(finder, &info));
-
-                    BluetoothFindDeviceClose(finder);
+                    message.clear();
+                    return Error::Ok;
                 }
+                classic_scan_->running.store(true);
+                generation = ++classic_scan_->generation;
+            }
 
-                classic_scanning_.store(false);
+            // An inquiry a stop left running is not joined here: the new
+            // scan's thread waits for it, so two inquiries never overlap and
+            // the game thread never blocks on one.
+            auto previous = std::make_shared<PreviousWorker>();
+            previous->thread = std::move(classic_scan_thread_);
 
-                if (hooks_.push_event)
+            const auto shared = classic_;
+            const auto scan = classic_scan_;
+            classic_scan_thread_ = spawn_worker(
+                workers_,
+                [shared, scan, generation, previous]()
                 {
-                    BackendEvent event;
-                    event.type = BackendEventType::ScanStopped;
-                    event.transport = Transport::Classic;
-                    event.error = Error::Ok;
-                    hooks_.push_event(std::move(event));
+                    if (previous->thread.joinable())
+                        previous->thread.join();
+                    run_classic_inquiry(shared, scan, generation);
+                });
+
+            if (!classic_scan_thread_.joinable())
+            {
+                classic_scan_thread_ = std::move(previous->thread);
+                {
+                    std::scoped_lock lock(classic_scan_->mutex);
+                    if (classic_scan_->generation.load() == generation)
+                        classic_scan_->running.store(false);
                 }
-            });
+                message = "Could not start the Classic discovery thread";
+                return Error::OperationFailed;
+            }
 
             message.clear();
             return Error::Ok;
         }
 
+        // Never waits for the inquiry, which Windows cannot cut short: the
+        // scan is marked stopped and reported here, and the inquiry thread,
+        // its generation now stale, ends unobserved.
         Error classic_scan_stop(std::string& message) override
         {
-            classic_scan_stop_requested_.store(true);
+            bool was_running = false;
+            {
+                std::scoped_lock lock(classic_scan_->mutex);
+                was_running = classic_scan_->running.load();
+                classic_scan_->running.store(false);
+                ++classic_scan_->generation;
+            }
 
-            if (classic_scan_thread_.joinable())
-                classic_scan_thread_.join();
+            if (was_running && classic_->alive->load() && hooks_.push_event)
+            {
+                BackendEvent event;
+                event.type = BackendEventType::ScanStopped;
+                event.transport = Transport::Classic;
+                event.error = Error::Ok;
+                hooks_.push_event(std::move(event));
+            }
 
-            classic_scanning_.store(false);
             message.clear();
             return Error::Ok;
         }
 
         bool classic_scan_is_running() const override
         {
-            return classic_scanning_.load();
+            return classic_scan_->running.load();
         }
 
         Error classic_connect(
@@ -3562,86 +4556,34 @@ namespace gmbluetooth
             }
 
             const auto shared = classic_;
-            const auto alive = classic_->alive;
             const std::uint64_t device_handle = hooks_.upsert_device
                 ? hooks_.upsert_device(device)
                 : 0;
 
-            std::thread([shared, alive, connection, device_handle, address, service_guid]()
+            // Registered while still connecting, before the worker starts, so
+            // a classic_disconnect that comes before the connect completes
+            // finds it and cancels it.
+            auto state = std::make_shared<ClassicConnectionState>(
+                connection, device_handle);
+            if (!register_connection_if_alive(shared, state))
             {
-                if (!alive->load())
-                    return;
+                message = "Bluetooth backend is shutting down";
+                return Error::NotInitialized;
+            }
 
-                SOCKET socket_handle = socket(AF_BTH, SOCK_STREAM, BTHPROTO_RFCOMM);
-                if (socket_handle == INVALID_SOCKET)
+            const bool started = spawn_detached_worker(
+                workers_,
+                [shared, state, address, service_guid]()
                 {
-                    const int error = WSAGetLastError();
-                    if (alive->load() && shared->hooks.push_event)
-                    {
-                        BackendEvent event;
-                        event.type = BackendEventType::ClassicConnected;
-                        event.transport = Transport::Classic;
-                        event.connection = connection;
-                        event.device = device_handle;
-                        event.error = map_wsa_error(error);
-                        event.message = wsa_message("socket", error);
-                        shared->hooks.push_event(std::move(event));
-                    }
-                    return;
-                }
+                    run_classic_connect(shared, state, address, service_guid);
+                });
 
-                SOCKADDR_BTH remote{};
-                remote.addressFamily = AF_BTH;
-                remote.btAddr = address;
-                remote.serviceClassId = service_guid;
-                remote.port = 0;
-
-                if (connect(
-                        socket_handle,
-                        reinterpret_cast<const sockaddr*>(&remote),
-                        sizeof(remote)) == SOCKET_ERROR)
-                {
-                    const int error = WSAGetLastError();
-                    closesocket(socket_handle);
-
-                    if (alive->load() && shared->hooks.push_event)
-                    {
-                        BackendEvent event;
-                        event.type = BackendEventType::ClassicConnected;
-                        event.transport = Transport::Classic;
-                        event.connection = connection;
-                        event.device = device_handle;
-                        event.error = map_wsa_error(error);
-                        event.message = wsa_message("connect", error);
-                        shared->hooks.push_event(std::move(event));
-                    }
-                    return;
-                }
-
-                auto state = std::make_shared<ClassicConnectionState>(
-                    connection, device_handle);
-                state->socket = socket_handle;
-                state->connected.store(true);
-
-                if (!register_connection_if_alive(shared, state))
-                {
-                    closesocket(socket_handle);
-                    return;
-                }
-
-                if (alive->load() && shared->hooks.push_event)
-                {
-                    BackendEvent event;
-                    event.type = BackendEventType::ClassicConnected;
-                    event.transport = Transport::Classic;
-                    event.connection = connection;
-                    event.device = device_handle;
-                    event.error = Error::Ok;
-                    shared->hooks.push_event(std::move(event));
-                }
-
-                start_receive_loop(shared, state);
-            }).detach();
+            if (!started)
+            {
+                unregister_connection(shared, connection);
+                message = "Could not start a thread for the Classic connection";
+                return Error::OperationFailed;
+            }
 
             message.clear();
             return Error::Ok;
@@ -3674,7 +4616,7 @@ namespace gmbluetooth
             const auto shared = classic_;
             const auto alive = classic_->alive;
 
-            std::thread([shared, alive, device_handle, address]()
+            const bool started = spawn_detached_worker(workers_, [shared, alive, device_handle, address]()
             {
                 if (!alive->load())
                     return;
@@ -3705,7 +4647,13 @@ namespace gmbluetooth
                 }
 
                 shared->hooks.push_event(std::move(event));
-            }).detach();
+            });
+
+            if (!started)
+            {
+                message = "Could not start a thread for the pairing";
+                return Error::OperationFailed;
+            }
 
             message.clear();
             return Error::Ok;
@@ -3754,9 +4702,10 @@ namespace gmbluetooth
                 return Error::Ok;
             }
 
-            state->closing.store(true);
-            state->connected.store(false);
-            connection_request_shutdown(state);
+            // Open or still connecting. A connect cancelled here reports
+            // nothing (the core answers its callback); an open connection's
+            // receive loop reports the disconnect once it has closed.
+            connection_request_close(state);
 
             message.clear();
             return Error::Ok;
@@ -3791,32 +4740,35 @@ namespace gmbluetooth
                 return Error::Disconnected;
             }
             if (!data && size != 0)
-                return Error::InvalidArgument;
-
-            std::scoped_lock lock(state->send_mutex);
-            std::size_t sent_total = 0;
-            while (sent_total < size)
             {
-                const SOCKET socket_handle = connection_socket(state);
-                if (socket_handle == INVALID_SOCKET)
+                message = "Classic send data is missing";
+                return Error::InvalidArgument;
+            }
+
+            // Queued for the connection's writer; nothing here waits on the
+            // socket.
+            if (size != 0)
+            {
+                std::scoped_lock lock(state->send_mutex);
+                if (state->writer_stop || state->send_failed)
                 {
-                    message = "Classic connection is not connected";
+                    message = state->send_error_message.empty()
+                        ? std::string("Classic connection is not connected")
+                        : state->send_error_message;
                     return Error::Disconnected;
                 }
 
-                const int sent = send(
-                    socket_handle,
-                    reinterpret_cast<const char*>(data + sent_total),
-                    static_cast<int>(size - sent_total),
-                    0);
-                if (sent <= 0)
+                if (size > k_classic_send_cap - state->send_pending)
                 {
-                    const int error = WSAGetLastError();
-                    message = wsa_message("send", error);
-                    return map_wsa_error(error);
+                    message = "The Classic send queue is full: at most 1 MiB may wait to be sent, "
+                        "try again once it drains";
+                    return Error::Busy;
                 }
-                sent_total += static_cast<std::size_t>(sent);
+
+                state->outbound.insert(state->outbound.end(), data, data + size);
+                state->send_pending += size;
             }
+            state->send_cv.notify_all();
 
             message.clear();
             return Error::Ok;
@@ -3842,7 +4794,12 @@ namespace gmbluetooth
                     state->received.pop_front();
                 }
                 drained = state->finished && state->received.empty();
+                // The next data to arrive is announced again.
+                state->data_pending = false;
             }
+
+            // Room again for a receive loop held back by the cap.
+            state->receive_cv.notify_all();
 
             // The last bytes of a connection the peer closed: nothing is left
             // to keep it registered for.
@@ -3914,7 +4871,6 @@ namespace gmbluetooth
                 return map_wsa_error(error);
             }
 
-            server_socket_ = listener;
             server_guid_ = guid;
             server_addr_ = local;
             server_name_ = utf8_to_wide(name.empty() ? "GMBluetooth RFCOMM" : name);
@@ -3942,86 +4898,40 @@ namespace gmbluetooth
             if (WSASetServiceW(&server_query_, RNRSERVICE_REGISTER, 0) == SOCKET_ERROR)
             {
                 const int error = WSAGetLastError();
-                closesocket(server_socket_);
-                server_socket_ = INVALID_SOCKET;
+                closesocket(listener);
                 message = wsa_message("WSASetService", error);
                 return map_wsa_error(error);
             }
 
-            server_registered_ = true;
-            classic_server_running_.store(true);
+            auto server = std::make_shared<ClassicServerState>();
+            server->listener = listener;
 
-            if (server_thread_.joinable())
-                server_thread_.join();
-
-            server_thread_ = std::thread([this]()
-            {
-                while (classic_server_running_.load())
+            const auto shared = classic_;
+            const bool started = spawn_detached_worker(
+                workers_,
+                [shared, server, listener]()
                 {
-                    SOCKADDR_BTH remote{};
-                    int remote_len = sizeof(remote);
-                    SOCKET client = accept(
-                        server_socket_,
-                        reinterpret_cast<sockaddr*>(&remote),
-                        &remote_len);
+                    run_classic_accept_loop(shared, server, listener);
+                });
 
-                    if (client == INVALID_SOCKET)
-                    {
-                        if (!classic_server_running_.load())
-                            break;
-                        continue;
-                    }
+            if (!started)
+            {
+                WSASetServiceW(&server_query_, RNRSERVICE_DELETE, 0);
+                closesocket(listener);
+                message = "Could not start the Classic server thread";
+                return Error::OperationFailed;
+            }
 
-                    DiscoveredDevice device;
-                    device.transport = Transport::Classic;
-                    device.address = format_bluetooth_address(remote.btAddr);
-                    device.id = "win:classic:" + device.address;
-                    device.address_available = true;
-                    device.connectable = true;
-
-                    const std::uint64_t device_handle = hooks_.upsert_device
-                        ? hooks_.upsert_device(device)
-                        : 0;
-                    const std::uint64_t connection = hooks_.create_classic_connection
-                        ? hooks_.create_classic_connection(device_handle)
-                        : 0;
-
-                    if (!connection)
-                    {
-                        closesocket(client);
-                        continue;
-                    }
-
-                    auto state = std::make_shared<ClassicConnectionState>(
-                        connection, device_handle);
-                    state->socket = client;
-                    state->connected.store(true);
-
-                    if (!register_connection_if_alive(classic_, state))
-                    {
-                        closesocket(client);
-                        continue;
-                    }
-
-                    if (hooks_.push_event)
-                    {
-                        BackendEvent event;
-                        event.type = BackendEventType::ClassicClientConnected;
-                        event.transport = Transport::Classic;
-                        event.connection = connection;
-                        event.device = device_handle;
-                        event.error = Error::Ok;
-                        hooks_.push_event(std::move(event));
-                    }
-
-                    start_receive_loop(classic_, state);
-                }
-            });
+            server_registered_ = true;
+            classic_server_ = std::move(server);
+            classic_server_running_.store(true);
 
             message.clear();
             return Error::Ok;
         }
 
+        // Closes the listening socket, which ends a blocked accept(); the
+        // accept loop then finds its server stopped and returns on its own.
         Error classic_server_stop(std::string& message) override
         {
             classic_server_running_.store(false);
@@ -4032,14 +4942,20 @@ namespace gmbluetooth
                 server_registered_ = false;
             }
 
-            if (server_socket_ != INVALID_SOCKET)
+            if (classic_server_)
             {
-                closesocket(server_socket_);
-                server_socket_ = INVALID_SOCKET;
+                {
+                    std::scoped_lock lock(classic_server_->mutex);
+                    classic_server_->running = false;
+                    if (classic_server_->listener != INVALID_SOCKET)
+                    {
+                        closesocket(classic_server_->listener);
+                        classic_server_->listener = INVALID_SOCKET;
+                    }
+                }
+                classic_server_->wake.notify_all();
+                classic_server_.reset();
             }
-
-            if (server_thread_.joinable())
-                server_thread_.join();
 
             message.clear();
             return Error::Ok;
@@ -4083,23 +4999,29 @@ namespace gmbluetooth
 
             discoverable_radio_ = radio_handle;
             classic_discoverable_active_.store(true);
-            classic_discoverable_stop_requested_.store(false);
+            {
+                std::scoped_lock lock(discoverable_mutex_);
+                classic_discoverable_stop_requested_ = false;
+            }
 
             if (duration_seconds > 0)
             {
-                discoverable_timer_thread_ = std::thread([this, duration_seconds]()
+                // Joined by classic_discoverable_stop (shutdown calls it), so
+                // it never outlives the backend; a stop wakes it at once.
+                discoverable_timer_thread_ = spawn_worker(workers_, [this, duration_seconds]()
                 {
-                    const auto deadline =
-                        std::chrono::steady_clock::now() + std::chrono::seconds(duration_seconds);
-                    while (!classic_discoverable_stop_requested_.load() &&
-                           std::chrono::steady_clock::now() < deadline)
+                    bool stopped = false;
                     {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                        std::unique_lock lock(discoverable_mutex_);
+                        stopped = discoverable_wake_.wait_for(
+                            lock,
+                            std::chrono::seconds(duration_seconds),
+                            [this]() { return classic_discoverable_stop_requested_; });
                     }
 
                     // Only auto-disable on natural expiry - if a stop was requested,
                     // classic_discoverable_stop() owns disabling/closing the radio.
-                    if (!classic_discoverable_stop_requested_.load())
+                    if (!stopped)
                     {
                         if (discoverable_radio_)
                             BluetoothEnableDiscovery(discoverable_radio_, FALSE);
@@ -4114,7 +5036,11 @@ namespace gmbluetooth
 
         Error classic_discoverable_stop(std::string& message) override
         {
-            classic_discoverable_stop_requested_.store(true);
+            {
+                std::scoped_lock lock(discoverable_mutex_);
+                classic_discoverable_stop_requested_ = true;
+            }
+            discoverable_wake_.notify_all();
 
             if (discoverable_timer_thread_.joinable())
                 discoverable_timer_thread_.join();
@@ -4141,7 +5067,15 @@ namespace gmbluetooth
         ~WindowsBackend() override
         {
             if (initialized_)
+            {
                 shutdown();
+            }
+            else
+            {
+                // Discoverability needs no initialize; its timer is joinable.
+                std::string ignored;
+                classic_discoverable_stop(ignored);
+            }
         }
 
     private:
@@ -4392,6 +5326,8 @@ namespace gmbluetooth
         }
 
         CoreHooks hooks_;
+        // Counts every thread this backend starts; see spawn_worker.
+        std::shared_ptr<WorkerTracker> workers_ = std::make_shared<WorkerTracker>();
         std::shared_ptr<SharedClassicState> classic_;
         std::shared_ptr<SharedLeClientState> le_client_;
         std::shared_ptr<NotifyQueueState> notify_queue_ = std::make_shared<NotifyQueueState>();
@@ -4435,13 +5371,13 @@ namespace gmbluetooth
         std::unordered_map<std::int32_t, PendingGattWrite> pending_gatt_writes_;
         std::atomic<std::int32_t> next_gatt_request_id_{1};
 
-        std::atomic_bool classic_scanning_{false};
-        std::atomic_bool classic_scan_stop_requested_{false};
+        std::shared_ptr<ClassicScanState> classic_scan_ = std::make_shared<ClassicScanState>();
+        // The newest inquiry thread. Joined by the next scan's thread, or by
+        // shutdown once every worker has finished; never by a stop.
         std::thread classic_scan_thread_;
 
         std::atomic_bool classic_server_running_{false};
-        SOCKET server_socket_ = INVALID_SOCKET;
-        std::thread server_thread_;
+        std::shared_ptr<ClassicServerState> classic_server_;
         bool server_registered_ = false;
         GUID server_guid_{};
         SOCKADDR_BTH server_addr_{};
@@ -4451,7 +5387,9 @@ namespace gmbluetooth
         std::wstring server_comment_;
 
         std::atomic_bool classic_discoverable_active_{false};
-        std::atomic_bool classic_discoverable_stop_requested_{false};
+        std::mutex discoverable_mutex_;
+        std::condition_variable discoverable_wake_;
+        bool classic_discoverable_stop_requested_ = false; // under discoverable_mutex_
         std::thread discoverable_timer_thread_;
         HANDLE discoverable_radio_ = nullptr;
     };

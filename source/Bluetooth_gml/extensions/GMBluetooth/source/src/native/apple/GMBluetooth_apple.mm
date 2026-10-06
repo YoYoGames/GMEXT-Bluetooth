@@ -119,9 +119,14 @@
 @property(nonatomic, copy) void (^eventSink)(NSString *type, NSDictionary *params);
 
 // The completion of a GATT, advertise-start or add-service call: the op id
-// the core passed in, the platform error code (nil on success) and what the
-// call returned. No event name: the core knows the call from its op id.
-@property(nonatomic, copy) void (^opSink)(NSNumber *opId, NSNumber *errorCode, gmbluetooth::LeOpResult result);
+// the core passed in, the BluetoothError and message (Ok and empty on
+// success) and what the call returned. No event name: the core knows the
+// call from its op id.
+@property(nonatomic, copy) void (^opSink)(NSNumber *opId, gmbluetooth::Error error, std::string message, gmbluetooth::LeOpResult result);
+
+// Called after either manager reports a state change, which is also when a
+// pending authorization prompt has been answered.
+@property(nonatomic, copy) void (^managerStateSink)(void);
 
 // CLIENT
 
@@ -278,6 +283,58 @@
 @implementation GMBTWriteBatch
 @end
 
+static NSString *gmbt_ns(const std::string &text) {
+    NSString *value = [NSString stringWithUTF8String:text.c_str()];
+    return value ? value : @"";
+}
+
+static NSString *gmbt_manager_state_name(CBManagerState state) {
+    switch (state) {
+        case CBManagerStateUnknown: return @"Unknown";
+        case CBManagerStateResetting: return @"Resetting";
+        case CBManagerStateUnsupported: return @"Unsupported";
+        case CBManagerStateUnauthorized: return @"Unauthorized";
+        case CBManagerStatePoweredOff: return @"PoweredOff";
+        case CBManagerStatePoweredOn: return @"PoweredOn";
+    }
+    return @"Unknown";
+}
+
+// The BluetoothError and message a CoreBluetooth NSError reports to GML. An
+// ATT refusal goes through the shared ATT table; a CBError keeps its code in
+// the message.
+static gmbluetooth::Error gmbt_error_from_nserror(NSError *error, std::string &message) {
+    const int code = (int)error.code;
+    NSString *description = error.localizedDescription;
+    const std::string text = description.UTF8String ? description.UTF8String : "";
+
+    if ([error.domain isEqualToString:CBATTErrorDomain]) {
+        message = gmbluetooth::att_error_message(code);
+        if (!text.empty()) message += " (" + text + ")";
+        return gmbluetooth::map_att_error(code);
+    }
+
+    if ([error.domain isEqualToString:CBErrorDomain]) {
+        message = text + " (CBError " + std::to_string(code) + ")";
+        switch (code) {
+            case CBErrorConnectionTimeout:
+                return gmbluetooth::Error::Timeout;
+            case CBErrorNotConnected:
+            case CBErrorPeripheralDisconnected:
+                return gmbluetooth::Error::Disconnected;
+            case CBErrorConnectionFailed:
+            case CBErrorConnectionLimitReached:
+                return gmbluetooth::Error::ConnectionFailed;
+            default:
+                return gmbluetooth::Error::OperationFailed;
+        }
+    }
+
+    NSString *domain = error.domain;
+    message = text + " (" + (domain.UTF8String ? domain.UTF8String : "error") + " " + std::to_string(code) + ")";
+    return gmbluetooth::Error::OperationFailed;
+}
+
 @implementation GMBluetoothAppleTransport
 
 // The id a server-side ATT request is answered by (bt_le_server_respond_*).
@@ -307,15 +364,27 @@
     [self notifyOperation:functionName extraParams:params];
 }
 
-// Completes the call the core registered as opId; errorCode nil means
-// success. The other calls need no id: a connect is matched by its
+// Completes the call the core registered as opId; Ok with an empty message
+// is success. The other calls need no id: a connect is matched by its
 // peripheral, and the rest have no callback.
-- (void) completeOp:(NSNumber *)opId errorCode:(NSNumber *)errorCode result:(gmbluetooth::LeOpResult)result {
-    if (self.opSink) self.opSink(opId, errorCode, std::move(result));
+- (void) completeOp:(NSNumber *)opId failure:(gmbluetooth::Error)failure message:(std::string)message result:(gmbluetooth::LeOpResult)result {
+    if (self.opSink) self.opSink(opId, failure, std::move(message), std::move(result));
 }
 
 - (void) completeOp:(NSNumber *)opId error:(NSError *)error result:(gmbluetooth::LeOpResult)result {
-    [self completeOp:opId errorCode:(error ? @((int)error.code) : nil) result:std::move(result)];
+    if (!error) {
+        [self completeOp:opId failure:gmbluetooth::Error::Ok message:std::string() result:std::move(result)];
+        return;
+    }
+    std::string message;
+    const gmbluetooth::Error failure = gmbt_error_from_nserror(error, message);
+    [self completeOp:opId failure:failure message:std::move(message) result:std::move(result)];
+}
+
+// Fails an op whose manager left PoweredOn before it could run.
+- (void) failOp:(NSNumber *)opId managerState:(CBManagerState)state {
+    NSString *text = [NSString stringWithFormat:@"Bluetooth became unavailable (%@)", gmbt_manager_state_name(state)];
+    [self completeOp:opId failure:gmbluetooth::Error::Disconnected message:std::string(text.UTF8String) result:gmbluetooth::LeOpResult{}];
 }
 
 - (void) completeOp:(NSNumber *)opId error:(NSError *)error {
@@ -434,7 +503,10 @@
 
     [queue removeObjectsInArray:failed];
     for (GMBTQueuedPeripheral *entry in failed) {
-        [self completeOp:entry.opId errorCode:@((int)CBATTErrorInvalidHandle) result:gmbluetooth::LeOpResult{}];
+        [self completeOp:entry.opId
+                 failure:gmbluetooth::map_att_error(CBATTErrorInvalidHandle)
+                 message:gmbluetooth::att_error_message(CBATTErrorInvalidHandle) + " (the peripheral removed the service)"
+                  result:gmbluetooth::LeOpResult{}];
     }
 
     if (queue.count > 0 && queue.firstObject != oldHead) reissue();
@@ -599,7 +671,7 @@ static bool _scanPendingPowerOn = false;
     [self.discoveredPeripherals removeAllObjects];
 
     int authorization = -1;
-    if (@available(iOS 13.0, macOS 10.15, *)) {
+    if (@available(iOS 13.1, macOS 10.15, *)) {
         authorization = (int)[CBManager authorization];
     }
     NSLog(@"[GMBluetooth] bt_le_scan_start: CBCentralManager.state=%d (5=PoweredOn) authorization=%d",
@@ -798,6 +870,11 @@ static bool _scanPendingPowerOn = false;
     CBMutableService *service = [[CBMutableService alloc] initWithType:serviceUUID primary:YES];
 
     NSMutableArray<CBMutableCharacteristic *> *characteristicsArray = [NSMutableArray array];
+    // Moved into _initialValues only once the whole definition parsed, so a
+    // refused definition leaves nothing behind.
+    NSMapTable<CBMutableCharacteristic *, NSData *> *pendingInitialValues =
+        [NSMapTable mapTableWithKeyOptions:NSPointerFunctionsStrongMemory | NSPointerFunctionsObjectPointerPersonality
+                              valueOptions:NSPointerFunctionsStrongMemory];
     id characteristicsValue = serviceData[@"characteristics"];
     if ([characteristicsValue isKindOfClass:[NSArray class]]) {
         for (id charValue in (NSArray *)characteristicsValue) {
@@ -818,14 +895,23 @@ static bool _scanPendingPowerOn = false;
                                static_cast<NSUInteger>(CBCharacteristicPropertyExtendedProperties));
             CBCharacteristicProperties charProperties = (CBCharacteristicProperties)rawProperties;
 
-            // permissions is still the legacy cross-platform/Android-style bitmask:
-            // 1=read, 2/4=read encrypted, 16=write, 32/64=write encrypted.
+            // permissions is BluetoothLeAttributePermission, Android's PERMISSION_*
+            // bits. CoreBluetooth has no signed-write permission, so asking for
+            // one fails the call (-3) instead of adding a weaker characteristic.
             const NSUInteger permissions = [charDict[@"permissions"] unsignedIntegerValue];
+            if (permissions & (gmbluetooth::kPermissionWriteSigned | gmbluetooth::kPermissionWriteSignedMitm)) {
+                NSLog(@"[GMBluetooth] characteristic %@ asks for a signed-write permission, which Apple does not have", charUuidString);
+                return -3;
+            }
             CBAttributePermissions charPermissions = 0;
-            if (permissions & 1)       charPermissions |= CBAttributePermissionsReadable;
-            if (permissions & (2|4))   charPermissions |= CBAttributePermissionsReadEncryptionRequired;
-            if (permissions & 16)      charPermissions |= CBAttributePermissionsWriteable;
-            if (permissions & (32|64)) charPermissions |= CBAttributePermissionsWriteEncryptionRequired;
+            if (permissions & gmbluetooth::kPermissionRead)
+                charPermissions |= CBAttributePermissionsReadable;
+            if (permissions & (gmbluetooth::kPermissionReadEncrypted | gmbluetooth::kPermissionReadEncryptedMitm))
+                charPermissions |= CBAttributePermissionsReadEncryptionRequired;
+            if (permissions & gmbluetooth::kPermissionWrite)
+                charPermissions |= CBAttributePermissionsWriteable;
+            if (permissions & (gmbluetooth::kPermissionWriteEncrypted | gmbluetooth::kPermissionWriteEncryptedMitm))
+                charPermissions |= CBAttributePermissionsWriteEncryptionRequired;
 
             NSData *initialValue = nil;
             id initialValueField = charDict[@"value"];
@@ -848,7 +934,7 @@ static bool _scanPendingPowerOn = false;
                                                         value:(readOnly ? initialValue : nil)
                                                   permissions:charPermissions];
             if (initialValue && !readOnly)
-                [_initialValues setObject:initialValue forKey:characteristic];
+                [pendingInitialValues setObject:initialValue forKey:characteristic];
 
             NSMutableArray<CBMutableDescriptor *> *descriptorsArray = [NSMutableArray array];
             id descriptorsValue = charDict[@"descriptors"];
@@ -876,6 +962,8 @@ static bool _scanPendingPowerOn = false;
     }
 
     service.characteristics = characteristicsArray;
+    for (CBMutableCharacteristic *characteristic in pendingInitialValues)
+        [_initialValues setObject:[pendingInitialValues objectForKey:characteristic] forKey:characteristic];
 
     GMBTQueuedMutableService *queueService = [[GMBTQueuedMutableService alloc] initWithOpId:opId service:service];
     [self queueEnqueue:_addServiceQueue value:queueService withHandler:^(){ [self handleAddServiceQueue]; }];
@@ -936,18 +1024,20 @@ static bool _scanPendingPowerOn = false;
         return 0;
     }
         
-    // Decode the base64 value
-    NSData *dataValue = [[NSData alloc] initWithBase64EncodedString:value options:0];
-    if (!dataValue) {
-        NSLog(@"Failed to decode base64 value");
-        return -1;
+    // status is an ATT error code the core validated. A refusal carries no
+    // value, so the (empty) value is only decoded for a success.
+    const CBATTError result = (CBATTError)status;
+    if (result == CBATTErrorSuccess) {
+        NSData *dataValue = [[NSData alloc] initWithBase64EncodedString:(value ? value : @"") options:0];
+        if (!dataValue) {
+            NSLog(@"Failed to decode base64 value");
+            return -1;
+        }
+        request.value = dataValue;
     }
-    
-    // Set the value in the request object
-    request.value = dataValue;
-    
+
     // Respond to the read request
-    [_peripheralManager respondToRequest:request withResult:(CBATTError)status];
+    [_peripheralManager respondToRequest:request withResult:result];
     
     // Remove the request from the _readRequests dictionary
     [_readRequestsLookup removeObjectForKey:requestKey];
@@ -1052,6 +1142,11 @@ static bool _scanPendingPowerOn = false;
 }
 
 - (void) peripheralManagerDidUpdateState:(CBPeripheralManager *)peripheral {
+    [self applyPeripheralManagerState:peripheral];
+    if (self.managerStateSink) self.managerStateSink();
+}
+
+- (void) applyPeripheralManagerState:(CBPeripheralManager *)peripheral {
     [self notifyOperation:@"bt_le_peripheral_manager_update_state"
               extraParams:@{ @"success": @((int)peripheral.state) }];
 
@@ -1075,11 +1170,11 @@ static bool _scanPendingPowerOn = false;
 
     while (_startAdvertisementQueue.count > 0) {
         GMBTQueuedMutableDictionary *queued = [self queueDequeue:_startAdvertisementQueue];
-        [self completeOp:queued.opId errorCode:@((int)peripheral.state) result:gmbluetooth::LeOpResult{}];
+        [self failOp:queued.opId managerState:peripheral.state];
     }
     while (_addServiceQueue.count > 0) {
         GMBTQueuedMutableService *queued = [self queueDequeue:_addServiceQueue];
-        [self completeOp:queued.opId errorCode:@((int)peripheral.state) result:gmbluetooth::LeOpResult{}];
+        [self failOp:queued.opId managerState:peripheral.state];
     }
 }
 
@@ -1212,8 +1307,7 @@ static bool _scanPendingPowerOn = false;
     }
 
     NSMutableDictionary *params = [NSMutableDictionary dictionary];
-    BOOL isDescriptorRequest = NO;
-    
+
     int requestId = [self generateRequestId];
     
     // Storing the CBATTRequest object with the requestId for future use
@@ -1228,22 +1322,9 @@ static bool _scanPendingPowerOn = false;
     params[@"central"] = [self centralKey:request.central];
     params[@"device"] = [self createJSONFromCentral:request.central];
 
-    // Loop through the characteristic's descriptors to check UUIDs
-    for (CBDescriptor *descriptor in request.characteristic.descriptors) {
-        // Assuming you store descriptor's UUID when it's read
-        if ([descriptor.UUID isEqual:request.characteristic.UUID]) {
-            params[@"descriptor_uuid"] = descriptor.UUID.UUIDString;
-            isDescriptorRequest = YES;
-            break;
-        }
-    }
-    
-    NSString* eventType = @"bt_le_server_characteristic_read_request";
-    if (isDescriptorRequest) {
-        eventType = @"bt_le_server_descriptor_read_request";
-    }
-    
-    [self notifyOperation:eventType extraParams:params];
+    // CoreBluetooth never hands the app a descriptor read; only
+    // characteristic reads reach here.
+    [self notifyOperation:@"bt_le_server_characteristic_read_request" extraParams:params];
 }
 
 - (void) peripheralManager:(CBPeripheralManager *)peripheral didReceiveWriteRequests:(NSArray<CBATTRequest *> *)requests {
@@ -1267,8 +1348,10 @@ static bool _scanPendingPowerOn = false;
         [group addObject:request];
     }
 
-    // Each group's fragments laid out by offset, from its lowest one.
+    // Each group's fragments laid out by offset, from its lowest one, which
+    // GML gets as the write's offset.
     NSMutableArray<NSData *> *values = [NSMutableArray array];
+    NSMutableArray<NSNumber *> *offsets = [NSMutableArray array];
     for (CBCharacteristic *characteristic in order) {
         NSArray<CBATTRequest *> *group = [groups objectForKey:characteristic];
         NSUInteger start = NSUIntegerMax;
@@ -1289,6 +1372,7 @@ static bool _scanPendingPowerOn = false;
             }
         }
         [values addObject:value];
+        [offsets addObject:@(start)];
     }
 
     GMBTWriteBatch *batch = [GMBTWriteBatch new];
@@ -1306,6 +1390,10 @@ static bool _scanPendingPowerOn = false;
         params[@"service_uuid"] = characteristic.service.UUID.UUIDString;
         params[@"characteristic_uuid"] = characteristic.UUID.UUIDString;
         params[@"value"] = [values[i] base64EncodedStringWithOptions:0];
+        params[@"offset"] = offsets[i];
+        // CBATTRequest does not say whether the central asked for a response,
+        // so every write is reported as needing one.
+        params[@"response_needed"] = @YES;
         CBCentral *central = [groups objectForKey:characteristic].firstObject.central;
         params[@"central"] = [self centralKey:central];
         params[@"device"] = [self createJSONFromCentral:central];
@@ -1757,6 +1845,16 @@ static NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length
     params[@"name"] = peripheral.name ?: @"";
     params[@"address"] = peripheral.identifier.UUIDString;
 
+    // A connect that failed for no more specific reason is ConnectionFailed.
+    std::string message = "LE connect failed";
+    gmbluetooth::Error failure = gmbluetooth::Error::ConnectionFailed;
+    if (error) {
+        failure = gmbt_error_from_nserror(error, message);
+        if (failure == gmbluetooth::Error::OperationFailed) failure = gmbluetooth::Error::ConnectionFailed;
+    }
+    params[@"error"] = @((int)failure);
+    params[@"message"] = gmbt_ns(message);
+
     [self notifyResult:@"bt_le_peripheral_open" errorCode:@((int)error.code) extraParams:params];
     [self handleOpenPeripheralQueue];
 }
@@ -1769,6 +1867,8 @@ static NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length
     NSMutableDictionary* params = [[NSMutableDictionary alloc] init];
     params[@"name"] = queuedPeripheral.peripheral.name ?: @"";
     params[@"address"] = queuedPeripheral.peripheral.identifier.UUIDString;
+    params[@"error"] = @((int)gmbluetooth::Error::Timeout);
+    params[@"message"] = @"LE connect timed out";
 
     [self notifyResult:@"bt_le_peripheral_open" errorCode:@133 extraParams:params];
     [self handleOpenPeripheralQueue];
@@ -1791,6 +1891,12 @@ static NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length
     NSMutableDictionary* params = [[NSMutableDictionary alloc] init];
     params[@"address"] = key;
     params[@"error_code"] = @(error ? (int)error.code : 0);
+    // A disconnect the game asked for (bt_le_peripheral_close) never gets
+    // here, so this is always the link going away.
+    std::string message = "The peripheral disconnected";
+    if (error) (void)gmbt_error_from_nserror(error, message);
+    params[@"error"] = @((int)gmbluetooth::Error::Disconnected);
+    params[@"message"] = gmbt_ns(message);
     [self notifyOperation:@"bt_le_peripheral_disconnect" extraParams:params];
 }
 
@@ -1811,10 +1917,15 @@ static NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length
     }
     // Peripheral disconneted
     else if (event == CBConnectionEventPeerDisconnected) {
+        // Still open means the link dropped; otherwise the game closed it
+        // (bt_le_peripheral_close) or never opened it.
+        const BOOL lost = _openedPeripherals[peripheral.identifier.UUIDString] != nil;
         peripheral.delegate = nil;
         [_connectedPeripherals removeObjectForKey:peripheral.identifier.UUIDString];
 
         params[@"is_connected"] = @(false);
+        params[@"error"] = @((int)(lost ? gmbluetooth::Error::Disconnected : gmbluetooth::Error::Ok));
+        params[@"message"] = lost ? @"The peripheral disconnected" : @"";
     }
     
     [self notifyOperation:@"bt_le_peripheral_connection_state_changed" extraParams:params];
@@ -1951,27 +2062,7 @@ static NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length
 }
 
 - (void) centralManagerDidUpdateState:(nonnull CBCentralManager *)central {
-    NSString *stateString = @"Unknown";
-    switch (central.state) {
-        case CBManagerStateUnknown:
-            stateString = @"Unknown";
-            break;
-        case CBManagerStateResetting:
-            stateString = @"Resetting";
-            break;
-        case CBManagerStateUnsupported:
-            stateString = @"Unsupported";
-            break;
-        case CBManagerStateUnauthorized:
-            stateString = @"Unauthorized";
-            break;
-        case CBManagerStatePoweredOff:
-            stateString = @"PoweredOff";
-            break;
-        case CBManagerStatePoweredOn:
-            stateString = @"PoweredOn";
-            break;
-    }
+    NSString *stateString = gmbt_manager_state_name(central.state);
     NSLog(@"[GMBluetooth] CBCentralManager state changed: %@ (%d)", stateString, (int)central.state);
 
     if (central.state == CBManagerStatePoweredOn) {
@@ -2004,10 +2095,13 @@ static NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length
         [_openedPeripherals removeAllObjects];
         [_connectedPeripherals removeAllObjects];
         [_peripheralQueues removeAllObjects];
+        NSString *message = [NSString stringWithFormat:@"Bluetooth became unavailable (%@)", stateString];
         for (CBPeripheral *peripheral in lost) {
             [self notifyOperation:@"bt_le_peripheral_disconnect"
                       extraParams:@{ @"address": peripheral.identifier.UUIDString ? peripheral.identifier.UUIDString : @"",
-                                     @"error_code": @((int)central.state) }];
+                                     @"error_code": @((int)central.state),
+                                     @"error": @((int)gmbluetooth::Error::Disconnected),
+                                     @"message": message }];
         }
     }
 
@@ -2017,6 +2111,8 @@ static NSData *KCharacteristicIndicate = [NSData dataWithBytes:(int[]){3} length
     // Keep the legacy transport event for compatibility with existing diagnostics.
     [self notifyOperation:@"bt_le_state_update"
               extraParams:@{ @"success": @((int)central.state), @"state": stateString }];
+
+    if (self.managerStateSink) self.managerStateSink();
 }
 
 - (void) centralManager:(CBCentralManager *)central willRestoreState:(NSDictionary<NSString *,id> *)dict {
@@ -2276,6 +2372,16 @@ namespace
         return type;
     }
 
+    // True while the user has not answered the Bluetooth prompt; creating a
+    // CoreBluetooth manager now would show it. [CBManager authorization] is
+    // iOS 13.1 and macOS 10.15; before them there is no prompt to wait for.
+    static bool authorization_not_determined()
+    {
+        if (@available(iOS 13.1, macOS 10.15, *))
+            return [CBManager authorization] == CBManagerAuthorizationNotDetermined;
+        return false;
+    }
+
     class AppleBackend final : public Backend
     {
     public:
@@ -2295,12 +2401,26 @@ namespace
             transport_.eventSink = ^(NSString* type, NSDictionary* params) {
                 self->on_event(type, params);
             };
-            transport_.opSink = ^(NSNumber* op_id, NSNumber* error_code, LeOpResult result) {
-                self->on_op_completed(op_id, error_code, std::move(result));
+            transport_.opSink = ^(NSNumber* op_id, Error error, std::string text, LeOpResult result) {
+                self->on_op_completed(op_id, error, std::move(text), std::move(result));
             };
-            [transport_ bt_init];
-            GMBT_LOG("Apple transport created and bt_init sent. CoreBluetooth powers on asynchronously - "
-                     "watch for 'CBCentralManager state changed: PoweredOn' before expecting a scan to work.");
+            transport_.managerStateSink = ^{
+                self->on_manager_state();
+            };
+
+            // Creating a manager is what shows the system prompt, so while the
+            // user has not answered it the managers wait for permission_request.
+            if (authorization_not_determined())
+            {
+                GMBT_LOG("Apple transport created; Bluetooth authorization is not determined, so the "
+                         "CoreBluetooth managers wait for bluetooth_permission_request.");
+            }
+            else
+            {
+                [transport_ bt_init];
+                GMBT_LOG("Apple transport created and bt_init sent. CoreBluetooth powers on asynchronously - "
+                         "watch for 'CBCentralManager state changed: PoweredOn' before expecting a scan to work.");
+            }
             message.clear();
             return Error::Ok;
         }
@@ -2310,9 +2430,14 @@ namespace
 #if TARGET_OS_OSX
             classic_shutdown();
 #endif
+            // The core fails the requests still waiting for an answer; a late
+            // state change or poll finds nothing pending.
+            permission_pending_ = false;
+            ++permission_generation_;
             if (!transport_) return;
             transport_.eventSink = nil;
             transport_.opSink = nil;
+            transport_.managerStateSink = nil;
             [transport_ bt_end];
             transport_ = nil;
             std::scoped_lock lock(mutex_);
@@ -2347,15 +2472,17 @@ namespace
 
         std::int32_t current_bluetooth_state() const override
         {
-            if (!transport_ || !transport_.centralManager)
+            if (!transport_)
                 return 0; // BluetoothState.Unknown
+            if (!transport_.centralManager)
+                return 3; // BluetoothState.Unauthorized: waiting for permission_request
             return static_cast<std::int32_t>(transport_.centralManager.state);
         }
 
         PermissionStatus permission_status() const override
         {
 #if (TARGET_OS_IOS || TARGET_OS_OSX)
-            if (@available(iOS 13.0, macOS 10.15, *))
+            if (@available(iOS 13.1, macOS 10.15, *))
             {
                 switch ([CBManager authorization])
                 {
@@ -2369,17 +2496,41 @@ namespace
             return PermissionStatus::Granted;
         }
 
+        // CoreBluetooth has no explicit request call: creating a manager while
+        // authorization is NotDetermined shows the prompt, and the managers
+        // report a state change once the user has answered.
         Error permission_request(std::string& message) override
         {
-            // CoreBluetooth owns the Apple system permission prompt. Creating the
-            // managers in initialize() is the supported trigger; there is no
-            // Android-style explicit requestPermissions call.
+            if (!transport_)
+            {
+                message = "Bluetooth backend is not initialized";
+                return Error::NotInitialized;
+            }
             message.clear();
+
+            // A prompt is already up: its answer is pushed once, and the core
+            // hands it to every request waiting.
+            if (permission_pending_) return Error::Ok;
+
+            if (transport_.centralManager || !authorization_not_determined())
+            {
+                push_permission_result();
+                return Error::Ok;
+            }
+
+            // Pending before the managers exist, so their first state change
+            // finds it.
+            permission_pending_ = true;
+            const std::uint64_t generation = ++permission_generation_;
+            [transport_ bt_init];
+            GMBT_LOG("Bluetooth permission requested: CoreBluetooth managers created, the system prompt follows.");
+            schedule_permission_poll(generation);
             return Error::Ok;
         }
 
         Error le_scan_start(bool, std::string& message) override
         {
+            if (const Error e = require_managers(message); e != Error::Ok) return e;
             const double r = [transport_ bt_le_scan_start];
             if (r < 0) { message = "BLE scan could not start"; return Error::OperationFailed; }
             message.clear(); return Error::Ok;
@@ -2395,6 +2546,7 @@ namespace
 
         Error le_connect(std::uint64_t connection, const DiscoveredDevice& device, std::string& message) override
         {
+            if (const Error e = require_managers(message); e != Error::Ok) return e;
             const std::string identifier = identifier_from_device(device);
             if (identifier.empty()) { message="BLE device identifier is unavailable"; return Error::InvalidArgument; }
             {
@@ -2435,6 +2587,7 @@ namespace
         // before anything starts (R1-36).
         Error le_advertise_start(std::uint64_t op,const LeAdvertiseSettings& settings,const LeAdvertiseData& data,std::string& m) override
         {
+            if (const Error e = require_managers(m); e != Error::Ok) return e;
             const char* field = nullptr;
             if (!settings.connectable) field = "connectable = false";
             else if (settings.tx_power) field = "tx_power";
@@ -2453,15 +2606,26 @@ namespace
         }
         Error le_advertise_stop(std::string&m) override { return async_result([transport_ bt_le_advertise_stop],"BLE advertising could not stop",m); }
         bool le_advertise_is_running() const override { return transport_ && [transport_ bt_le_advertise_is_active] > 0.5; }
-        Error le_server_start(std::string&m) override { return async_result([transport_ bt_le_server_open],"GATT server could not start",m); }
+        Error le_server_start(std::string&m) override
+        {
+            if (const Error e = require_managers(m); e != Error::Ok) return e;
+            return async_result([transport_ bt_le_server_open],"GATT server could not start",m);
+        }
         Error le_server_stop(std::string&m) override { return async_result([transport_ bt_le_server_close],"GATT server could not stop",m); }
         bool le_server_is_running() const override { return _isServerOpen; }
-        Error le_server_add_service(std::uint64_t op,const std::string&j,std::string&m) override { return async_result([transport_ bt_le_server_add_service:to_ns(j) opId:@(op)],"GATT service could not be added",m); }
+        Error le_server_add_service(std::uint64_t op,const std::string&j,std::string&m) override
+        {
+            if (const Error e = require_managers(m); e != Error::Ok) return e;
+            const double r=[transport_ bt_le_server_add_service:to_ns(j) opId:@(op)];
+            if(r==-3){m="Apple has no signed-write permission";return Error::NotSupported;}
+            return async_result(r,"GATT service could not be added",m);
+        }
         Error le_server_clear_services(std::string&m) override { return async_result([transport_ bt_le_server_clear_services],"GATT services could not be cleared",m); }
         Error le_server_respond_read(std::int32_t r,std::int32_t st,const std::string&v,std::string&m) override { double x=[transport_ bt_le_server_respond_read:r status:st value:to_ns(v)]; if(x>0){m.clear();return Error::Ok;}m="GATT read response failed";return Error::OperationFailed; }
         Error le_server_respond_write(std::int32_t r,std::int32_t st,std::string&m) override { double x=[transport_ bt_le_server_respond_write:r status:st]; if(x>0){m.clear();return Error::Ok;}m="GATT write response failed";return Error::OperationFailed; }
         Error le_server_notify_value(const std::string&s,const std::string&ch,const std::string&central,const std::string&v,std::string&m) override
         {
+            if (const Error e = require_managers(m); e != Error::Ok) return e;
             const double r=[transport_ bt_le_server_notify_value:to_ns(s) characteristicUuid:to_ns(ch) central:to_ns(central) value:to_ns(v)];
             if(r==-2){m="That central is not subscribed to the characteristic";return Error::NotFound;}
             return async_result(r,"GATT notification could not start",m);
@@ -2471,6 +2635,7 @@ namespace
 
         Error classic_scan_start(std::string& message) override
         {
+            if (const Error e = require_managers(message); e != Error::Ok) return e;
             if (classic_inquiry_) { GMBT_LOG("Classic inquiry already running"); message.clear(); return Error::Ok; }
 
             // IOBluetooth delivers every callback on the run loop of the thread
@@ -2524,6 +2689,7 @@ namespace
 
         Error classic_connect(std::uint64_t connection, const DiscoveredDevice& device, const std::string& service_uuid, std::string& message) override
         {
+            if (const Error e = require_managers(message); e != Error::Ok) return e;
             if (!device.address_available || device.address.empty())
             {
                 message = "Classic device address is unavailable";
@@ -2686,6 +2852,7 @@ namespace
 
         Error classic_server_start(const std::string& name, const std::string& service_uuid, std::string& message) override
         {
+            if (const Error e = require_managers(message); e != Error::Ok) return e;
             if (classic_server_running_) { message.clear(); return Error::Ok; }
 
             IOBluetoothSDPUUID* uuid = classic_uuid_from_string(service_uuid);
@@ -2773,6 +2940,7 @@ namespace
 
         Error pair(std::uint64_t device_handle, const DiscoveredDevice& device, std::string& message) override
         {
+            if (const Error e = require_managers(message); e != Error::Ok) return e;
             if (device.transport != Transport::Classic)
             {
                 message = "Bluetooth pairing is only supported for Classic devices on macOS";
@@ -2839,6 +3007,9 @@ namespace
         {
             if (device.transport != Transport::Classic || !device.address_available || device.address.empty())
                 return false;
+            // Touching IOBluetooth would show the prompt the game has not asked for.
+            if (!managers_created())
+                return false;
 
             IOBluetoothDevice* btDevice = const_cast<AppleBackend*>(this)->classic_device_for_address(device.address);
             return btDevice != nil && [btDevice isPaired];
@@ -2868,9 +3039,69 @@ namespace
         std::unordered_map<std::uint64_t,std::string> le_connection_to_id_;
         std::unordered_map<std::string,std::uint64_t> le_id_to_connection_;
 
+        // Expires with the backend, so delayed blocks can tell it is gone.
+        std::shared_ptr<int> lifetime_ = std::make_shared<int>(0);
+
+        // A permission_request is waiting for the user's answer. The
+        // generation tells a poll for it from one for an earlier request.
+        std::atomic_bool permission_pending_{false};
+        std::atomic<std::uint64_t> permission_generation_{0};
+
+        static constexpr double kPermissionPollSeconds = 0.5;
+
         static Error async_result(double value,const char* failure,std::string&message)
         { if(value<0){message=failure;return Error::OperationFailed;}message.clear();return Error::Ok; }
         static Error invalid_connection(std::string&message){message="Invalid connection handle";return Error::InvalidHandle;}
+
+        // The managers exist once authorization was decided at initialize or
+        // permission_request created them.
+        bool managers_created() const { return transport_ && transport_.centralManager != nil; }
+
+        // Every call that uses the radio fails until then, rather than show
+        // the system prompt from a call the game did not mean as a request.
+        Error require_managers(std::string& message) const
+        {
+            if (!transport_) { message = "Bluetooth backend is not initialized"; return Error::NotInitialized; }
+            if (!managers_created()) { message = "call bluetooth_permission_request first"; return Error::PermissionDenied; }
+            return Error::Ok;
+        }
+
+        void push_permission_result()
+        {
+            BackendEvent ev;
+            ev.type = BackendEventType::PermissionResult;
+            ev.value = static_cast<std::int32_t>(permission_status());
+            hooks_.push_event(std::move(ev));
+        }
+
+        // Both managers report state changes, in any order and more than once;
+        // the first one after the user answered pushes the result and clears
+        // the pending flag, so the result goes out once.
+        void on_manager_state()
+        {
+            if (!permission_pending_ || authorization_not_determined()) return;
+            if (permission_pending_.exchange(false))
+            {
+                GMBT_LOG("Bluetooth permission answered: status %d", static_cast<int>(permission_status()));
+                push_permission_result();
+            }
+        }
+
+        // A fallback for an answer no state change reports: rechecks the
+        // authorization on the main queue until the request is answered or
+        // superseded.
+        void schedule_permission_poll(std::uint64_t generation)
+        {
+            AppleBackend* self = this;
+            std::weak_ptr<int> alive = lifetime_;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kPermissionPollSeconds * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                if (alive.expired()) return;
+                if (self->permission_generation_ != generation || !self->permission_pending_) return;
+                self->on_manager_state();
+                if (self->permission_pending_) self->schedule_permission_poll(generation);
+            });
+        }
 
         std::string id_for_connection(std::uint64_t c) const
         { std::scoped_lock lock(mutex_); auto it=le_connection_to_id_.find(c); return it==le_connection_to_id_.end()?std::string{}:it->second; }
@@ -3003,9 +3234,6 @@ namespace
         }
 
         static constexpr double kClassicSdpTimeoutSeconds = 15.0;
-
-        // Expires with the backend, so delayed blocks can tell it is gone.
-        std::shared_ptr<int> lifetime_ = std::make_shared<int>(0);
 
         // Finds the RFCOMM channel for service_uuid in the device's current SDP
         // records. With allow_any_rfcomm, falls back to the first record that
@@ -3403,17 +3631,14 @@ namespace
 
 #endif // TARGET_OS_OSX
 
-        void on_op_completed(NSNumber* op_id, NSNumber* error_code, LeOpResult result)
+        void on_op_completed(NSNumber* op_id, Error error, std::string message, LeOpResult result)
         {
             BackendEvent ev;
             ev.type = BackendEventType::LeOpCompleted;
             ev.transport = Transport::LowEnergy;
             ev.op_id = op_id ? op_id.unsignedLongLongValue : 0;
-            if (error_code)
-            {
-                ev.error = Error::OperationFailed;
-                ev.value = error_code.intValue;
-            }
+            ev.error = error;
+            ev.message = std::move(message);
             ev.result = std::move(result);
             hooks_.push_event(std::move(ev));
         }

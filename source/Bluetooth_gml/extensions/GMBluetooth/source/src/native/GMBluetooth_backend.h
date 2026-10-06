@@ -26,7 +26,75 @@ namespace gmbluetooth
         ConnectionFailed  = 11,
         Disconnected      = 12,
         OperationFailed   = 13,
+        // An ATT refusal: read/write not permitted, request not supported.
+        NotPermitted      = 14,
+        // An ATT security refusal: authentication, authorization, encryption
+        // or key size.
+        InsufficientSecurity = 15,
     };
+
+    // The BluetoothError an ATT error code reports to GML. Android's GATT
+    // statuses share the ATT values below 0x80.
+    inline Error map_att_error(int att)
+    {
+        switch (att)
+        {
+        case 0x00: return Error::Ok;
+        case 0x02: case 0x03: case 0x06: return Error::NotPermitted;
+        case 0x05: case 0x08: case 0x0C: case 0x0F: return Error::InsufficientSecurity;
+        default: return Error::OperationFailed;
+        }
+    }
+
+    // "ATT error 0x05: insufficient authentication", the message that goes
+    // with map_att_error.
+    inline std::string att_error_message(int att)
+    {
+        const char* name = "unknown error";
+        switch (att)
+        {
+        case 0x01: name = "invalid handle"; break;
+        case 0x02: name = "read not permitted"; break;
+        case 0x03: name = "write not permitted"; break;
+        case 0x04: name = "invalid PDU"; break;
+        case 0x05: name = "insufficient authentication"; break;
+        case 0x06: name = "request not supported"; break;
+        case 0x07: name = "invalid offset"; break;
+        case 0x08: name = "insufficient authorization"; break;
+        case 0x09: name = "prepare queue full"; break;
+        case 0x0A: name = "attribute not found"; break;
+        case 0x0B: name = "attribute not long"; break;
+        case 0x0C: name = "insufficient encryption key size"; break;
+        case 0x0D: name = "invalid attribute value length"; break;
+        case 0x0E: name = "unlikely error"; break;
+        case 0x0F: name = "insufficient encryption"; break;
+        case 0x10: name = "unsupported group type"; break;
+        case 0x11: name = "insufficient resources"; break;
+        default:
+            if (att >= 0x80 && att <= 0x9F)
+                name = "application error";
+            break;
+        }
+
+        static const char hex[] = "0123456789ABCDEF";
+        std::string code = "0x";
+        code += hex[(att >> 4) & 0xF];
+        code += hex[att & 0xF];
+        return "ATT error " + code + ": " + name;
+    }
+
+    // BluetoothLeAttributePermission: Android's PERMISSION_* bits.
+    constexpr std::int32_t kPermissionRead               = 1;
+    constexpr std::int32_t kPermissionReadEncrypted      = 2;
+    constexpr std::int32_t kPermissionReadEncryptedMitm  = 4;
+    constexpr std::int32_t kPermissionWrite              = 16;
+    constexpr std::int32_t kPermissionWriteEncrypted     = 32;
+    constexpr std::int32_t kPermissionWriteEncryptedMitm = 64;
+    constexpr std::int32_t kPermissionWriteSigned        = 128;
+    constexpr std::int32_t kPermissionWriteSignedMitm    = 256;
+    constexpr std::int32_t kPermissionAll = kPermissionRead | kPermissionReadEncrypted |
+        kPermissionReadEncryptedMitm | kPermissionWrite | kPermissionWriteEncrypted |
+        kPermissionWriteEncryptedMitm | kPermissionWriteSigned | kPermissionWriteSignedMitm;
 
     enum class Transport : std::int32_t
     {
@@ -128,6 +196,8 @@ namespace gmbluetooth
         // the call was from its op id.
         LeOpCompleted,
         DevicePaired,
+        // The answer to permission_request: value is the PermissionStatus.
+        PermissionResult,
     };
 
     struct BackendEvent
@@ -202,11 +272,11 @@ namespace gmbluetooth
             return PermissionStatus::Granted;
         }
 
-        virtual Error permission_request(std::string& message)
-        {
-            message.clear();
-            return Error::Ok;
-        }
+        // Ok when the request started or the answer is already known; either
+        // way the backend then pushes one PermissionResult event, value the
+        // PermissionStatus, once the user has answered (at once when known).
+        // Any other error is a pre-flight failure and pushes nothing.
+        virtual Error permission_request(std::string& message) = 0;
 
         virtual Error le_scan_start(bool active, std::string& message) = 0;
         virtual Error le_scan_stop(std::string& message) = 0;

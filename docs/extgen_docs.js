@@ -65,6 +65,7 @@
 
 /**
  * @function_partial bluetooth_permission_request
+ * @param {Function} callback
  * @returns {Enum.BluetoothError}
  * @function_end
  */
@@ -565,7 +566,7 @@
 /**
  * @function_partial bluetooth_le_server_respond_read
  * @param {Real} request_id
- * @param {Real} error_code
+ * @param {Enum.BluetoothAttError} error_code
  * @param {Buffer} data
  * @param {Real} offset
  * @param {Real} size
@@ -576,7 +577,7 @@
 /**
  * @function_partial bluetooth_le_server_respond_write
  * @param {Real} request_id
- * @param {Real} error_code
+ * @param {Enum.BluetoothAttError} error_code
  * @returns {Enum.BluetoothError}
  * @function_end
  */
@@ -778,7 +779,7 @@
  * @member {String} uuid
  * @member {Real} properties
  * @member {Real} permissions
- * @member {String} [value]
+ * @member {Array[Real]} value
  * @member {Array[Struct.BluetoothLeDescriptorDefinition]} descriptors
  * @struct_end
  */
@@ -816,6 +817,31 @@
  * @member ConnectionFailed
  * @member Disconnected
  * @member OperationFailed
+ * @member NotPermitted
+ * @member InsufficientSecurity
+ * @enum_end
+ */
+
+/**
+ * @enum_partial BluetoothAttError
+ * @member Success
+ * @member InvalidHandle
+ * @member ReadNotPermitted
+ * @member WriteNotPermitted
+ * @member InvalidPdu
+ * @member InsufficientAuthentication
+ * @member RequestNotSupported
+ * @member InvalidOffset
+ * @member InsufficientAuthorization
+ * @member PrepareQueueFull
+ * @member AttributeNotFound
+ * @member AttributeNotLong
+ * @member InsufficientEncryptionKeySize
+ * @member InvalidAttributeValueLength
+ * @member UnlikelyError
+ * @member InsufficientEncryption
+ * @member UnsupportedGroupType
+ * @member InsufficientResources
  * @enum_end
  */
 
@@ -854,6 +880,20 @@
  * @member Indicate
  * @member AuthenticatedSignedWrites
  * @member ExtendedProperties
+ * @enum_end
+ */
+
+/**
+ * @enum_partial BluetoothLeAttributePermission
+ * @member None
+ * @member Read
+ * @member ReadEncrypted
+ * @member ReadEncryptedMitm
+ * @member Write
+ * @member WriteEncrypted
+ * @member WriteEncryptedMitm
+ * @member WriteSigned
+ * @member WriteSignedMitm
  * @enum_end
  */
 
