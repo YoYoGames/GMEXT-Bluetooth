@@ -31,6 +31,8 @@
 #include <condition_variable>
 #include <cstdio>
 #include <deque>
+#include <functional>
+#include <future>
 #include <memory>
 #include <optional>
 #include <mutex>
@@ -224,7 +226,8 @@ namespace gmbluetooth
 
         // "connect failed (10060): A connection attempt failed ...", the
         // system text in UTF-8 without the CRLF FormatMessage ends it with.
-        std::string wsa_message(const char* operation, int error)
+        // Winsock and Win32 error codes share the system message table.
+        std::string system_error_message(const char* operation, DWORD error)
         {
             wchar_t* system_message = nullptr;
             const DWORD flags = FORMAT_MESSAGE_ALLOCATE_BUFFER |
@@ -247,14 +250,21 @@ namespace gmbluetooth
             }
             trim_trailing_space(text);
 
-            std::string out(operation ? operation : "Bluetooth socket operation");
-            out += " failed (" + std::to_string(error) + ")";
-            if (!text.empty())
+            std::string out(operation ? operation : "Bluetooth operation");
+            out += " failed";
+            if (error != 0)
+                out += " (" + std::to_string(error) + ")";
+            if (!text.empty() && error != 0)
             {
                 out += ": ";
                 out += text;
             }
             return out;
+        }
+
+        std::string wsa_message(const char* operation, int error)
+        {
+            return system_error_message(operation ? operation : "Bluetooth socket operation", static_cast<DWORD>(error));
         }
 
         // Worker threads can outlive a shutdown that stopped waiting for
@@ -1534,52 +1544,6 @@ namespace gmbluetooth
     }
 
 
-    struct RemoteGattDescriptorState
-    {
-        std::string uuid;
-        WDBG::GattDescriptor descriptor{nullptr};
-    };
-
-    struct RemoteGattCharacteristicState
-    {
-        std::string uuid;
-        WDBG::GattCharacteristic characteristic{nullptr};
-        winrt::event_token value_changed_token{};
-        bool value_changed_registered = false;
-        std::unordered_map<std::string, std::shared_ptr<RemoteGattDescriptorState>> descriptors;
-    };
-
-    struct RemoteGattServiceState
-    {
-        std::string uuid;
-        WDBG::GattDeviceService service{nullptr};
-        std::unordered_map<std::string, std::shared_ptr<RemoteGattCharacteristicState>> characteristics;
-    };
-
-    struct RemoteGattConnectionState
-    {
-        std::uint64_t handle = 0;
-        std::uint64_t device_handle = 0;
-        std::atomic_bool connected{false};
-        std::atomic_bool closing{false};
-        WDB::BluetoothLEDevice device{nullptr};
-        winrt::event_token connection_status_token{};
-        bool connection_status_registered = false;
-        mutable std::mutex mutex;
-        std::mutex operation_mutex;
-        std::unordered_map<std::string, std::shared_ptr<RemoteGattServiceState>> services;
-    };
-
-    struct SharedLeClientState
-    {
-        CoreHooks hooks;
-        std::shared_ptr<std::atomic_bool> alive =
-            std::make_shared<std::atomic_bool>(true);
-
-        mutable std::mutex connections_mutex;
-        std::unordered_map<std::uint64_t, std::shared_ptr<RemoteGattConnectionState>> connections;
-    };
-
     struct WinrtWorkerApartment
     {
         bool owns = false;
@@ -1611,6 +1575,161 @@ namespace gmbluetooth
                 }
             }
         }
+    };
+
+    // One thread running jobs in order. It holds an MTA init for its whole
+    // life, so a job may wait on a WinRT async call; while any worker runs,
+    // the process has an MTA, which is what the game thread's own
+    // non-blocking WinRT calls run in - it never initializes COM itself.
+    class SerialWorker
+    {
+    public:
+        // Null when Windows could not start the thread.
+        static std::shared_ptr<SerialWorker> start(const std::shared_ptr<WorkerTracker>& tracker)
+        {
+            auto worker = std::make_shared<SerialWorker>();
+            if (!spawn_detached_worker(tracker, [worker]() { worker->run(); }))
+                return nullptr;
+            return worker;
+        }
+
+        // False once the worker has stopped; the job is then not run.
+        bool post(std::function<void()> job)
+        {
+            {
+                std::scoped_lock lock(mutex_);
+                if (stopped_)
+                    return false;
+                jobs_.push_back(std::move(job));
+            }
+            wake_.notify_one();
+            return true;
+        }
+
+        // The running job finishes; the queued ones are dropped unrun.
+        void stop()
+        {
+            {
+                std::scoped_lock lock(mutex_);
+                stopped_ = true;
+            }
+            wake_.notify_one();
+        }
+
+    private:
+        void run()
+        {
+            std::optional<WinrtWorkerApartment> apartment;
+            try
+            {
+                apartment.emplace();
+            }
+            catch (const winrt::hresult_error& error)
+            {
+                GMBT_LOG("Bluetooth worker could not enter the MTA: %s", winrt::to_string(error.message()).c_str());
+                stop();
+            }
+
+            for (;;)
+            {
+                std::function<void()> job;
+                // Released here, inside the apartment, with what they captured.
+                std::deque<std::function<void()>> dropped;
+                {
+                    std::unique_lock lock(mutex_);
+                    wake_.wait(lock, [this]() { return stopped_ || !jobs_.empty(); });
+                    if (stopped_)
+                    {
+                        dropped.swap(jobs_);
+                    }
+                    else
+                    {
+                        job = std::move(jobs_.front());
+                        jobs_.pop_front();
+                    }
+                }
+
+                if (!job)
+                    return;
+
+                try
+                {
+                    job();
+                }
+                catch (const winrt::hresult_error& error)
+                {
+                    GMBT_LOG("Bluetooth worker job failed: %s", winrt::to_string(error.message()).c_str());
+                }
+                catch (const std::exception& error)
+                {
+                    GMBT_LOG("Bluetooth worker job failed: %s", error.what());
+                }
+                catch (...)
+                {
+                    GMBT_LOG("Bluetooth worker job failed");
+                }
+            }
+        }
+
+        std::mutex mutex_;
+        std::condition_variable wake_;
+        std::deque<std::function<void()>> jobs_;
+        bool stopped_ = false;
+    };
+
+    struct RemoteGattDescriptorState
+    {
+        std::string uuid;
+        WDBG::GattDescriptor descriptor{nullptr};
+    };
+
+    // Every field is read and written under the connection's mutex.
+    struct RemoteGattCharacteristicState
+    {
+        std::string uuid;
+        WDBG::GattCharacteristic characteristic{nullptr};
+        winrt::event_token value_changed_token{};
+        bool value_changed_registered = false;
+        std::unordered_map<std::string, std::shared_ptr<RemoteGattDescriptorState>> descriptors;
+    };
+
+    struct RemoteGattServiceState
+    {
+        std::string uuid;
+        WDBG::GattDeviceService service{nullptr};
+        std::unordered_map<std::string, std::shared_ptr<RemoteGattCharacteristicState>> characteristics;
+    };
+
+    struct RemoteGattConnectionState
+    {
+        std::uint64_t handle = 0;
+        std::uint64_t device_handle = 0;
+        std::atomic_bool connected{false};
+        std::atomic_bool closing{false};
+        // Set with closing when the peer dropped the link, not the game.
+        std::atomic_bool peer_dropped{false};
+        // Runs this connection's open and every op on it, in order.
+        std::shared_ptr<SerialWorker> worker;
+        WDB::BluetoothLEDevice device{nullptr};
+        // Held with MaintainConnection for the link's life (R1-114).
+        WDBG::GattSession session{nullptr};
+        winrt::event_token connection_status_token{};
+        bool connection_status_registered = false;
+        mutable std::mutex mutex;
+        std::unordered_map<std::string, std::shared_ptr<RemoteGattServiceState>> services;
+    };
+
+    struct SharedLeClientState
+    {
+        CoreHooks hooks;
+        std::shared_ptr<std::atomic_bool> alive =
+            std::make_shared<std::atomic_bool>(true);
+        // The backend worker, set by initialize before any connection exists:
+        // it closes a link the peer dropped.
+        std::shared_ptr<SerialWorker> worker;
+
+        mutable std::mutex connections_mutex;
+        std::unordered_map<std::uint64_t, std::shared_ptr<RemoteGattConnectionState>> connections;
     };
 
     std::string guid_to_uuid_string(const winrt::guid& value)
@@ -1697,7 +1816,7 @@ namespace gmbluetooth
         return { Error::OperationFailed, std::move(message) };
     }
 
-    // What a worker's catch (...) reports.
+    // What a job's catch (...) reports.
     constexpr const char* k_gatt_unexpected_failure =
         "Windows GATT operation failed with an unexpected exception";
 
@@ -1717,9 +1836,9 @@ namespace gmbluetooth
         shared->hooks.push_event(std::move(event));
     }
 
-    // The completion of the LE call the core registered as op_id. Each op
-    // runs on its own thread, so completions arrive in any order; the id is
-    // what the core matches them by.
+    // The completion of the LE call the core registered as op_id. Each
+    // connection runs its ops on its own worker, so completions of different
+    // connections arrive in any order; the id is what the core matches them by.
     void push_le_op_completion(
         const std::shared_ptr<SharedLeClientState>& shared,
         std::uint64_t op_id,
@@ -1767,7 +1886,8 @@ namespace gmbluetooth
     }
 
     constexpr const char* k_le_open_cancelled = "Connection cancelled by bluetooth_le_disconnect";
-    constexpr const char* k_le_worker_failed = "Could not start a thread for the BLE operation";
+    constexpr const char* k_le_open_dropped = "The Bluetooth LE device disconnected while opening";
+    constexpr const char* k_le_attribute_closed = "The GATT attribute was closed with its connection or a re-discovery";
 
     std::shared_ptr<RemoteGattConnectionState> find_le_client_connection(
         const std::shared_ptr<SharedLeClientState>& shared,
@@ -1839,55 +1959,104 @@ namespace gmbluetooth
         return it != characteristic->descriptors.end() ? it->second : nullptr;
     }
 
+    // The WinRT object behind a cached attribute, read under the connection's
+    // mutex; null once a close or a re-discovery dropped it.
+    WDBG::GattDeviceService service_object(
+        const RemoteGattConnectionState& state,
+        const RemoteGattServiceState& service)
+    {
+        std::scoped_lock lock(state.mutex);
+        return service.service;
+    }
+
+    WDBG::GattCharacteristic characteristic_object(
+        const RemoteGattConnectionState& state,
+        const RemoteGattCharacteristicState& characteristic)
+    {
+        std::scoped_lock lock(state.mutex);
+        return characteristic.characteristic;
+    }
+
+    WDBG::GattDescriptor descriptor_object(
+        const RemoteGattConnectionState& state,
+        const RemoteGattDescriptorState& descriptor)
+    {
+        std::scoped_lock lock(state.mutex);
+        return descriptor.descriptor;
+    }
+
+    // Caller holds the connection's mutex.
+    bool service_has_subscription_locked(const RemoteGattServiceState& service)
+    {
+        for (const auto& pair : service.characteristics)
+        {
+            if (pair.second && pair.second->value_changed_registered)
+                return true;
+        }
+        return false;
+    }
+
     void close_remote_characteristic_noexcept(
+        const std::shared_ptr<RemoteGattConnectionState>& state,
         const std::shared_ptr<RemoteGattCharacteristicState>& characteristic)
     {
-        if (!characteristic)
+        if (!state || !characteristic)
             return;
+
+        WDBG::GattCharacteristic object{nullptr};
+        winrt::event_token token{};
+        {
+            std::scoped_lock lock(state->mutex);
+            object = characteristic->characteristic;
+            if (characteristic->value_changed_registered)
+                token = characteristic->value_changed_token;
+            characteristic->value_changed_token = {};
+            characteristic->value_changed_registered = false;
+            characteristic->descriptors.clear();
+            characteristic->characteristic = nullptr;
+        }
 
         try
         {
-            if (characteristic->characteristic &&
-                characteristic->value_changed_registered &&
-                characteristic->value_changed_token.value != 0)
-            {
-                characteristic->characteristic.ValueChanged(
-                    characteristic->value_changed_token);
-            }
+            if (object && token.value != 0)
+                object.ValueChanged(token);
         }
         catch (...)
         {
         }
-
-        characteristic->value_changed_token = {};
-        characteristic->value_changed_registered = false;
-        characteristic->descriptors.clear();
-        characteristic->characteristic = nullptr;
     }
 
     void close_remote_service_noexcept(
+        const std::shared_ptr<RemoteGattConnectionState>& state,
         const std::shared_ptr<RemoteGattServiceState>& service)
     {
-        if (!service)
+        if (!state || !service)
             return;
 
-        for (auto& pair : service->characteristics)
-            close_remote_characteristic_noexcept(pair.second);
+        std::unordered_map<std::string, std::shared_ptr<RemoteGattCharacteristicState>> characteristics;
+        WDBG::GattDeviceService object{nullptr};
+        {
+            std::scoped_lock lock(state->mutex);
+            characteristics.swap(service->characteristics);
+            object = service->service;
+            service->service = nullptr;
+        }
 
-        service->characteristics.clear();
+        for (auto& pair : characteristics)
+            close_remote_characteristic_noexcept(state, pair.second);
 
         try
         {
-            if (service->service)
-                service->service.Close();
+            if (object)
+                object.Close();
         }
         catch (...)
         {
         }
-
-        service->service = nullptr;
     }
 
+    // Closes everything the connection holds and stops its worker; the job
+    // running on it, if any, finishes and the queued ones are dropped.
     void close_le_client_connection_noexcept(
         const std::shared_ptr<RemoteGattConnectionState>& state)
     {
@@ -1896,6 +2065,7 @@ namespace gmbluetooth
 
         std::unordered_map<std::string, std::shared_ptr<RemoteGattServiceState>> services;
         WDB::BluetoothLEDevice device{nullptr};
+        WDBG::GattSession session{nullptr};
         winrt::event_token connection_token{};
         bool remove_connection_token = false;
 
@@ -1904,19 +2074,33 @@ namespace gmbluetooth
             services.swap(state->services);
             device = state->device;
             state->device = nullptr;
+            session = state->session;
+            state->session = nullptr;
             connection_token = state->connection_status_token;
             remove_connection_token = state->connection_status_registered;
             state->connection_status_registered = false;
             state->connection_status_token = {};
         }
 
+        if (state->worker)
+            state->worker->stop();
+
         for (auto& pair : services)
-            close_remote_service_noexcept(pair.second);
+            close_remote_service_noexcept(state, pair.second);
 
         try
         {
             if (device && remove_connection_token && connection_token.value != 0)
                 device.ConnectionStatusChanged(connection_token);
+        }
+        catch (...)
+        {
+        }
+
+        try
+        {
+            if (session)
+                session.Close();
         }
         catch (...)
         {
@@ -1934,6 +2118,1165 @@ namespace gmbluetooth
         state->connected.store(false);
     }
 
+    // A connection's status changed, on a WinRT thread.
+    void le_connection_status_changed(
+        const std::shared_ptr<SharedLeClientState>& shared,
+        const std::shared_ptr<RemoteGattConnectionState>& current,
+        const WDB::BluetoothLEDevice& sender)
+    {
+        if (!shared->alive->load())
+            return;
+
+        bool connected = false;
+        try
+        {
+            connected = sender.ConnectionStatus() == WDB::BluetoothConnectionStatus::Connected;
+        }
+        catch (...)
+        {
+            return;
+        }
+
+        const bool was_connected = current->connected.exchange(connected);
+        if (connected || !was_connected)
+            return;
+
+        // Only a link the game did not close reports; Windows gives no
+        // reason for the loss. It is then closed like one the game closed,
+        // so nothing on it reports or comes back later (R1-114).
+        if (current->closing.exchange(true))
+            return;
+        current->peer_dropped.store(true);
+
+        unregister_le_client_connection(shared, current->handle);
+        push_le_client_event(
+            shared,
+            "bluetooth_le_peripheral_connection_state_changed",
+            "{\"connection\":" +
+                std::to_string(current->handle) +
+                ",\"is_connected\":false" +
+                ",\"error\":" +
+                std::to_string(static_cast<std::int32_t>(Error::Disconnected)) +
+                ",\"message\":\"The Bluetooth LE device disconnected\"}");
+
+        // Its queued ops are dropped now; the device is closed off this
+        // handler, on the backend worker.
+        if (current->worker)
+            current->worker->stop();
+        const auto worker = shared->worker;
+        if (!worker || !worker->post([current]() { close_le_client_connection_noexcept(current); }))
+            close_le_client_connection_noexcept(current);
+    }
+
+    // The open of a connection: the first job on its worker.
+    void open_le_connection(
+        const std::shared_ptr<SharedLeClientState>& shared,
+        const std::shared_ptr<RemoteGattConnectionState>& state,
+        std::uint64_t address,
+        std::optional<WDB::BluetoothAddressType> address_type)
+    {
+        // What it opened is closed and the core told why.
+        const auto fail_open = [&shared, &state](std::int32_t error_code, Error failure, const std::string& why)
+        {
+            state->closing.store(true);
+            close_le_client_connection_noexcept(state);
+            unregister_le_client_connection(shared, state->handle);
+            push_le_client_event(
+                shared,
+                "bluetooth_le_peripheral_open",
+                le_error_json(error_code, state->handle, failure, why));
+        };
+
+        const auto cancelled_message = [&state]()
+        {
+            return state->peer_dropped.load() ? k_le_open_dropped : k_le_open_cancelled;
+        };
+
+        try
+        {
+            if (!shared->alive->load() || state->closing.load())
+                return;
+
+            // The advertised address type, when the scan saw one (R1-182).
+            const auto remote = address_type
+                ? WDB::BluetoothLEDevice::FromBluetoothAddressAsync(address, *address_type).get()
+                : WDB::BluetoothLEDevice::FromBluetoothAddressAsync(address).get();
+
+            if (!remote)
+            {
+                fail_open(1, Error::ConnectionFailed, "Windows found no Bluetooth LE device at this address");
+                return;
+            }
+
+            // le_disconnect sets closing before it takes the state mutex to
+            // close what is stored, so checking under that mutex leaves one
+            // owner for the device: this job if the open was already
+            // cancelled, close otherwise.
+            bool cancelled = false;
+            {
+                std::scoped_lock lock(state->mutex);
+                cancelled = state->closing.load();
+                if (!cancelled)
+                {
+                    state->device = remote;
+
+                    std::weak_ptr<RemoteGattConnectionState> weak_state = state;
+                    state->connection_status_token =
+                        remote.ConnectionStatusChanged(
+                            [shared, weak_state](
+                                const WDB::BluetoothLEDevice& sender,
+                                const WF::IInspectable&)
+                            {
+                                if (const auto current = weak_state.lock())
+                                    le_connection_status_changed(shared, current, sender);
+                            });
+                    state->connection_status_registered = true;
+                }
+            }
+
+            if (cancelled)
+            {
+                try
+                {
+                    remote.Close();
+                }
+                catch (...)
+                {
+                }
+                push_le_client_event(
+                    shared,
+                    "bluetooth_le_peripheral_open",
+                    le_error_json(1, state->handle, Error::ConnectionFailed, cancelled_message()));
+                return;
+            }
+
+            // Windows may drop a link no session holds once it goes idle; the
+            // session keeps it for the connection's life (R1-114).
+            try
+            {
+                auto session = WDBG::GattSession::FromDeviceIdAsync(remote.BluetoothDeviceId()).get();
+                if (session)
+                {
+                    if (session.CanMaintainConnection())
+                        session.MaintainConnection(true);
+
+                    bool keep = false;
+                    {
+                        std::scoped_lock lock(state->mutex);
+                        keep = !state->closing.load();
+                        if (keep)
+                            state->session = session;
+                    }
+                    if (!keep)
+                        session.Close();
+                }
+            }
+            catch (const winrt::hresult_error& error)
+            {
+                GMBT_LOG("No GATT session for the LE connection: %s", winrt::to_string(error.message()).c_str());
+            }
+
+            // An uncached GATT query is intentional here. Microsoft
+            // documents that creating BluetoothLEDevice alone does not
+            // necessarily initiate a physical connection; an uncached
+            // GATT operation does.
+            const auto services_result =
+                remote.GetGattServicesAsync(
+                    WDB::BluetoothCacheMode::Uncached).get();
+
+            if (services_result.Status() !=
+                WDBG::GattCommunicationStatus::Success)
+            {
+                // A peer that never answered is a timeout (the old 133); a
+                // refusal keeps its ATT meaning.
+                const auto status = services_result.Status();
+                const bool unreachable = status == WDBG::GattCommunicationStatus::Unreachable;
+                GattOutcome outcome = gatt_result_outcome(services_result);
+                if (unreachable)
+                {
+                    outcome.error = Error::Timeout;
+                    outcome.message = "The Bluetooth LE device did not answer";
+                }
+                else if (outcome.error == Error::OperationFailed)
+                {
+                    outcome.error = Error::ConnectionFailed;
+                }
+
+                fail_open(unreachable ? 133 : 1, outcome.error, outcome.message);
+                return;
+            }
+
+            std::unordered_map<
+                std::string,
+                std::shared_ptr<RemoteGattServiceState>> services;
+
+            for (const auto& service : services_result.Services())
+            {
+                auto service_state =
+                    std::make_shared<RemoteGattServiceState>();
+                service_state->uuid =
+                    guid_to_uuid_string(service.Uuid());
+                service_state->service = service;
+                services[service_state->uuid] = service_state;
+            }
+
+            {
+                std::scoped_lock lock(state->mutex);
+                cancelled = state->closing.load();
+                if (!cancelled)
+                {
+                    state->services = std::move(services);
+                    state->connected.store(true);
+                }
+            }
+
+            if (cancelled)
+            {
+                // The close already ran; the services found after it are
+                // this job's.
+                for (auto& pair : services)
+                {
+                    try
+                    {
+                        if (pair.second->service)
+                            pair.second->service.Close();
+                    }
+                    catch (...)
+                    {
+                    }
+                }
+                push_le_client_event(
+                    shared,
+                    "bluetooth_le_peripheral_open",
+                    le_error_json(1, state->handle, Error::ConnectionFailed, cancelled_message()));
+                return;
+            }
+
+            push_le_client_event(
+                shared,
+                "bluetooth_le_peripheral_open",
+                "{\"connection\":" +
+                    std::to_string(state->handle) + "}");
+        }
+        catch (const winrt::hresult_error& error)
+        {
+            fail_open(1, Error::ConnectionFailed, gatt_exception_outcome(error).message);
+        }
+        catch (...)
+        {
+            fail_open(1, Error::ConnectionFailed, "Opening the Bluetooth LE device failed with an unexpected exception");
+        }
+    }
+
+    // A local GATT service as le_server_add_service parsed it on the game
+    // thread, for the worker to create.
+    struct LocalDescriptorDefinition
+    {
+        winrt::guid guid{};
+        std::string uuid;
+    };
+
+    struct LocalCharacteristicDefinition
+    {
+        winrt::guid guid{};
+        std::string uuid;
+        std::int32_t properties = 0;
+        std::int32_t permissions = 0;
+        std::vector<std::uint8_t> value;
+        std::vector<LocalDescriptorDefinition> descriptors;
+    };
+
+    struct LocalServiceDefinition
+    {
+        winrt::guid guid{};
+        std::string uuid;
+        std::vector<LocalCharacteristicDefinition> characteristics;
+    };
+
+    // A remote central's GattSession, kept from its first server event
+    // until it closes. Windows has no "central connected" event for a GATT
+    // server; the first request or subscription stands for it, and the
+    // session closing is the disconnect (R1-23).
+    struct ServerSession
+    {
+        WDBG::GattSession session{nullptr};
+        winrt::event_token status_token{};
+    };
+
+    // What the radio, scan, advertise and GATT server handlers touch. They
+    // hold it weakly and never the backend, so a handler still running on
+    // a WinRT thread during bluetooth_shutdown finds it gone or dead
+    // instead of a freed backend (R1-105).
+    struct SharedLeState
+    {
+        CoreHooks hooks;
+        std::atomic_bool alive{true};
+
+        std::atomic<std::int32_t> bluetooth_state{0};
+        std::atomic_bool ble_supported{false};
+        std::atomic_bool le_peripheral_supported{false};
+        std::atomic_bool classic_supported{false};
+        std::mutex radio_mutex;
+        WDR::Radio radio{nullptr};
+        winrt::event_token radio_state_token{};
+
+        std::atomic_bool le_scanning{false};
+        // Bumped by every scan start and stop; a watcher's handlers act only
+        // while theirs is current (R1-187).
+        std::atomic<std::uint64_t> scan_generation{0};
+        std::mutex address_types_mutex;
+        std::unordered_map<std::uint64_t, WDB::BluetoothAddressType> address_types;
+
+        std::atomic_bool le_advertising{false};
+        std::atomic<std::uint64_t> advertise_generation{0};
+
+        // Guards the services, the adds in flight, the server generation
+        // and the advertise parameters start_service_advertising_locked reads.
+        std::mutex services_mutex;
+        std::unordered_map<std::string, std::shared_ptr<LocalGattServiceState>> gatt_services;
+        std::unordered_set<std::string> adding_services;
+        // Bumped by clear and stop; an add finishing under an older one is
+        // dropped.
+        std::uint64_t server_generation = 0;
+        bool advertise_connectable = true;
+        bool advertise_discoverable = true;
+        // The registered services advertise_start listed: only these advertise.
+        std::unordered_set<std::string> advertise_service_uuids;
+        std::unordered_map<std::string, std::vector<std::uint8_t>> advertise_service_data;
+
+        std::mutex gatt_request_mutex;
+        std::unordered_map<std::int32_t, PendingGattRead> pending_gatt_reads;
+        std::unordered_map<std::int32_t, PendingGattWrite> pending_gatt_writes;
+        std::atomic<std::int32_t> next_gatt_request_id{1};
+
+        std::mutex server_sessions_mutex;
+        std::unordered_map<std::string, ServerSession> server_sessions;
+    };
+
+    void push_le_event(const std::shared_ptr<SharedLeState>& le, BackendEvent event)
+    {
+        if (!le || !le->alive.load() || !le->hooks.push_event)
+            return;
+        le->hooks.push_event(std::move(event));
+    }
+
+    void complete_le_op(const std::shared_ptr<SharedLeState>& le, std::uint64_t op_id, Error error, std::string message)
+    {
+        BackendEvent event;
+        event.type = BackendEventType::LeOpCompleted;
+        event.transport = Transport::LowEnergy;
+        event.op_id = op_id;
+        event.error = error;
+        event.message = std::move(message);
+        push_le_event(le, std::move(event));
+    }
+
+    void push_bluetooth_state(const std::shared_ptr<SharedLeState>& le)
+    {
+        BackendEvent event;
+        event.type = BackendEventType::LeEvent;
+        event.transport = Transport::Unknown;
+        event.event_type = "bluetooth_state_changed";
+        event.json = "{\"state\":" + std::to_string(le->bluetooth_state.load()) + "}";
+        push_le_event(le, std::move(event));
+    }
+
+    // A radio the Win32 Classic stack can open.
+    bool has_classic_radio()
+    {
+        BLUETOOTH_FIND_RADIO_PARAMS params{};
+        params.dwSize = sizeof(params);
+        HANDLE radio = nullptr;
+        HBLUETOOTH_RADIO_FIND find = BluetoothFindFirstRadio(&params, &radio);
+        if (!find)
+            return false;
+        BluetoothFindRadioClose(find);
+        if (radio)
+            CloseHandle(radio);
+        return true;
+    }
+
+    // BluetoothState raw values from spec.gmidl.
+    constexpr std::int32_t k_state_unknown = 0;
+    constexpr std::int32_t k_state_unsupported = 2;
+
+    // The adapter and radio query, on the backend worker. A failed query
+    // reports LE as unsupported, never as supported (R1-71); Classic keeps
+    // what the Win32 stack said.
+    void query_adapter(const std::shared_ptr<SharedLeState>& le) noexcept
+    {
+        const auto no_adapter = [&le]()
+        {
+            le->ble_supported.store(false);
+            le->le_peripheral_supported.store(false);
+            le->bluetooth_state.store(le->classic_supported.load() ? k_state_unknown : k_state_unsupported);
+        };
+
+        try
+        {
+            const auto adapter = WDB::BluetoothAdapter::GetDefaultAsync().get();
+            if (!adapter)
+            {
+                no_adapter();
+                return;
+            }
+
+            le->ble_supported.store(adapter.IsLowEnergySupported());
+            le->le_peripheral_supported.store(adapter.IsPeripheralRoleSupported());
+            le->classic_supported.store(adapter.IsClassicSupported());
+
+            const auto radio = adapter.GetRadioAsync().get();
+            if (!radio)
+            {
+                le->bluetooth_state.store(k_state_unknown);
+                return;
+            }
+            le->bluetooth_state.store(normalized_radio_state(radio.State()));
+
+            std::weak_ptr<SharedLeState> weak = le;
+            std::scoped_lock lock(le->radio_mutex);
+            if (!le->alive.load())
+                return;
+            le->radio = radio;
+            le->radio_state_token = radio.StateChanged(
+                [weak](const WDR::Radio& sender, const WF::IInspectable&)
+                {
+                    const auto current = weak.lock();
+                    if (!current || !current->alive.load())
+                        return;
+                    try
+                    {
+                        current->bluetooth_state.store(normalized_radio_state(sender.State()));
+                    }
+                    catch (...)
+                    {
+                        return;
+                    }
+                    push_bluetooth_state(current);
+                });
+        }
+        catch (const winrt::hresult_error& error)
+        {
+            GMBT_LOG("Windows Bluetooth adapter query failed: %s", winrt::to_string(error.message()).c_str());
+            no_adapter();
+        }
+        catch (...)
+        {
+            GMBT_LOG("Windows Bluetooth adapter query failed");
+            no_adapter();
+        }
+    }
+
+    constexpr std::size_t k_max_address_types = 1024;
+
+    void remember_address_type(SharedLeState& le, std::uint64_t address, WDB::BluetoothAddressType type)
+    {
+        std::scoped_lock lock(le.address_types_mutex);
+        if (le.address_types.size() >= k_max_address_types &&
+            le.address_types.find(address) == le.address_types.end())
+        {
+            le.address_types.clear();
+        }
+        le.address_types[address] = type;
+    }
+
+    std::optional<WDB::BluetoothAddressType> find_address_type(SharedLeState& le, std::uint64_t address)
+    {
+        std::scoped_lock lock(le.address_types_mutex);
+        const auto it = le.address_types.find(address);
+        if (it == le.address_types.end())
+            return std::nullopt;
+        return it->second;
+    }
+
+    void push_server_connection_state(
+        const std::shared_ptr<SharedLeState>& le,
+        const std::string& central,
+        const std::string& address,
+        bool connected)
+    {
+        if (central.empty())
+            return;
+
+        BackendEvent event;
+        event.type = BackendEventType::LeEvent;
+        event.transport = Transport::LowEnergy;
+        event.event_type = "bluetooth_le_server_connection_state_changed";
+        event.json = std::string("{\"connected\":") + (connected ? "true" : "false") + "," +
+            server_central_json(central, address) + "}";
+        push_le_event(le, std::move(event));
+    }
+
+    void server_session_closed(
+        const std::shared_ptr<SharedLeState>& le,
+        const std::string& central,
+        const std::string& address)
+    {
+        ServerSession entry;
+        {
+            std::scoped_lock lock(le->server_sessions_mutex);
+            const auto it = le->server_sessions.find(central);
+            if (it == le->server_sessions.end())
+                return;
+            entry = std::move(it->second);
+            le->server_sessions.erase(it);
+        }
+
+        try
+        {
+            entry.session.SessionStatusChanged(entry.status_token);
+        }
+        catch (...)
+        {
+        }
+        push_server_connection_state(le, central, address, false);
+    }
+
+    // The key the core knows the central by - its session's device id -
+    // registering the session on first sight; is_new says it was. Empty for
+    // a session that names no device.
+    std::string note_server_session(
+        const std::shared_ptr<SharedLeState>& le,
+        const WDBG::GattSession& session,
+        std::string& address,
+        bool& is_new)
+    {
+        is_new = false;
+        if (!session)
+            return std::string();
+
+        std::string central;
+        try
+        {
+            central = winrt::to_string(session.DeviceId().Id());
+        }
+        catch (...)
+        {
+            return std::string();
+        }
+        address = address_from_device_id(central);
+
+        std::scoped_lock lock(le->server_sessions_mutex);
+        if (le->server_sessions.find(central) != le->server_sessions.end())
+            return central;
+
+        ServerSession entry;
+        entry.session = session;
+        try
+        {
+            std::weak_ptr<SharedLeState> weak = le;
+            entry.status_token = session.SessionStatusChanged(
+                [weak, central, address](const WDBG::GattSession&, const WDBG::GattSessionStatusChangedEventArgs& args)
+                {
+                    const auto current = weak.lock();
+                    if (current && current->alive.load() && args.Status() == WDBG::GattSessionStatus::Closed)
+                        server_session_closed(current, central, address);
+                });
+        }
+        catch (...)
+        {
+        }
+        le->server_sessions.emplace(central, std::move(entry));
+        is_new = true;
+        return central;
+    }
+
+    // The server stopped: the core retires every central itself, so the
+    // sessions are only let go.
+    void release_server_sessions_noexcept(const std::shared_ptr<SharedLeState>& le) noexcept
+    {
+        std::unordered_map<std::string, ServerSession> sessions;
+        {
+            std::scoped_lock lock(le->server_sessions_mutex);
+            sessions.swap(le->server_sessions);
+        }
+
+        for (auto& [_, entry] : sessions)
+        {
+            try
+            {
+                entry.session.SessionStatusChanged(entry.status_token);
+            }
+            catch (...)
+            {
+            }
+        }
+    }
+
+    // Caller holds le.services_mutex.
+    void start_service_advertising_locked(
+        SharedLeState& le,
+        const std::shared_ptr<LocalGattServiceState>& service)
+    {
+        if (!service || !service->provider)
+            return;
+        if (le.advertise_service_uuids.find(service->uuid) == le.advertise_service_uuids.end())
+            return;
+
+        WDBG::GattServiceProviderAdvertisingParameters parameters;
+        parameters.IsConnectable(le.advertise_connectable);
+        parameters.IsDiscoverable(le.advertise_discoverable);
+
+        const auto data_it = le.advertise_service_data.find(service->uuid);
+        if (data_it != le.advertise_service_data.end() && !data_it->second.empty())
+            parameters.ServiceData(bytes_to_buffer(data_it->second));
+
+        service->provider.StartAdvertising(parameters);
+    }
+
+    void revoke_advertise_handlers(const std::shared_ptr<AdvertiseStartTracker>& tracker) noexcept
+    {
+        std::vector<std::pair<WDBG::GattServiceProvider, winrt::event_token>> providers;
+        {
+            std::scoped_lock lock(tracker->mutex);
+            providers.swap(tracker->providers);
+        }
+
+        for (auto& [provider, token] : providers)
+        {
+            try
+            {
+                provider.AdvertisementStatusChanged(token);
+            }
+            catch (...)
+            {
+            }
+        }
+    }
+
+    // Completes the start once. False when it was already completed.
+    bool finish_advertise_start(
+        const std::shared_ptr<SharedLeState>& le,
+        const std::shared_ptr<AdvertiseStartTracker>& tracker,
+        Error error,
+        std::string message)
+    {
+        if (tracker->done.exchange(true))
+            return false;
+
+        revoke_advertise_handlers(tracker);
+        complete_le_op(le, tracker->op_id, error, std::move(message));
+        return true;
+    }
+
+    void advertise_start_progress(
+        const std::shared_ptr<SharedLeState>& le,
+        const std::shared_ptr<AdvertiseStartTracker>& tracker)
+    {
+        if (tracker->remaining.fetch_sub(1) == 1)
+            finish_advertise_start(le, tracker, Error::Ok, {});
+    }
+
+    // A failed start leaves nothing it began advertising, unless a newer
+    // start already owns the advertisers.
+    void advertise_start_failed(
+        const std::shared_ptr<SharedLeState>& le,
+        const std::shared_ptr<AdvertiseStartTracker>& tracker,
+        Error error,
+        std::string message)
+    {
+        WDBA::BluetoothLEAdvertisementPublisher publisher{nullptr};
+        std::vector<WDBG::GattServiceProvider> providers;
+        {
+            std::scoped_lock lock(tracker->mutex);
+            publisher = tracker->publisher;
+            for (const auto& pair : tracker->providers)
+                providers.push_back(pair.first);
+        }
+
+        if (!finish_advertise_start(le, tracker, error, std::move(message)))
+            return;
+
+        if (tracker->generation != le->advertise_generation.load())
+            return;
+
+        try
+        {
+            if (publisher)
+                publisher.Stop();
+        }
+        catch (...)
+        {
+        }
+
+        for (auto& provider : providers)
+        {
+            try
+            {
+                provider.StopAdvertising();
+            }
+            catch (...)
+            {
+            }
+        }
+
+        le->le_advertising.store(false);
+    }
+
+    // A read request on a local characteristic, or on one of its
+    // descriptors when descriptor_uuid is set; on a WinRT thread.
+    void on_local_read_request(
+        const std::shared_ptr<SharedLeState>& le,
+        const std::string& service_uuid,
+        const std::string& characteristic_uuid,
+        const std::string& descriptor_uuid,
+        const WDBG::GattReadRequestedEventArgs& args)
+    {
+        const auto deferral = args.GetDeferral();
+        try
+        {
+            if (!le || !le->alive.load())
+            {
+                deferral.Complete();
+                return;
+            }
+
+            const auto request = args.GetRequestAsync().get();
+            if (!request)
+            {
+                deferral.Complete();
+                return;
+            }
+
+            const std::int32_t request_id = le->next_gatt_request_id.fetch_add(1);
+            {
+                std::scoped_lock lock(le->gatt_request_mutex);
+                le->pending_gatt_reads[request_id] = PendingGattRead{request, deferral};
+            }
+
+            std::string central_address;
+            bool central_is_new = false;
+            const std::string central = note_server_session(le, args.Session(), central_address, central_is_new);
+
+            BackendEvent event;
+            event.type = BackendEventType::LeEvent;
+            event.transport = Transport::LowEnergy;
+            event.event_type = descriptor_uuid.empty()
+                ? "bluetooth_le_server_characteristic_read_request"
+                : "bluetooth_le_server_descriptor_read_request";
+            event.json = make_server_request_json(
+                request_id,
+                central,
+                central_address,
+                service_uuid,
+                characteristic_uuid,
+                descriptor_uuid,
+                request.Offset(),
+                nullptr);
+            push_le_event(le, std::move(event));
+        }
+        catch (...)
+        {
+            try { deferral.Complete(); } catch (...) {}
+        }
+    }
+
+    // A write request on a local characteristic, or on one of its
+    // descriptors when descriptor_uuid is set; on a WinRT thread.
+    void on_local_write_request(
+        const std::shared_ptr<SharedLeState>& le,
+        const std::string& service_uuid,
+        const std::string& characteristic_uuid,
+        const std::string& descriptor_uuid,
+        const WDBG::GattWriteRequestedEventArgs& args)
+    {
+        const auto deferral = args.GetDeferral();
+        try
+        {
+            if (!le || !le->alive.load())
+            {
+                deferral.Complete();
+                return;
+            }
+
+            const auto request = args.GetRequestAsync().get();
+            if (!request)
+            {
+                deferral.Complete();
+                return;
+            }
+
+            const std::vector<std::uint8_t> value = buffer_to_bytes(request.Value());
+            const bool with_response = request.Option() == WDBG::GattWriteOption::WriteWithResponse;
+            const std::int32_t request_id = le->next_gatt_request_id.fetch_add(1);
+            // A write without response needs no answer: it is completed now and
+            // the core keeps its value for GML, instead of the deferral waiting
+            // on a respond_write nothing obliges the game to send.
+            if (with_response)
+            {
+                std::scoped_lock lock(le->gatt_request_mutex);
+                le->pending_gatt_writes[request_id] = PendingGattWrite{request, deferral, with_response};
+            }
+            else
+            {
+                deferral.Complete();
+            }
+
+            std::string central_address;
+            bool central_is_new = false;
+            const std::string central = note_server_session(le, args.Session(), central_address, central_is_new);
+
+            BackendEvent event;
+            event.type = BackendEventType::LeEvent;
+            event.transport = Transport::LowEnergy;
+            event.event_type = descriptor_uuid.empty()
+                ? "bluetooth_le_server_characteristic_write_request"
+                : "bluetooth_le_server_descriptor_write_request";
+            event.json = make_server_request_json(
+                request_id,
+                central,
+                central_address,
+                service_uuid,
+                characteristic_uuid,
+                descriptor_uuid,
+                request.Offset(),
+                &value,
+                with_response);
+            push_le_event(le, std::move(event));
+        }
+        catch (...)
+        {
+            try { deferral.Complete(); } catch (...) {}
+        }
+    }
+
+    // Stops a service advertising and revokes every handler it registered,
+    // so nothing it held fires after it is dropped (R1-105).
+    void release_local_service_noexcept(LocalGattServiceState& service) noexcept
+    {
+        try
+        {
+            if (service.provider)
+                service.provider.StopAdvertising();
+        }
+        catch (...)
+        {
+        }
+
+        for (auto& [_, characteristic] : service.characteristics)
+        {
+            if (!characteristic || !characteristic->characteristic)
+                continue;
+
+            try
+            {
+                if (characteristic->read_token.value != 0)
+                    characteristic->characteristic.ReadRequested(characteristic->read_token);
+                if (characteristic->write_token.value != 0)
+                    characteristic->characteristic.WriteRequested(characteristic->write_token);
+                if (characteristic->subscribed_token.value != 0)
+                    characteristic->characteristic.SubscribedClientsChanged(characteristic->subscribed_token);
+            }
+            catch (...)
+            {
+            }
+
+            for (auto& descriptor : characteristic->descriptors)
+            {
+                if (!descriptor || !descriptor->descriptor)
+                    continue;
+
+                try
+                {
+                    if (descriptor->read_token.value != 0)
+                        descriptor->descriptor.ReadRequested(descriptor->read_token);
+                    if (descriptor->write_token.value != 0)
+                        descriptor->descriptor.WriteRequested(descriptor->write_token);
+                }
+                catch (...)
+                {
+                }
+            }
+        }
+
+        service.characteristics.clear();
+        service.provider = nullptr;
+    }
+
+    // Everything le_server_add_service can refuse, checked on the game
+    // thread before any WinRT call.
+    Error parse_local_service(const std::string& service_json, LocalServiceDefinition& out, std::string& message)
+    {
+        const auto root = json::parse(service_json);
+        if (!root || !root->is_object())
+        {
+            message = "Invalid BLE service definition";
+            return Error::InvalidArgument;
+        }
+
+        const auto* uuid_field = root->find("uuid");
+        if (!uuid_field || !uuid_field->is_string() || uuid_field->string_value.empty())
+        {
+            message = "BLE service UUID is required";
+            return Error::InvalidArgument;
+        }
+
+        if (!parse_winrt_guid(uuid_field->string_value, out.guid))
+        {
+            message = "Invalid BLE service UUID";
+            return Error::InvalidArgument;
+        }
+        out.uuid = normalize_uuid(uuid_field->string_value);
+
+        const auto* characteristics = root->find("characteristics");
+        if (!characteristics || !characteristics->is_array())
+            return Error::Ok;
+
+        for (const auto& characteristic_value : characteristics->array_value)
+        {
+            if (!characteristic_value.is_object())
+                continue;
+
+            const auto* permissions_field = characteristic_value.find("permissions");
+            const std::int32_t permissions = permissions_field ? permissions_field->as_int(0) : 0;
+            // Windows has no protection level for a signed write.
+            if ((permissions & (kPermissionWriteSigned | kPermissionWriteSignedMitm)) != 0)
+            {
+                message = "Windows has no signed-write permission: "
+                    "BluetoothLeAttributePermission.WriteSigned and WriteSignedMitm are not supported";
+                return Error::NotSupported;
+            }
+
+            const auto* char_uuid_field = characteristic_value.find("uuid");
+            if (!char_uuid_field || !char_uuid_field->is_string())
+                continue;
+
+            LocalCharacteristicDefinition characteristic;
+            if (!parse_winrt_guid(char_uuid_field->string_value, characteristic.guid))
+            {
+                message = "Invalid BLE characteristic UUID";
+                return Error::InvalidArgument;
+            }
+            characteristic.uuid = normalize_uuid(char_uuid_field->string_value);
+
+            const auto* properties_field = characteristic_value.find("properties");
+            characteristic.properties = properties_field ? properties_field->as_int(0) : 0;
+            characteristic.permissions = permissions;
+
+            if (const auto* initial_value = characteristic_value.find("value");
+                initial_value && initial_value->is_string() && !initial_value->string_value.empty())
+            {
+                characteristic.value = json::base64_decode(initial_value->string_value);
+            }
+
+            if (const auto* descriptors = characteristic_value.find("descriptors"); descriptors && descriptors->is_array())
+            {
+                for (const auto& descriptor_value : descriptors->array_value)
+                {
+                    if (!descriptor_value.is_object())
+                        continue;
+                    const auto* descriptor_uuid_field = descriptor_value.find("uuid");
+                    if (!descriptor_uuid_field || !descriptor_uuid_field->is_string())
+                        continue;
+
+                    LocalDescriptorDefinition descriptor;
+                    if (!parse_winrt_guid(descriptor_uuid_field->string_value, descriptor.guid))
+                    {
+                        message = "Invalid BLE descriptor UUID";
+                        return Error::InvalidArgument;
+                    }
+                    descriptor.uuid = normalize_uuid(descriptor_uuid_field->string_value);
+
+                    // Windows creates the Client Characteristic Configuration
+                    // descriptor automatically for Notify/Indicate characteristics.
+                    if (descriptor.uuid == "00002902-0000-1000-8000-00805f9b34fb")
+                        continue;
+
+                    characteristic.descriptors.push_back(std::move(descriptor));
+                }
+            }
+
+            out.characteristics.push_back(std::move(characteristic));
+        }
+
+        return Error::Ok;
+    }
+
+    // Creates the service le_server_add_service accepted, on the backend
+    // worker: each Create*Async waits on WinRT (R1-103). generation is the
+    // server generation the add started under.
+    void build_local_service(
+        const std::shared_ptr<SharedLeState>& le,
+        std::uint64_t op_id,
+        const LocalServiceDefinition& definition,
+        std::uint64_t generation)
+    {
+        const auto fail = [&le, op_id, &definition](Error error, std::string why)
+        {
+            {
+                std::scoped_lock lock(le->services_mutex);
+                le->adding_services.erase(definition.uuid);
+            }
+            complete_le_op(le, op_id, error, std::move(why));
+        };
+
+        auto service_state = std::make_shared<LocalGattServiceState>();
+        service_state->uuid = definition.uuid;
+
+        try
+        {
+            const auto provider_result = WDBG::GattServiceProvider::CreateAsync(definition.guid).get();
+            if (provider_result.Error() != WDB::BluetoothError::Success || !provider_result.ServiceProvider())
+            {
+                fail(map_bluetooth_error(provider_result.Error()), bluetooth_error_message(provider_result.Error()));
+                return;
+            }
+            service_state->provider = provider_result.ServiceProvider();
+
+            const std::weak_ptr<SharedLeState> weak = le;
+            const std::string& service_uuid = definition.uuid;
+
+            for (const auto& characteristic : definition.characteristics)
+            {
+                const std::string& characteristic_uuid = characteristic.uuid;
+
+                WDBG::GattLocalCharacteristicParameters parameters;
+                // Windows local GATT rejects Broadcast. All other raw
+                // BluetoothLeCharacteristicProperty values map directly.
+                parameters.CharacteristicProperties(
+                    static_cast<WDBG::GattCharacteristicProperties>(characteristic.properties & ~1));
+                parameters.ReadProtectionLevel(read_protection_from_permissions(characteristic.permissions));
+                parameters.WriteProtectionLevel(write_protection_from_permissions(characteristic.permissions));
+                if (!characteristic.value.empty())
+                    parameters.StaticValue(bytes_to_buffer(characteristic.value));
+
+                const auto characteristic_result = service_state->provider.Service()
+                    .CreateCharacteristicAsync(characteristic.guid, parameters).get();
+                if (characteristic_result.Error() != WDB::BluetoothError::Success || !characteristic_result.Characteristic())
+                {
+                    release_local_service_noexcept(*service_state);
+                    fail(map_bluetooth_error(characteristic_result.Error()), bluetooth_error_message(characteristic_result.Error()));
+                    return;
+                }
+
+                auto characteristic_state = std::make_shared<LocalGattCharacteristicState>();
+                characteristic_state->service_uuid = service_uuid;
+                characteristic_state->characteristic_uuid = characteristic_uuid;
+                characteristic_state->characteristic = characteristic_result.Characteristic();
+                // In the map before any handler is registered, so a failure
+                // below revokes every one already in place.
+                service_state->characteristics[characteristic_uuid] = characteristic_state;
+
+                characteristic_state->subscribed_token = characteristic_state->characteristic.SubscribedClientsChanged(
+                    [weak](const WDBG::GattLocalCharacteristic& local, const WF::IInspectable&)
+                    {
+                        const auto current = weak.lock();
+                        if (!current || !current->alive.load())
+                            return;
+
+                        try
+                        {
+                            for (const auto& client : local.SubscribedClients())
+                            {
+                                std::string address;
+                                bool is_new = false;
+                                const std::string central = note_server_session(current, client.Session(), address, is_new);
+                                if (is_new)
+                                    push_server_connection_state(current, central, address, true);
+                            }
+                        }
+                        catch (...)
+                        {
+                        }
+                    });
+
+                characteristic_state->read_token = characteristic_state->characteristic.ReadRequested(
+                    [weak, service_uuid, characteristic_uuid](
+                        const WDBG::GattLocalCharacteristic&,
+                        const WDBG::GattReadRequestedEventArgs& args)
+                    {
+                        on_local_read_request(weak.lock(), service_uuid, characteristic_uuid, std::string(), args);
+                    });
+
+                characteristic_state->write_token = characteristic_state->characteristic.WriteRequested(
+                    [weak, service_uuid, characteristic_uuid](
+                        const WDBG::GattLocalCharacteristic&,
+                        const WDBG::GattWriteRequestedEventArgs& args)
+                    {
+                        on_local_write_request(weak.lock(), service_uuid, characteristic_uuid, std::string(), args);
+                    });
+
+                for (const auto& descriptor : characteristic.descriptors)
+                {
+                    const std::string& descriptor_uuid = descriptor.uuid;
+
+                    WDBG::GattLocalDescriptorParameters descriptor_parameters;
+                    descriptor_parameters.ReadProtectionLevel(WDBG::GattProtectionLevel::Plain);
+                    descriptor_parameters.WriteProtectionLevel(WDBG::GattProtectionLevel::Plain);
+
+                    const auto descriptor_result = characteristic_state->characteristic
+                        .CreateDescriptorAsync(descriptor.guid, descriptor_parameters).get();
+                    if (descriptor_result.Error() != WDB::BluetoothError::Success || !descriptor_result.Descriptor())
+                    {
+                        release_local_service_noexcept(*service_state);
+                        fail(map_bluetooth_error(descriptor_result.Error()), bluetooth_error_message(descriptor_result.Error()));
+                        return;
+                    }
+
+                    auto descriptor_state = std::make_shared<LocalGattDescriptorState>();
+                    descriptor_state->descriptor = descriptor_result.Descriptor();
+                    characteristic_state->descriptors.push_back(descriptor_state);
+
+                    descriptor_state->read_token = descriptor_state->descriptor.ReadRequested(
+                        [weak, service_uuid, characteristic_uuid, descriptor_uuid](
+                            const WDBG::GattLocalDescriptor&,
+                            const WDBG::GattReadRequestedEventArgs& args)
+                        {
+                            on_local_read_request(weak.lock(), service_uuid, characteristic_uuid, descriptor_uuid, args);
+                        });
+
+                    descriptor_state->write_token = descriptor_state->descriptor.WriteRequested(
+                        [weak, service_uuid, characteristic_uuid, descriptor_uuid](
+                            const WDBG::GattLocalDescriptor&,
+                            const WDBG::GattWriteRequestedEventArgs& args)
+                        {
+                            on_local_write_request(weak.lock(), service_uuid, characteristic_uuid, descriptor_uuid, args);
+                        });
+                }
+            }
+        }
+        catch (const winrt::hresult_error& error)
+        {
+            release_local_service_noexcept(*service_state);
+            fail(Error::OperationFailed, winrt::to_string(error.message()));
+            return;
+        }
+
+        bool dropped = false;
+        std::string advertise_failure;
+        {
+            std::scoped_lock lock(le->services_mutex);
+            le->adding_services.erase(definition.uuid);
+            dropped = le->server_generation != generation || !le->alive.load();
+            if (!dropped)
+            {
+                le->gatt_services[definition.uuid] = service_state;
+                if (le->le_advertising.load())
+                {
+                    try
+                    {
+                        start_service_advertising_locked(*le, service_state);
+                    }
+                    catch (const winrt::hresult_error& error)
+                    {
+                        advertise_failure = winrt::to_string(error.message());
+                    }
+                }
+            }
+        }
+
+        if (dropped)
+        {
+            release_local_service_noexcept(*service_state);
+            complete_le_op(le, op_id, Error::OperationFailed, "The GATT services were cleared before the service was added");
+            return;
+        }
+
+        if (!advertise_failure.empty())
+            GMBT_LOG("The added GATT service could not start advertising: %s", advertise_failure.c_str());
+        complete_le_op(le, op_id, Error::Ok, {});
+    }
+
     class WindowsBackend final : public Backend
     {
     public:
@@ -1945,6 +3288,7 @@ namespace gmbluetooth
             classic_->hooks = hooks_;
             classic_->workers = workers_;
             le_client_->hooks = hooks_;
+            le_->hooks = hooks_;
         }
 
         Error initialize(std::string& message) override
@@ -1954,20 +3298,9 @@ namespace gmbluetooth
 
             pin_module();
 
-            try
-            {
-                winrt::init_apartment(winrt::apartment_type::multi_threaded);
-                owns_apartment_ = true;
-            }
-            catch (const winrt::hresult_error& error)
-            {
-                if (error.code() != winrt::hresult{RPC_E_CHANGED_MODE})
-                {
-                    message = winrt::to_string(error.message());
-                    return Error::OperationFailed;
-                }
-            }
-
+            // Nothing here touches the game thread's COM apartment (R1-104):
+            // WinRT waits run on le_worker_, whose MTA also serves the game
+            // thread's own non-blocking WinRT calls.
             WSADATA wsa{};
             const int wsa_result = WSAStartup(MAKEWORD(2, 2), &wsa);
             if (wsa_result != 0)
@@ -1975,58 +3308,40 @@ namespace gmbluetooth
                 message = wsa_message("WSAStartup", wsa_result);
                 return Error::OperationFailed;
             }
+
+            le_worker_ = SerialWorker::start(workers_);
+            if (!le_worker_)
+            {
+                WSACleanup();
+                message = "Could not start the Bluetooth worker thread";
+                return Error::OperationFailed;
+            }
             winsock_initialized_ = true;
+            le_client_->worker = le_worker_;
 
-            try
-            {
-                bluetooth_adapter_ = WDB::BluetoothAdapter::GetDefaultAsync().get();
-                if (bluetooth_adapter_)
-                {
-                    ble_supported_ = bluetooth_adapter_.IsLowEnergySupported();
-                    le_peripheral_supported_ = bluetooth_adapter_.IsPeripheralRoleSupported();
-                    bluetooth_radio_ = bluetooth_adapter_.GetRadioAsync().get();
-                    if (bluetooth_radio_)
-                    {
-                        bluetooth_state_.store(normalized_radio_state(bluetooth_radio_.State()));
-                        radio_state_token_ = bluetooth_radio_.StateChanged(
-                            [this](const WDR::Radio& radio, const winrt::Windows::Foundation::IInspectable&)
-                            {
-                                const std::int32_t state = normalized_radio_state(radio.State());
-                                bluetooth_state_.store(state);
+            // Classic is known from the Win32 stack at once; the adapter
+            // query refines it.
+            le_->classic_supported.store(has_classic_radio());
 
-                                if (hooks_.push_event)
-                                {
-                                    BackendEvent event;
-                                    event.type = BackendEventType::LeEvent;
-                                    event.transport = Transport::Unknown;
-                                    event.event_type = "bluetooth_state_changed";
-                                    event.json = "{\"state\":" + std::to_string(state) + "}";
-                                    hooks_.push_event(std::move(event));
-                                }
-                            });
-                    }
-                    else
-                    {
-                        bluetooth_state_.store(0);
-                    }
-                }
-                else
-                {
-                    ble_supported_ = false;
-                    le_peripheral_supported_ = false;
-                    bluetooth_state_.store(2); // Unsupported
-                }
-            }
-            catch (...)
+            // The adapter query waits on WinRT, so it runs on the worker
+            // (R1-103). bluetooth_initialize is synchronous and games read
+            // the capabilities right after it, so the query gets a few
+            // seconds; an answer later than that still sets them and reports
+            // the state.
+            auto waiting = std::make_shared<std::atomic_bool>(true);
+            auto answered = std::make_shared<std::promise<void>>();
+            std::future<void> answer = answered->get_future();
+            const auto le = le_;
+            le_worker_->post([le, waiting, answered]()
             {
-                // Bluetooth Classic still works through the Win32 APIs even if
-                // the WinRT adapter query is unavailable. Keep initialization alive.
-                bluetooth_adapter_ = nullptr;
-                bluetooth_radio_ = nullptr;
-                ble_supported_ = true;
-                le_peripheral_supported_ = true;
-                bluetooth_state_.store(0);
-            }
+                query_adapter(le);
+                answered->set_value();
+                if (!waiting->exchange(false))
+                    push_bluetooth_state(le);
+            });
+
+            if (answer.wait_for(std::chrono::seconds(3)) != std::future_status::ready && waiting->exchange(false))
+                GMBT_LOG("The Windows Bluetooth adapter did not answer within 3 s; its capabilities follow when it does");
 
             initialized_ = true;
             message.clear();
@@ -2070,6 +3385,9 @@ namespace gmbluetooth
                 le_client_->connections.clear();
             }
 
+            // From here no WinRT handler reports or touches anything.
+            le_->alive.store(false);
+
             for (const auto& state : le_connections)
             {
                 state->closing.store(true);
@@ -2095,11 +3413,15 @@ namespace gmbluetooth
             release_watcher_noexcept();
             release_radio_noexcept();
 
+            // Last: its MTA served every WinRT call above.
+            if (le_worker_)
+                le_worker_->stop();
+
             // Everything is asked to stop; every thread the backend started
-            // gets a bounded window to finish. Tearing down Winsock or COM
-            // while a worker still has a call in flight is undefined
-            // behavior, so a worker still running past it leaves both up
-            // (the module is pinned, so its code stays mapped).
+            // gets a bounded window to finish. Tearing down Winsock while a
+            // worker still has a call in flight is undefined behavior, so a
+            // worker still running past it leaves it up (the module is
+            // pinned, so its code stays mapped).
             std::size_t remaining = 0;
             const bool drained = wait_for_workers(*workers_, std::chrono::seconds(5), remaining);
 
@@ -2115,28 +3437,24 @@ namespace gmbluetooth
             {
                 if (winsock_initialized_)
                     WSACleanup();
-
-                if (owns_apartment_)
-                    winrt::uninit_apartment();
             }
             else
             {
                 GMBT_LOG(
                     "Bluetooth shutdown: %zu worker thread(s) still running after 5 s; "
-                    "leaving Winsock and the COM apartment initialized",
+                    "leaving Winsock initialized",
                     remaining);
             }
 
             winsock_initialized_ = false;
-            owns_apartment_ = false;
             initialized_ = false;
         }
 
-        bool supports_ble() const override { return ble_supported_; }
-        bool supports_le_advertise() const override { return ble_supported_ && le_peripheral_supported_; }
-        bool supports_le_server() const override { return ble_supported_ && le_peripheral_supported_; }
-        bool supports_classic() const override { return true; }
-        bool supports_classic_server() const override { return true; }
+        bool supports_ble() const override { return le_->ble_supported.load(); }
+        bool supports_le_advertise() const override { return le_->ble_supported.load() && le_->le_peripheral_supported.load(); }
+        bool supports_le_server() const override { return le_->ble_supported.load() && le_->le_peripheral_supported.load(); }
+        bool supports_classic() const override { return le_->classic_supported.load(); }
+        bool supports_classic_server() const override { return le_->classic_supported.load(); }
 
         // Kept platform-local for now. The shared Backend interface can expose
         // this directly in the later common-source step.
@@ -2147,7 +3465,7 @@ namespace gmbluetooth
 
         std::int32_t current_bluetooth_state() const
         {
-            return bluetooth_state_.load();
+            return le_->bluetooth_state.load();
         }
 
         PermissionStatus permission_status() const override
@@ -2179,7 +3497,7 @@ namespace gmbluetooth
                 return Error::NotInitialized;
             }
 
-            if (le_scanning_.load())
+            if (le_->le_scanning.load())
             {
                 message.clear();
                 return Error::Ok;
@@ -2194,11 +3512,20 @@ namespace gmbluetooth
                         ? WDBA::BluetoothLEScanningMode::Active
                         : WDBA::BluetoothLEScanningMode::Passive);
 
+                // An event from an earlier watcher is stale once this
+                // generation is current (R1-187).
+                const std::uint64_t generation = ++le_->scan_generation;
+                const std::weak_ptr<SharedLeState> weak = le_;
+
                 received_token_ = watcher_.Received(
-                    [this](
+                    [weak, generation](
                         const WDBA::BluetoothLEAdvertisementWatcher&,
                         const WDBA::BluetoothLEAdvertisementReceivedEventArgs& args)
                     {
+                        const auto le = weak.lock();
+                        if (!le || !le->alive.load() || le->scan_generation.load() != generation)
+                            return;
+
                         DiscoveredDevice device;
                         device.transport = Transport::LowEnergy;
 
@@ -2214,72 +3541,93 @@ namespace gmbluetooth
                         if (!local_name.empty())
                             device.name = winrt::to_string(local_name);
 
-                        if (hooks_.upsert_device)
-                            hooks_.upsert_device(device);
+                        // le_connect opens it with the type it advertised (R1-182).
+                        remember_address_type(*le, raw_address, args.BluetoothAddressType());
+
+                        if (le->hooks.upsert_device)
+                            le->hooks.upsert_device(device);
                     });
 
                 stopped_token_ = watcher_.Stopped(
-                    [this](
+                    [weak, generation](
                         const WDBA::BluetoothLEAdvertisementWatcher&,
                         const WDBA::BluetoothLEAdvertisementWatcherStoppedEventArgs& args)
                     {
-                        le_scanning_.store(false);
+                        const auto le = weak.lock();
+                        if (!le || !le->alive.load() || le->scan_generation.load() != generation)
+                            return;
 
-                        if (hooks_.push_event)
-                        {
-                            BackendEvent event;
-                            event.type = BackendEventType::ScanStopped;
-                            event.transport = Transport::LowEnergy;
-                            event.error = map_bluetooth_error(args.Error());
-                            event.message = bluetooth_error_message(args.Error());
-                            hooks_.push_event(std::move(event));
-                        }
+                        // A stop Windows made (radio off, an error); one the game
+                        // asked for has already reported.
+                        if (!le->le_scanning.exchange(false))
+                            return;
+
+                        BackendEvent event;
+                        event.type = BackendEventType::ScanStopped;
+                        event.transport = Transport::LowEnergy;
+                        event.error = map_bluetooth_error(args.Error());
+                        event.message = bluetooth_error_message(args.Error());
+                        push_le_event(le, std::move(event));
                     });
 
-                le_scanning_.store(true);
+                le_->le_scanning.store(true);
                 watcher_.Start();
                 message.clear();
                 return Error::Ok;
             }
             catch (const winrt::hresult_error& error)
             {
-                le_scanning_.store(false);
+                le_->le_scanning.store(false);
+                ++le_->scan_generation;
                 release_watcher_noexcept();
                 message = winrt::to_string(error.message());
                 return Error::OperationFailed;
             }
         }
 
+        // Reports scan_stopped itself, as Android does, with the watcher's
+        // handlers already gone: each scan reports one stop.
         Error le_scan_stop(std::string& message) override
         {
             if (!initialized_)
                 return Error::NotInitialized;
 
-            if (!watcher_)
-            {
-                le_scanning_.store(false);
-                message.clear();
-                return Error::Ok;
-            }
+            const bool was_scanning = le_->le_scanning.exchange(false);
+            ++le_->scan_generation;
 
+            std::string failure;
             try
             {
-                watcher_.Stop();
-                le_scanning_.store(false);
-                message.clear();
-                return Error::Ok;
+                if (watcher_)
+                    watcher_.Stop();
             }
             catch (const winrt::hresult_error& error)
             {
-                le_scanning_.store(false);
-                message = winrt::to_string(error.message());
+                failure = winrt::to_string(error.message());
+            }
+            release_watcher_noexcept();
+
+            if (was_scanning)
+            {
+                BackendEvent event;
+                event.type = BackendEventType::ScanStopped;
+                event.transport = Transport::LowEnergy;
+                event.error = Error::Ok;
+                push_le_event(le_, std::move(event));
+            }
+
+            if (!failure.empty())
+            {
+                message = failure;
                 return Error::OperationFailed;
             }
+            message.clear();
+            return Error::Ok;
         }
 
         bool le_scan_is_running() const override
         {
-            return le_scanning_.load();
+            return le_->le_scanning.load();
         }
 
         Error le_connect(
@@ -2312,8 +3660,16 @@ namespace gmbluetooth
                 return Error::InvalidArgument;
             }
 
+            // One worker per connection keeps its ops in order without one
+            // slow peer holding up another (R1-115).
             auto state = std::make_shared<RemoteGattConnectionState>();
             state->handle = connection;
+            state->worker = SerialWorker::start(workers_);
+            if (!state->worker)
+            {
+                message = "Could not start a thread for the Bluetooth LE connection";
+                return Error::OperationFailed;
+            }
 
             {
                 std::scoped_lock lock(le_client_->connections_mutex);
@@ -2321,220 +3677,16 @@ namespace gmbluetooth
             }
 
             const auto shared = le_client_;
-
-            // The failure of an open that got past the device lookup: what
-            // it opened is closed and the core told why.
-            const auto fail_open = [](
-                const std::shared_ptr<SharedLeClientState>& owner,
-                const std::shared_ptr<RemoteGattConnectionState>& opening,
-                Error failure,
-                const std::string& why)
-            {
-                opening->closing.store(true);
-                close_le_client_connection_noexcept(opening);
-                unregister_le_client_connection(owner, opening->handle);
-                push_le_client_event(
-                    owner,
-                    "bluetooth_le_peripheral_open",
-                    le_error_json(1, opening->handle, failure, why));
-            };
-
-            const bool started = spawn_detached_worker(
-                workers_,
-                [shared, state, address, fail_open]()
+            const auto address_type = find_address_type(*le_, static_cast<std::uint64_t>(address));
+            const bool posted = state->worker->post(
+                [shared, state, address, address_type]()
                 {
-                    try
-                    {
-                        WinrtWorkerApartment apartment;
-
-                        if (!shared->alive->load() || state->closing.load())
-                            return;
-
-                        auto remote =
-                            WDB::BluetoothLEDevice::FromBluetoothAddressAsync(
-                                static_cast<std::uint64_t>(address)).get();
-
-                        if (!remote)
-                        {
-                            unregister_le_client_connection(shared, state->handle);
-                            push_le_client_event(
-                                shared,
-                                "bluetooth_le_peripheral_open",
-                                le_error_json(
-                                    1,
-                                    state->handle,
-                                    Error::ConnectionFailed,
-                                    "Windows found no Bluetooth LE device at this address"));
-                            return;
-                        }
-
-                        // le_disconnect sets closing before it takes the state
-                        // mutex to close what is stored, so checking under that
-                        // mutex leaves one owner for the device: this worker if
-                        // the open was already cancelled, close otherwise.
-                        bool cancelled = false;
-                        {
-                            std::scoped_lock lock(state->mutex);
-                            cancelled = state->closing.load();
-                            if (!cancelled)
-                            {
-                                state->device = remote;
-
-                                std::weak_ptr<RemoteGattConnectionState> weak_state = state;
-                                state->connection_status_token =
-                                    remote.ConnectionStatusChanged(
-                                        [shared, weak_state](
-                                            const WDB::BluetoothLEDevice& sender,
-                                            const winrt::Windows::Foundation::IInspectable&)
-                                        {
-                                            auto current = weak_state.lock();
-                                            if (!current || !shared->alive->load())
-                                                return;
-
-                                            const bool connected =
-                                                sender.ConnectionStatus() ==
-                                                WDB::BluetoothConnectionStatus::Connected;
-
-                                            const bool was_connected =
-                                                current->connected.exchange(connected);
-
-                                            // Only a link the game did not
-                                            // close reports; Windows gives no
-                                            // reason for the loss.
-                                            if (!connected &&
-                                                was_connected &&
-                                                !current->closing.load())
-                                            {
-                                                push_le_client_event(
-                                                    shared,
-                                                    "bluetooth_le_peripheral_connection_state_changed",
-                                                    "{\"connection\":" +
-                                                        std::to_string(current->handle) +
-                                                        ",\"is_connected\":false" +
-                                                        ",\"error\":" +
-                                                        std::to_string(static_cast<std::int32_t>(Error::Disconnected)) +
-                                                        ",\"message\":\"The Bluetooth LE device disconnected\"}");
-                                            }
-                                        });
-                                state->connection_status_registered = true;
-                            }
-                        }
-
-                        if (cancelled)
-                        {
-                            try
-                            {
-                                remote.Close();
-                            }
-                            catch (...)
-                            {
-                            }
-                            push_le_client_event(
-                                shared,
-                                "bluetooth_le_peripheral_open",
-                                le_error_json(1, state->handle, Error::ConnectionFailed, k_le_open_cancelled));
-                            return;
-                        }
-
-                        // An uncached GATT query is intentional here. Microsoft
-                        // documents that creating BluetoothLEDevice alone does not
-                        // necessarily initiate a physical connection; an uncached
-                        // GATT operation does.
-                        const auto services_result =
-                            remote.GetGattServicesAsync(
-                                WDB::BluetoothCacheMode::Uncached).get();
-
-                        if (services_result.Status() !=
-                            WDBG::GattCommunicationStatus::Success)
-                        {
-                            // A peer that never answered is a timeout (the
-                            // old 133); a refusal keeps its ATT meaning.
-                            const auto status = services_result.Status();
-                            const bool unreachable = status == WDBG::GattCommunicationStatus::Unreachable;
-                            GattOutcome outcome = gatt_result_outcome(services_result);
-                            if (unreachable)
-                            {
-                                outcome.error = Error::Timeout;
-                                outcome.message = "The Bluetooth LE device did not answer";
-                            }
-                            else if (outcome.error == Error::OperationFailed)
-                            {
-                                outcome.error = Error::ConnectionFailed;
-                            }
-
-                            state->closing.store(true);
-                            close_le_client_connection_noexcept(state);
-                            unregister_le_client_connection(shared, state->handle);
-                            push_le_client_event(
-                                shared,
-                                "bluetooth_le_peripheral_open",
-                                le_error_json(
-                                    unreachable ? 133 : 1,
-                                    state->handle,
-                                    outcome.error,
-                                    outcome.message));
-                            return;
-                        }
-
-                        std::unordered_map<
-                            std::string,
-                            std::shared_ptr<RemoteGattServiceState>> services;
-
-                        for (const auto& service : services_result.Services())
-                        {
-                            auto service_state =
-                                std::make_shared<RemoteGattServiceState>();
-                            service_state->uuid =
-                                guid_to_uuid_string(service.Uuid());
-                            service_state->service = service;
-                            services[service_state->uuid] = service_state;
-                        }
-
-                        {
-                            std::scoped_lock lock(state->mutex);
-                            cancelled = state->closing.load();
-                            if (!cancelled)
-                            {
-                                state->services = std::move(services);
-                                state->connected.store(true);
-                            }
-                        }
-
-                        if (cancelled)
-                        {
-                            // le_disconnect already closed the device; the
-                            // services found after it are this worker's.
-                            for (auto& pair : services)
-                                close_remote_service_noexcept(pair.second);
-                            push_le_client_event(
-                                shared,
-                                "bluetooth_le_peripheral_open",
-                                le_error_json(1, state->handle, Error::ConnectionFailed, k_le_open_cancelled));
-                            return;
-                        }
-
-                        push_le_client_event(
-                            shared,
-                            "bluetooth_le_peripheral_open",
-                            "{\"connection\":" +
-                                std::to_string(state->handle) + "}");
-                    }
-                    catch (const winrt::hresult_error& error)
-                    {
-                        fail_open(shared, state, Error::ConnectionFailed, gatt_exception_outcome(error).message);
-                    }
-                    catch (...)
-                    {
-                        fail_open(
-                            shared,
-                            state,
-                            Error::ConnectionFailed,
-                            "Opening the Bluetooth LE device failed with an unexpected exception");
-                    }
+                    open_le_connection(shared, state, static_cast<std::uint64_t>(address), address_type);
                 });
 
-            if (!started)
+            if (!posted)
             {
+                state->worker->stop();
                 unregister_le_client_connection(le_client_, connection);
                 message = "Could not start a thread for the Bluetooth LE connection";
                 return Error::OperationFailed;
@@ -2569,6 +3721,42 @@ namespace gmbluetooth
             return state && state->connected.load() && !state->closing.load();
         }
 
+        // Queues body as op_id's job on the connection's worker. A WinRT or
+        // any other exception completes the op with why.
+        template <typename Body>
+        Error post_le_op(
+            const std::shared_ptr<RemoteGattConnectionState>& state,
+            std::uint64_t op_id,
+            std::string& message,
+            Body&& body)
+        {
+            const auto shared = le_client_;
+            auto job = [shared, op_id, body = std::forward<Body>(body)]() mutable
+            {
+                try
+                {
+                    body();
+                }
+                catch (const winrt::hresult_error& error)
+                {
+                    push_le_op_completion(shared, op_id, gatt_exception_outcome(error));
+                }
+                catch (...)
+                {
+                    push_le_op_completion(shared, op_id, Error::OperationFailed, k_gatt_unexpected_failure);
+                }
+            };
+
+            if (!state->worker || !state->worker->post(std::move(job)))
+            {
+                message = "The BLE connection is closing";
+                return Error::Disconnected;
+            }
+
+            message.clear();
+            return Error::Ok;
+        }
+
         Error le_services_discover(
             std::uint64_t op_id,
             std::uint64_t connection,
@@ -2594,91 +3782,75 @@ namespace gmbluetooth
             }
 
             const auto shared = le_client_;
-            const bool started = spawn_detached_worker(
-                workers_,
-                [shared, op_id, state, remote]()
-                {
-                    try
-                    {
-                        WinrtWorkerApartment apartment;
-                        std::scoped_lock operation_lock(state->operation_mutex);
-
-                        const auto result =
-                            remote.GetGattServicesAsync(
-                                WDB::BluetoothCacheMode::Uncached).get();
-
-                        if (result.Status() !=
-                            WDBG::GattCommunicationStatus::Success)
-                        {
-                            push_le_op_completion(
-                                shared,
-                                op_id,
-                                gatt_result_outcome(result));
-                            return;
-                        }
-
-                        std::unordered_map<
-                            std::string,
-                            std::shared_ptr<RemoteGattServiceState>> services;
-                        LeOpResult found;
-
-                        for (const auto& service : result.Services())
-                        {
-                            auto service_state =
-                                std::make_shared<RemoteGattServiceState>();
-                            service_state->uuid =
-                                guid_to_uuid_string(service.Uuid());
-                            service_state->service = service;
-                            services[service_state->uuid] = service_state;
-
-                            found.attributes.push_back(
-                                LeAttribute{ service_state->uuid, 0 });
-                        }
-
-                        std::unordered_map<
-                            std::string,
-                            std::shared_ptr<RemoteGattServiceState>> old_services;
-                        {
-                            std::scoped_lock lock(state->mutex);
-                            old_services.swap(state->services);
-                            state->services = std::move(services);
-                        }
-                        for (auto& pair : old_services)
-                            close_remote_service_noexcept(pair.second);
-
-                        state->connected.store(true);
-                        push_le_op_completion(
-                            shared,
-                            op_id,
-                            Error::Ok,
-                            std::string(),
-                            std::move(found));
-                    }
-                    catch (const winrt::hresult_error& error)
-                    {
-                        push_le_op_completion(
-                            shared,
-                            op_id,
-                            gatt_exception_outcome(error));
-                    }
-                    catch (...)
-                    {
-                        push_le_op_completion(
-                            shared,
-                            op_id,
-                            Error::OperationFailed,
-                            k_gatt_unexpected_failure);
-                    }
-                });
-
-            if (!started)
+            return post_le_op(state, op_id, message, [shared, op_id, state, remote]()
             {
-                message = k_le_worker_failed;
-                return Error::OperationFailed;
-            }
+                const auto result =
+                    remote.GetGattServicesAsync(
+                        WDB::BluetoothCacheMode::Uncached).get();
 
-            message.clear();
-            return Error::Ok;
+                if (result.Status() !=
+                    WDBG::GattCommunicationStatus::Success)
+                {
+                    push_le_op_completion(
+                        shared,
+                        op_id,
+                        gatt_result_outcome(result));
+                    return;
+                }
+
+                LeOpResult found;
+                std::vector<std::shared_ptr<RemoteGattServiceState>> gone;
+                {
+                    std::scoped_lock lock(state->mutex);
+
+                    // A service a subscription lives under keeps its state, so
+                    // its notifications keep coming (R1-112); any other takes
+                    // the fresh object.
+                    std::unordered_map<
+                        std::string,
+                        std::shared_ptr<RemoteGattServiceState>> services;
+                    for (const auto& service : result.Services())
+                    {
+                        const std::string uuid = guid_to_uuid_string(service.Uuid());
+                        found.attributes.push_back(LeAttribute{ uuid, 0 });
+                        if (services.find(uuid) != services.end())
+                            continue;
+
+                        const auto old = state->services.find(uuid);
+                        if (old != state->services.end() &&
+                            old->second->service &&
+                            (old->second->service == service || service_has_subscription_locked(*old->second)))
+                        {
+                            services[uuid] = old->second;
+                            continue;
+                        }
+
+                        auto service_state = std::make_shared<RemoteGattServiceState>();
+                        service_state->uuid = uuid;
+                        service_state->service = service;
+                        services[uuid] = service_state;
+                    }
+
+                    for (const auto& [uuid, old] : state->services)
+                    {
+                        const auto kept = services.find(uuid);
+                        if (kept == services.end() || kept->second != old)
+                            gone.push_back(old);
+                    }
+                    state->services.swap(services);
+                }
+
+                for (const auto& service : gone)
+                    close_remote_service_noexcept(state, service);
+
+                state->connected.store(true);
+                push_le_op_completion(
+                    shared,
+                    op_id,
+                    Error::Ok,
+                    std::string(),
+                    std::move(found));
+            });
         }
 
         Error le_characteristics_discover(
@@ -2689,111 +3861,95 @@ namespace gmbluetooth
         {
             auto state = find_le_client_connection(le_client_, connection);
             auto service = find_remote_service(state, service_uuid);
-            if (!state || !service || !service->service)
+            if (!state || !service || !service_object(*state, *service))
             {
                 message = "BLE GATT service was not found";
                 return Error::InvalidHandle;
             }
 
             const auto shared = le_client_;
-            const bool started = spawn_detached_worker(
-                workers_,
-                [shared, op_id, state, service]()
-                {
-                    try
-                    {
-                        WinrtWorkerApartment apartment;
-                        std::scoped_lock operation_lock(state->operation_mutex);
-                        const auto result =
-                            service->service.GetCharacteristicsAsync(
-                                WDB::BluetoothCacheMode::Uncached).get();
-
-                        if (result.Status() !=
-                            WDBG::GattCommunicationStatus::Success)
-                        {
-                            const auto protocol_error = result.ProtocolError();
-                            GMBT_LOG(
-                                "GetCharacteristicsAsync failed: status=%d protocol_error=%d",
-                                static_cast<int>(result.Status()),
-                                protocol_error ? static_cast<int>(protocol_error.Value()) : -1);
-
-                            push_le_op_completion(
-                                shared,
-                                op_id,
-                                gatt_result_outcome(result));
-                            return;
-                        }
-
-                        std::unordered_map<
-                            std::string,
-                            std::shared_ptr<RemoteGattCharacteristicState>>
-                            characteristics;
-
-                        LeOpResult found;
-
-                        for (const auto& characteristic :
-                             result.Characteristics())
-                        {
-                            auto characteristic_state =
-                                std::make_shared<RemoteGattCharacteristicState>();
-                            characteristic_state->uuid =
-                                guid_to_uuid_string(characteristic.Uuid());
-                            characteristic_state->characteristic =
-                                characteristic;
-                            characteristics[characteristic_state->uuid] =
-                                characteristic_state;
-
-                            found.attributes.push_back(LeAttribute{
-                                characteristic_state->uuid,
-                                static_cast<std::int32_t>(
-                                    characteristic.CharacteristicProperties()) });
-                        }
-
-                        std::unordered_map<
-                            std::string,
-                            std::shared_ptr<RemoteGattCharacteristicState>>
-                            old_characteristics;
-                        {
-                            std::scoped_lock lock(state->mutex);
-                            old_characteristics.swap(service->characteristics);
-                            service->characteristics =
-                                std::move(characteristics);
-                        }
-                        for (auto& pair : old_characteristics)
-                            close_remote_characteristic_noexcept(pair.second);
-
-                        push_le_op_completion(
-                            shared,
-                            op_id,
-                            Error::Ok,
-                            std::string(),
-                            std::move(found));
-                    }
-                    catch (const winrt::hresult_error& error)
-                    {
-                        push_le_op_completion(
-                            shared,
-                            op_id,
-                            gatt_exception_outcome(error));
-                    }
-                    catch (...)
-                    {
-                        push_le_op_completion(
-                            shared,
-                            op_id,
-                            Error::OperationFailed,
-                            k_gatt_unexpected_failure);
-                    }
-                });
-
-            if (!started)
+            return post_le_op(state, op_id, message, [shared, op_id, state, service]()
             {
-                message = k_le_worker_failed;
-                return Error::OperationFailed;
-            }
+                const auto object = service_object(*state, *service);
+                if (!object)
+                {
+                    push_le_op_completion(shared, op_id, Error::Disconnected, k_le_attribute_closed);
+                    return;
+                }
 
-            message.clear();
-            return Error::Ok;
+                const auto result =
+                    object.GetCharacteristicsAsync(
+                        WDB::BluetoothCacheMode::Uncached).get();
+
+                if (result.Status() !=
+                    WDBG::GattCommunicationStatus::Success)
+                {
+                    const auto protocol_error = result.ProtocolError();
+                    GMBT_LOG(
+                        "GetCharacteristicsAsync failed: status=%d protocol_error=%d",
+                        static_cast<int>(result.Status()),
+                        protocol_error ? static_cast<int>(protocol_error.Value()) : -1);
+
+                    push_le_op_completion(
+                        shared,
+                        op_id,
+                        gatt_result_outcome(result));
+                    return;
+                }
+
+                LeOpResult found;
+                std::vector<std::shared_ptr<RemoteGattCharacteristicState>> gone;
+                {
+                    std::scoped_lock lock(state->mutex);
+
+                    // A subscribed characteristic keeps its state and its
+                    // ValueChanged registration (R1-112).
+                    std::unordered_map<
+                        std::string,
+                        std::shared_ptr<RemoteGattCharacteristicState>> characteristics;
+                    for (const auto& characteristic : result.Characteristics())
+                    {
+                        const std::string uuid = guid_to_uuid_string(characteristic.Uuid());
+                        found.attributes.push_back(LeAttribute{
+                            uuid,
+                            static_cast<std::int32_t>(characteristic.CharacteristicProperties()) });
+                        if (characteristics.find(uuid) != characteristics.end())
+                            continue;
+
+                        const auto old = service->characteristics.find(uuid);
+                        if (old != service->characteristics.end() &&
+                            old->second->characteristic &&
+                            (old->second->value_changed_registered || old->second->characteristic == characteristic))
+                        {
+                            characteristics[uuid] = old->second;
+                            continue;
+                        }
+
+                        auto characteristic_state = std::make_shared<RemoteGattCharacteristicState>();
+                        characteristic_state->uuid = uuid;
+                        characteristic_state->characteristic = characteristic;
+                        characteristics[uuid] = characteristic_state;
+                    }
+
+                    for (const auto& [uuid, old] : service->characteristics)
+                    {
+                        const auto kept = characteristics.find(uuid);
+                        if (kept == characteristics.end() || kept->second != old)
+                            gone.push_back(old);
+                    }
+                    service->characteristics.swap(characteristics);
+                }
+
+                for (const auto& characteristic : gone)
+                    close_remote_characteristic_noexcept(state, characteristic);
+
+                push_le_op_completion(
+                    shared,
+                    op_id,
+                    Error::Ok,
+                    std::string(),
+                    std::move(found));
+            });
         }
 
         Error le_descriptors_discover(
@@ -2810,94 +3966,70 @@ namespace gmbluetooth
                 characteristic_uuid);
 
             if (!state || !characteristic ||
-                !characteristic->characteristic)
+                !characteristic_object(*state, *characteristic))
             {
                 message = "BLE GATT characteristic was not found";
                 return Error::InvalidHandle;
             }
 
             const auto shared = le_client_;
-            const bool started = spawn_detached_worker(
-                workers_,
-                [shared, op_id, state, characteristic]()
-                {
-                    try
-                    {
-                        WinrtWorkerApartment apartment;
-                        std::scoped_lock operation_lock(state->operation_mutex);
-                        const auto result =
-                            characteristic->characteristic.GetDescriptorsAsync(
-                                WDB::BluetoothCacheMode::Uncached).get();
-
-                        if (result.Status() !=
-                            WDBG::GattCommunicationStatus::Success)
-                        {
-                            push_le_op_completion(
-                                shared,
-                                op_id,
-                                gatt_result_outcome(result));
-                            return;
-                        }
-
-                        std::unordered_map<
-                            std::string,
-                            std::shared_ptr<RemoteGattDescriptorState>>
-                            descriptors;
-
-                        LeOpResult found;
-
-                        for (const auto& descriptor : result.Descriptors())
-                        {
-                            auto descriptor_state =
-                                std::make_shared<RemoteGattDescriptorState>();
-                            descriptor_state->uuid =
-                                guid_to_uuid_string(descriptor.Uuid());
-                            descriptor_state->descriptor = descriptor;
-                            descriptors[descriptor_state->uuid] =
-                                descriptor_state;
-
-                            found.attributes.push_back(
-                                LeAttribute{ descriptor_state->uuid, 0 });
-                        }
-
-                        {
-                            std::scoped_lock lock(state->mutex);
-                            characteristic->descriptors =
-                                std::move(descriptors);
-                        }
-
-                        push_le_op_completion(
-                            shared,
-                            op_id,
-                            Error::Ok,
-                            std::string(),
-                            std::move(found));
-                    }
-                    catch (const winrt::hresult_error& error)
-                    {
-                        push_le_op_completion(
-                            shared,
-                            op_id,
-                            gatt_exception_outcome(error));
-                    }
-                    catch (...)
-                    {
-                        push_le_op_completion(
-                            shared,
-                            op_id,
-                            Error::OperationFailed,
-                            k_gatt_unexpected_failure);
-                    }
-                });
-
-            if (!started)
+            return post_le_op(state, op_id, message, [shared, op_id, state, characteristic]()
             {
-                message = k_le_worker_failed;
-                return Error::OperationFailed;
-            }
+                const auto object = characteristic_object(*state, *characteristic);
+                if (!object)
+                {
+                    push_le_op_completion(shared, op_id, Error::Disconnected, k_le_attribute_closed);
+                    return;
+                }
 
-            message.clear();
-            return Error::Ok;
+                const auto result =
+                    object.GetDescriptorsAsync(
+                        WDB::BluetoothCacheMode::Uncached).get();
+
+                if (result.Status() !=
+                    WDBG::GattCommunicationStatus::Success)
+                {
+                    push_le_op_completion(
+                        shared,
+                        op_id,
+                        gatt_result_outcome(result));
+                    return;
+                }
+
+                std::unordered_map<
+                    std::string,
+                    std::shared_ptr<RemoteGattDescriptorState>>
+                    descriptors;
+
+                LeOpResult found;
+
+                for (const auto& descriptor : result.Descriptors())
+                {
+                    auto descriptor_state =
+                        std::make_shared<RemoteGattDescriptorState>();
+                    descriptor_state->uuid =
+                        guid_to_uuid_string(descriptor.Uuid());
+                    descriptor_state->descriptor = descriptor;
+                    descriptors[descriptor_state->uuid] =
+                        descriptor_state;
+
+                    found.attributes.push_back(
+                        LeAttribute{ descriptor_state->uuid, 0 });
+                }
+
+                {
+                    std::scoped_lock lock(state->mutex);
+                    if (characteristic->characteristic)
+                        characteristic->descriptors = std::move(descriptors);
+                }
+
+                push_le_op_completion(
+                    shared,
+                    op_id,
+                    Error::Ok,
+                    std::string(),
+                    std::move(found));
+            });
         }
 
         Error le_characteristic_read(
@@ -2914,75 +4046,51 @@ namespace gmbluetooth
                 characteristic_uuid);
 
             if (!state || !characteristic ||
-                !characteristic->characteristic)
+                !characteristic_object(*state, *characteristic))
             {
                 message = "BLE GATT characteristic was not found";
                 return Error::InvalidHandle;
             }
 
             const auto shared = le_client_;
-            const bool started = spawn_detached_worker(
-                workers_,
-                [shared, op_id, state, characteristic]()
-                {
-                    try
-                    {
-                        WinrtWorkerApartment apartment;
-                        std::scoped_lock operation_lock(state->operation_mutex);
-                        const auto result =
-                            characteristic->characteristic.ReadValueAsync(
-                                WDB::BluetoothCacheMode::Uncached).get();
-
-                        if (result.Status() !=
-                            WDBG::GattCommunicationStatus::Success)
-                        {
-                            const auto protocol_error = result.ProtocolError();
-                            GMBT_LOG(
-                                "ReadValueAsync failed: status=%d protocol_error=%d",
-                                static_cast<int>(result.Status()),
-                                protocol_error ? static_cast<int>(protocol_error.Value()) : -1);
-
-                            push_le_op_completion(
-                                shared,
-                                op_id,
-                                gatt_result_outcome(result));
-                            return;
-                        }
-
-                        LeOpResult read;
-                        read.value = buffer_to_bytes(result.Value());
-                        push_le_op_completion(
-                            shared,
-                            op_id,
-                            Error::Ok,
-                            std::string(),
-                            std::move(read));
-                    }
-                    catch (const winrt::hresult_error& error)
-                    {
-                        push_le_op_completion(
-                            shared,
-                            op_id,
-                            gatt_exception_outcome(error));
-                    }
-                    catch (...)
-                    {
-                        push_le_op_completion(
-                            shared,
-                            op_id,
-                            Error::OperationFailed,
-                            k_gatt_unexpected_failure);
-                    }
-                });
-
-            if (!started)
+            return post_le_op(state, op_id, message, [shared, op_id, state, characteristic]()
             {
-                message = k_le_worker_failed;
-                return Error::OperationFailed;
-            }
+                const auto object = characteristic_object(*state, *characteristic);
+                if (!object)
+                {
+                    push_le_op_completion(shared, op_id, Error::Disconnected, k_le_attribute_closed);
+                    return;
+                }
 
-            message.clear();
-            return Error::Ok;
+                const auto result =
+                    object.ReadValueAsync(
+                        WDB::BluetoothCacheMode::Uncached).get();
+
+                if (result.Status() !=
+                    WDBG::GattCommunicationStatus::Success)
+                {
+                    const auto protocol_error = result.ProtocolError();
+                    GMBT_LOG(
+                        "ReadValueAsync failed: status=%d protocol_error=%d",
+                        static_cast<int>(result.Status()),
+                        protocol_error ? static_cast<int>(protocol_error.Value()) : -1);
+
+                    push_le_op_completion(
+                        shared,
+                        op_id,
+                        gatt_result_outcome(result));
+                    return;
+                }
+
+                LeOpResult read;
+                read.value = buffer_to_bytes(result.Value());
+                push_le_op_completion(
+                    shared,
+                    op_id,
+                    Error::Ok,
+                    std::string(),
+                    std::move(read));
+            });
         }
 
         Error le_characteristic_write(
@@ -3001,7 +4109,7 @@ namespace gmbluetooth
                 characteristic_uuid);
 
             if (!state || !characteristic ||
-                !characteristic->characteristic)
+                !characteristic_object(*state, *characteristic))
             {
                 message = "BLE GATT characteristic was not found";
                 return Error::InvalidHandle;
@@ -3009,65 +4117,41 @@ namespace gmbluetooth
 
             const auto payload = json::base64_decode(value_base64);
             const auto shared = le_client_;
-            const bool started = spawn_detached_worker(
-                workers_,
-                [shared, op_id, state, characteristic, payload, with_response]()
-                {
-                    try
-                    {
-                        WinrtWorkerApartment apartment;
-                        std::scoped_lock operation_lock(state->operation_mutex);
-                        const auto option = with_response
-                            ? WDBG::GattWriteOption::WriteWithResponse
-                            : WDBG::GattWriteOption::WriteWithoutResponse;
-
-                        const auto result =
-                            characteristic->characteristic.WriteValueWithResultAsync(
-                                bytes_to_buffer(payload),
-                                option).get();
-
-                        const auto status = result.Status();
-                        if (status != WDBG::GattCommunicationStatus::Success)
-                        {
-                            const auto protocol_error = result.ProtocolError();
-                            GMBT_LOG(
-                                "WriteValueWithResultAsync failed: status=%d protocol_error=%d with_response=%d bytes=%zu",
-                                static_cast<int>(status),
-                                protocol_error ? static_cast<int>(protocol_error.Value()) : -1,
-                                with_response ? 1 : 0,
-                                payload.size());
-                        }
-
-                        push_le_op_completion(
-                            shared,
-                            op_id,
-                            gatt_result_outcome(result));
-                    }
-                    catch (const winrt::hresult_error& error)
-                    {
-                        push_le_op_completion(
-                            shared,
-                            op_id,
-                            gatt_exception_outcome(error));
-                    }
-                    catch (...)
-                    {
-                        push_le_op_completion(
-                            shared,
-                            op_id,
-                            Error::OperationFailed,
-                            k_gatt_unexpected_failure);
-                    }
-                });
-
-            if (!started)
+            return post_le_op(state, op_id, message, [shared, op_id, state, characteristic, payload, with_response]()
             {
-                message = k_le_worker_failed;
-                return Error::OperationFailed;
-            }
+                const auto object = characteristic_object(*state, *characteristic);
+                if (!object)
+                {
+                    push_le_op_completion(shared, op_id, Error::Disconnected, k_le_attribute_closed);
+                    return;
+                }
 
-            message.clear();
-            return Error::Ok;
+                const auto option = with_response
+                    ? WDBG::GattWriteOption::WriteWithResponse
+                    : WDBG::GattWriteOption::WriteWithoutResponse;
+
+                const auto result =
+                    object.WriteValueWithResultAsync(
+                        bytes_to_buffer(payload),
+                        option).get();
+
+                const auto status = result.Status();
+                if (status != WDBG::GattCommunicationStatus::Success)
+                {
+                    const auto protocol_error = result.ProtocolError();
+                    GMBT_LOG(
+                        "WriteValueWithResultAsync failed: status=%d protocol_error=%d with_response=%d bytes=%zu",
+                        static_cast<int>(status),
+                        protocol_error ? static_cast<int>(protocol_error.Value()) : -1,
+                        with_response ? 1 : 0,
+                        payload.size());
+                }
+
+                push_le_op_completion(
+                    shared,
+                    op_id,
+                    gatt_result_outcome(result));
+            });
         }
 
         Error le_characteristic_subscribe(
@@ -3085,7 +4169,7 @@ namespace gmbluetooth
                 characteristic_uuid);
 
             if (!state || !characteristic ||
-                !characteristic->characteristic)
+                !characteristic_object(*state, *characteristic))
             {
                 message = "BLE GATT characteristic was not found";
                 return Error::InvalidHandle;
@@ -3103,131 +4187,137 @@ namespace gmbluetooth
             const std::string normalized_characteristic =
                 normalize_uuid(characteristic_uuid);
 
-            const bool started = spawn_detached_worker(
-                workers_,
+            return post_le_op(state, op_id, message,
                 [shared, op_id,
                  state,
                  characteristic,
                  normalized_service,
                  normalized_characteristic,
                  mode]()
+            {
+                WDBG::GattCharacteristic object{nullptr};
+                bool registered = false;
                 {
-                    try
-                    {
-                        WinrtWorkerApartment apartment;
-                        std::scoped_lock operation_lock(state->operation_mutex);
+                    std::scoped_lock lock(state->mutex);
+                    object = characteristic->characteristic;
+                    registered = characteristic->value_changed_registered;
+                }
 
-                        if (mode != 0 &&
-                            !characteristic->value_changed_registered)
+                if (!object || state->closing.load())
+                {
+                    push_le_op_completion(shared, op_id, Error::Disconnected, k_le_attribute_closed);
+                    return;
+                }
+
+                if (mode != 0 && !registered)
+                {
+                    std::weak_ptr<RemoteGattConnectionState>
+                        weak_connection = state;
+
+                    const auto token = object.ValueChanged(
+                        [shared,
+                         weak_connection,
+                         normalized_service,
+                         normalized_characteristic](
+                            const WDBG::GattCharacteristic&,
+                            const WDBG::GattValueChangedEventArgs& args)
                         {
-                            std::weak_ptr<RemoteGattConnectionState>
-                                weak_connection = state;
+                            auto current =
+                                weak_connection.lock();
+                            if (!current ||
+                                !shared->alive->load())
+                                return;
 
-                            characteristic->value_changed_token =
-                                characteristic->characteristic.ValueChanged(
-                                    [shared,
-                                     weak_connection,
-                                     normalized_service,
-                                     normalized_characteristic](
-                                        const WDBG::GattCharacteristic&,
-                                        const WDBG::GattValueChangedEventArgs& args)
-                                    {
-                                        auto current =
-                                            weak_connection.lock();
-                                        if (!current ||
-                                            !shared->alive->load())
-                                            return;
+                            const auto bytes =
+                                buffer_to_bytes(
+                                    args.CharacteristicValue());
 
-                                        const auto bytes =
-                                            buffer_to_bytes(
-                                                args.CharacteristicValue());
+                            push_le_client_event(
+                                shared,
+                                "bluetooth_le_characteristic_value_changed",
+                                "{\"connection\":" +
+                                    std::to_string(
+                                        current->handle) +
+                                    ",\"service_uuid\":\"" +
+                                    json_escape(
+                                        normalized_service) +
+                                    "\",\"characteristic_uuid\":\"" +
+                                    json_escape(
+                                        normalized_characteristic) +
+                                    "\",\"value\":\"" +
+                                    json::base64_encode(
+                                        bytes.data(),
+                                        bytes.size()) +
+                                    "\"}");
+                        });
 
-                                        push_le_client_event(
-                                            shared,
-                                            "bluetooth_le_characteristic_value_changed",
-                                            "{\"connection\":" +
-                                                std::to_string(
-                                                    current->handle) +
-                                                ",\"service_uuid\":\"" +
-                                                json_escape(
-                                                    normalized_service) +
-                                                "\",\"characteristic_uuid\":\"" +
-                                                json_escape(
-                                                    normalized_characteristic) +
-                                                "\",\"value\":\"" +
-                                                json::base64_encode(
-                                                    bytes.data(),
-                                                    bytes.size()) +
-                                                "\"}");
-                                    });
-
+                    // Stored under the mutex close takes; a close that came
+                    // first leaves this handler to revoke now (R1-113).
+                    bool kept = false;
+                    {
+                        std::scoped_lock lock(state->mutex);
+                        kept = !state->closing.load() && characteristic->characteristic;
+                        if (kept)
+                        {
+                            characteristic->value_changed_token = token;
                             characteristic->value_changed_registered = true;
                         }
-
-                        const auto cccd_value =
-                            mode == 1
-                                ? WDBG::GattClientCharacteristicConfigurationDescriptorValue::Notify
-                            : mode == 2
-                                ? WDBG::GattClientCharacteristicConfigurationDescriptorValue::Indicate
-                                : WDBG::GattClientCharacteristicConfigurationDescriptorValue::None;
-
-                        // The WithResult form carries the ATT code of a refusal.
-                        const auto result =
-                            characteristic->characteristic
-                                .WriteClientCharacteristicConfigurationDescriptorWithResultAsync(
-                                    cccd_value)
-                                .get();
-
-                        if (result.Status() ==
-                                WDBG::GattCommunicationStatus::Success &&
-                            mode == 0)
-                        {
-                            try
-                            {
-                                if (characteristic->value_changed_registered &&
-                                    characteristic->value_changed_token.value != 0)
-                                {
-                                    characteristic->characteristic.ValueChanged(
-                                        characteristic->value_changed_token);
-                                }
-                            }
-                            catch (...)
-                            {
-                            }
-                            characteristic->value_changed_registered = false;
-                            characteristic->value_changed_token = {};
-                        }
-
-                        push_le_op_completion(
-                            shared,
-                            op_id,
-                            gatt_result_outcome(result));
                     }
-                    catch (const winrt::hresult_error& error)
+
+                    if (!kept)
                     {
-                        push_le_op_completion(
-                            shared,
-                            op_id,
-                            gatt_exception_outcome(error));
+                        try
+                        {
+                            object.ValueChanged(token);
+                        }
+                        catch (...)
+                        {
+                        }
+                        push_le_op_completion(shared, op_id, Error::Disconnected, k_le_attribute_closed);
+                        return;
+                    }
+                }
+
+                const auto cccd_value =
+                    mode == 1
+                        ? WDBG::GattClientCharacteristicConfigurationDescriptorValue::Notify
+                    : mode == 2
+                        ? WDBG::GattClientCharacteristicConfigurationDescriptorValue::Indicate
+                        : WDBG::GattClientCharacteristicConfigurationDescriptorValue::None;
+
+                // The WithResult form carries the ATT code of a refusal.
+                const auto result =
+                    object.WriteClientCharacteristicConfigurationDescriptorWithResultAsync(
+                        cccd_value).get();
+
+                if (result.Status() ==
+                        WDBG::GattCommunicationStatus::Success &&
+                    mode == 0)
+                {
+                    winrt::event_token token{};
+                    {
+                        std::scoped_lock lock(state->mutex);
+                        if (characteristic->value_changed_registered)
+                            token = characteristic->value_changed_token;
+                        characteristic->value_changed_registered = false;
+                        characteristic->value_changed_token = {};
+                    }
+
+                    try
+                    {
+                        if (token.value != 0)
+                            object.ValueChanged(token);
                     }
                     catch (...)
                     {
-                        push_le_op_completion(
-                            shared,
-                            op_id,
-                            Error::OperationFailed,
-                            k_gatt_unexpected_failure);
                     }
-                });
+                }
 
-            if (!started)
-            {
-                message = k_le_worker_failed;
-                return Error::OperationFailed;
-            }
-
-            message.clear();
-            return Error::Ok;
+                push_le_op_completion(
+                    shared,
+                    op_id,
+                    gatt_result_outcome(result));
+            });
         }
 
         Error le_descriptor_read(
@@ -3245,69 +4335,45 @@ namespace gmbluetooth
                 characteristic_uuid,
                 descriptor_uuid);
 
-            if (!state || !descriptor || !descriptor->descriptor)
+            if (!state || !descriptor || !descriptor_object(*state, *descriptor))
             {
                 message = "BLE GATT descriptor was not found";
                 return Error::InvalidHandle;
             }
 
             const auto shared = le_client_;
-            const bool started = spawn_detached_worker(
-                workers_,
-                [shared, op_id, state, descriptor]()
-                {
-                    try
-                    {
-                        WinrtWorkerApartment apartment;
-                        std::scoped_lock operation_lock(state->operation_mutex);
-                        const auto result =
-                            descriptor->descriptor.ReadValueAsync(
-                                WDB::BluetoothCacheMode::Uncached).get();
-
-                        if (result.Status() !=
-                            WDBG::GattCommunicationStatus::Success)
-                        {
-                            push_le_op_completion(
-                                shared,
-                                op_id,
-                                gatt_result_outcome(result));
-                            return;
-                        }
-
-                        LeOpResult read;
-                        read.value = buffer_to_bytes(result.Value());
-                        push_le_op_completion(
-                            shared,
-                            op_id,
-                            Error::Ok,
-                            std::string(),
-                            std::move(read));
-                    }
-                    catch (const winrt::hresult_error& error)
-                    {
-                        push_le_op_completion(
-                            shared,
-                            op_id,
-                            gatt_exception_outcome(error));
-                    }
-                    catch (...)
-                    {
-                        push_le_op_completion(
-                            shared,
-                            op_id,
-                            Error::OperationFailed,
-                            k_gatt_unexpected_failure);
-                    }
-                });
-
-            if (!started)
+            return post_le_op(state, op_id, message, [shared, op_id, state, descriptor]()
             {
-                message = k_le_worker_failed;
-                return Error::OperationFailed;
-            }
+                const auto object = descriptor_object(*state, *descriptor);
+                if (!object)
+                {
+                    push_le_op_completion(shared, op_id, Error::Disconnected, k_le_attribute_closed);
+                    return;
+                }
 
-            message.clear();
-            return Error::Ok;
+                const auto result =
+                    object.ReadValueAsync(
+                        WDB::BluetoothCacheMode::Uncached).get();
+
+                if (result.Status() !=
+                    WDBG::GattCommunicationStatus::Success)
+                {
+                    push_le_op_completion(
+                        shared,
+                        op_id,
+                        gatt_result_outcome(result));
+                    return;
+                }
+
+                LeOpResult read;
+                read.value = buffer_to_bytes(result.Value());
+                push_le_op_completion(
+                    shared,
+                    op_id,
+                    Error::Ok,
+                    std::string(),
+                    std::move(read));
+            });
         }
 
         Error le_descriptor_write(
@@ -3326,7 +4392,7 @@ namespace gmbluetooth
                 characteristic_uuid,
                 descriptor_uuid);
 
-            if (!state || !descriptor || !descriptor->descriptor)
+            if (!state || !descriptor || !descriptor_object(*state, *descriptor))
             {
                 message = "BLE GATT descriptor was not found";
                 return Error::InvalidHandle;
@@ -3334,82 +4400,25 @@ namespace gmbluetooth
 
             const auto payload = json::base64_decode(value_base64);
             const auto shared = le_client_;
-
-            const bool started = spawn_detached_worker(
-                workers_,
-                [shared, op_id, state, descriptor, payload]()
-                {
-                    try
-                    {
-                        WinrtWorkerApartment apartment;
-                        std::scoped_lock operation_lock(state->operation_mutex);
-                        // The WithResult form carries the ATT code of a refusal.
-                        const auto result =
-                            descriptor->descriptor.WriteValueWithResultAsync(
-                                bytes_to_buffer(payload)).get();
-
-                        push_le_op_completion(
-                            shared,
-                            op_id,
-                            gatt_result_outcome(result));
-                    }
-                    catch (const winrt::hresult_error& error)
-                    {
-                        push_le_op_completion(
-                            shared,
-                            op_id,
-                            gatt_exception_outcome(error));
-                    }
-                    catch (...)
-                    {
-                        push_le_op_completion(
-                            shared,
-                            op_id,
-                            Error::OperationFailed,
-                            k_gatt_unexpected_failure);
-                    }
-                });
-
-            if (!started)
+            return post_le_op(state, op_id, message, [shared, op_id, state, descriptor, payload]()
             {
-                message = k_le_worker_failed;
-                return Error::OperationFailed;
-            }
-
-            message.clear();
-            return Error::Ok;
-        }
-
-        // Completes the call registered as op_id from another thread, after
-        // the call has returned to the core.
-        void push_le_completion_async(std::uint64_t op_id)
-        {
-            if (!hooks_.push_event)
-                return;
-
-            auto push_event = hooks_.push_event;
-
-            const bool started = spawn_detached_worker(
-                workers_,
-                [push_event, op_id]()
+                const auto object = descriptor_object(*state, *descriptor);
+                if (!object)
                 {
-                    BackendEvent event;
-                    event.type = BackendEventType::LeOpCompleted;
-                    event.transport = Transport::LowEnergy;
-                    event.op_id = op_id;
-                    push_event(std::move(event));
-                });
+                    push_le_op_completion(shared, op_id, Error::Disconnected, k_le_attribute_closed);
+                    return;
+                }
 
-            // No thread: the core has registered the op already, so it can
-            // take the completion before the call returns.
-            if (!started)
-            {
-                BackendEvent event;
-                event.type = BackendEventType::LeOpCompleted;
-                event.transport = Transport::LowEnergy;
-                event.op_id = op_id;
-                hooks_.push_event(std::move(event));
-            }
+                // The WithResult form carries the ATT code of a refusal.
+                const auto result =
+                    object.WriteValueWithResultAsync(
+                        bytes_to_buffer(payload)).get();
+
+                push_le_op_completion(
+                    shared,
+                    op_id,
+                    gatt_result_outcome(result));
+            });
         }
 
         // ===== BLE Advertiser =====
@@ -3440,12 +4449,14 @@ namespace gmbluetooth
                 message = "BLE peripheral advertising is not supported by this Windows adapter";
                 return Error::NotSupported;
             }
-            if (le_advertising_.exchange(true))
+            // A second start would ignore its settings and data (R1-188).
+            if (le_->le_advertising.exchange(true))
             {
-                push_le_completion_async(op_id);
-                message.clear();
-                return Error::Ok;
+                message = "Bluetooth LE advertising is already running; stop it first";
+                return Error::Busy;
             }
+
+            std::unique_lock services_lock(le_->services_mutex);
 
             // The generic Windows advertisement publisher cannot write
             // system-reserved sections such as LocalName or Service UUIDs.
@@ -3453,54 +4464,52 @@ namespace gmbluetooth
             // so a service UUID, its service data and the name go out only
             // through one; the publisher carries manufacturer data and the
             // TX power. Each refusal names the field, before anything starts.
+            const auto refuse = [this, &services_lock, &message](std::string why)
+            {
+                services_lock.unlock();
+                le_->le_advertising.store(false);
+                message = std::move(why);
+                return Error::NotSupported;
+            };
+
             std::unordered_set<std::string> service_uuids;
             std::vector<WDBG::GattServiceProvider> providers;
             for (const auto& raw_uuid : data.service_uuids)
             {
                 const std::string uuid = normalize_uuid(raw_uuid);
-                const auto service_it = gatt_services_.find(uuid);
-                if (service_it == gatt_services_.end() || !service_it->second || !service_it->second->provider)
+                const auto service_it = le_->gatt_services.find(uuid);
+                if (service_it == le_->gatt_services.end() || !service_it->second || !service_it->second->provider)
                 {
-                    le_advertising_.store(false);
-                    message = "service_uuids: Windows advertises a service UUID only through a registered GATT service, and " +
-                        uuid + " is not one";
-                    return Error::NotSupported;
+                    return refuse("service_uuids: Windows advertises a service UUID only through a registered GATT service, and " +
+                        uuid + " is not one");
                 }
                 if (service_uuids.insert(uuid).second)
                     providers.push_back(service_it->second->provider);
             }
 
             if (data.include_name && providers.empty())
-            {
-                le_advertising_.store(false);
-                message = "include_name: Windows advertises the name only through a registered GATT service in service_uuids";
-                return Error::NotSupported;
-            }
+                return refuse("include_name: Windows advertises the name only through a registered GATT service in service_uuids");
 
             const bool start_publisher = !data.manufacturer_data.empty() || data.include_tx_power || settings.tx_power.has_value();
             if (!start_publisher && providers.empty())
-            {
-                le_advertising_.store(false);
-                message = "Windows cannot advertise without manufacturer data, a power level or a registered GATT service";
-                return Error::NotSupported;
-            }
+                return refuse("Windows cannot advertise without manufacturer data, a power level or a registered GATT service");
 
             try
             {
-                advertise_connectable_ = settings.connectable;
-                advertise_discoverable_ = data.include_name;
+                le_->advertise_connectable = settings.connectable;
+                le_->advertise_discoverable = data.include_name;
                 advertise_include_power_ = data.include_tx_power;
                 advertise_tx_power_.reset();
                 if (settings.tx_power)
                     advertise_tx_power_ = advertise_tx_power_dbm(*settings.tx_power);
-                advertise_service_uuids_ = std::move(service_uuids);
-                advertise_service_data_.clear();
+                le_->advertise_service_uuids = std::move(service_uuids);
+                le_->advertise_service_data.clear();
                 for (const auto& entry : data.service_data)
-                    advertise_service_data_[normalize_uuid(entry.uuid)] = entry.data;
+                    le_->advertise_service_data[normalize_uuid(entry.uuid)] = entry.data;
 
                 auto tracker = std::make_shared<AdvertiseStartTracker>();
                 tracker->op_id = op_id;
-                tracker->generation = ++advertise_generation_;
+                tracker->generation = ++le_->advertise_generation;
                 advertise_tracker_ = tracker;
 
                 // Counted before anything starts, so no status event can
@@ -3536,28 +4545,35 @@ namespace gmbluetooth
                     }
                 }
 
+                const std::weak_ptr<SharedLeState> weak = le_;
                 advertiser_status_token_ = advertiser_.StatusChanged(
-                    [this, tracker](
+                    [weak, tracker](
                         const WDBA::BluetoothLEAdvertisementPublisher&,
                         const WDBA::BluetoothLEAdvertisementPublisherStatusChangedEventArgs& args)
                     {
+                        const auto le = weak.lock();
+                        if (!le)
+                            return;
+
                         const auto status = args.Status();
                         if (status == WDBA::BluetoothLEAdvertisementPublisherStatus::Started)
                         {
-                            advertise_start_progress(tracker);
+                            advertise_start_progress(le, tracker);
                         }
                         else if (status == WDBA::BluetoothLEAdvertisementPublisherStatus::Aborted)
                         {
-                            le_advertising_.store(false);
+                            le->le_advertising.store(false);
                             advertise_start_failed(
+                                le,
                                 tracker,
                                 map_bluetooth_error(args.Error()),
                                 "Windows aborted the BLE advertisement: " + bluetooth_error_message(args.Error()));
                         }
                         else if (status == WDBA::BluetoothLEAdvertisementPublisherStatus::Stopped)
                         {
-                            le_advertising_.store(false);
+                            le->le_advertising.store(false);
                             advertise_start_failed(
+                                le,
                                 tracker,
                                 Error::OperationFailed,
                                 "BLE advertisement stopped before it started");
@@ -3576,27 +4592,33 @@ namespace gmbluetooth
                         continue;
 
                     const auto token = provider.AdvertisementStatusChanged(
-                        [this, tracker](
+                        [weak, tracker](
                             const WDBG::GattServiceProvider&,
                             const WDBG::GattServiceProviderAdvertisementStatusChangedEventArgs& args)
                         {
+                            const auto le = weak.lock();
+                            if (!le)
+                                return;
+
                             switch (args.Status())
                             {
                                 case WDBG::GattServiceProviderAdvertisementStatus::Started:
-                                    advertise_start_progress(tracker);
+                                    advertise_start_progress(le, tracker);
                                     break;
                                 case WDBG::GattServiceProviderAdvertisementStatus::StartedWithoutAllAdvertisementData:
                                     GMBT_LOG("GATT service advertising started without all of its advertisement data");
-                                    advertise_start_progress(tracker);
+                                    advertise_start_progress(le, tracker);
                                     break;
                                 case WDBG::GattServiceProviderAdvertisementStatus::Aborted:
                                     advertise_start_failed(
+                                        le,
                                         tracker,
                                         map_bluetooth_error(args.Error()),
                                         "Windows aborted GATT service advertising: " + bluetooth_error_message(args.Error()));
                                     break;
                                 case WDBG::GattServiceProviderAdvertisementStatus::Stopped:
                                     advertise_start_failed(
+                                        le,
                                         tracker,
                                         Error::OperationFailed,
                                         "GATT service advertising stopped before it started");
@@ -3613,19 +4635,23 @@ namespace gmbluetooth
                 if (start_publisher)
                     advertiser_.Start();
 
-                for (const auto& uuid : advertise_service_uuids_)
-                    start_service_advertising(gatt_services_[uuid]);
+                for (const auto& uuid : le_->advertise_service_uuids)
+                    start_service_advertising_locked(*le_, le_->gatt_services[uuid]);
+                services_lock.unlock();
 
                 // Every provider was already advertising and there is no
                 // publisher: nothing will report, so the start is done now.
                 if (to_start == 0)
-                    finish_advertise_start(tracker, Error::Ok, {});
+                    finish_advertise_start(le_, tracker, Error::Ok, {});
 
                 message.clear();
                 return Error::Ok;
             }
             catch (const winrt::hresult_error& error)
             {
+                if (services_lock.owns_lock())
+                    services_lock.unlock();
+
                 // The core drops the op when this call fails; nothing may
                 // complete it later.
                 if (advertise_tracker_)
@@ -3634,106 +4660,11 @@ namespace gmbluetooth
                     revoke_advertise_handlers(advertise_tracker_);
                     advertise_tracker_.reset();
                 }
-                le_advertising_.store(false);
+                le_->le_advertising.store(false);
                 release_advertiser_noexcept();
                 message = winrt::to_string(error.message());
                 return Error::OperationFailed;
             }
-        }
-
-        void revoke_advertise_handlers(const std::shared_ptr<AdvertiseStartTracker>& tracker) noexcept
-        {
-            std::vector<std::pair<WDBG::GattServiceProvider, winrt::event_token>> providers;
-            {
-                std::scoped_lock lock(tracker->mutex);
-                providers.swap(tracker->providers);
-            }
-
-            for (auto& [provider, token] : providers)
-            {
-                try
-                {
-                    provider.AdvertisementStatusChanged(token);
-                }
-                catch (...)
-                {
-                }
-            }
-        }
-
-        // Completes the start once. False when it was already completed.
-        bool finish_advertise_start(
-            const std::shared_ptr<AdvertiseStartTracker>& tracker,
-            Error error,
-            std::string message)
-        {
-            if (tracker->done.exchange(true))
-                return false;
-
-            revoke_advertise_handlers(tracker);
-
-            if (hooks_.push_event)
-            {
-                BackendEvent event;
-                event.type = BackendEventType::LeOpCompleted;
-                event.transport = Transport::LowEnergy;
-                event.op_id = tracker->op_id;
-                event.error = error;
-                event.message = std::move(message);
-                hooks_.push_event(std::move(event));
-            }
-            return true;
-        }
-
-        void advertise_start_progress(const std::shared_ptr<AdvertiseStartTracker>& tracker)
-        {
-            if (tracker->remaining.fetch_sub(1) == 1)
-                finish_advertise_start(tracker, Error::Ok, {});
-        }
-
-        // A failed start leaves nothing it began advertising, unless a newer
-        // start already owns the advertisers.
-        void advertise_start_failed(
-            const std::shared_ptr<AdvertiseStartTracker>& tracker,
-            Error error,
-            std::string message)
-        {
-            WDBA::BluetoothLEAdvertisementPublisher publisher{nullptr};
-            std::vector<WDBG::GattServiceProvider> providers;
-            {
-                std::scoped_lock lock(tracker->mutex);
-                publisher = tracker->publisher;
-                for (const auto& pair : tracker->providers)
-                    providers.push_back(pair.first);
-            }
-
-            if (!finish_advertise_start(tracker, error, std::move(message)))
-                return;
-
-            if (tracker->generation != advertise_generation_.load())
-                return;
-
-            try
-            {
-                if (publisher)
-                    publisher.Stop();
-            }
-            catch (...)
-            {
-            }
-
-            for (auto& provider : providers)
-            {
-                try
-                {
-                    provider.StopAdvertising();
-                }
-                catch (...)
-                {
-                }
-            }
-
-            le_advertising_.store(false);
         }
 
         Error le_advertise_stop(std::string& message) override
@@ -3741,6 +4672,7 @@ namespace gmbluetooth
             if (advertise_tracker_)
             {
                 finish_advertise_start(
+                    le_,
                     advertise_tracker_,
                     Error::OperationFailed,
                     "Advertising stopped before it started");
@@ -3749,19 +4681,22 @@ namespace gmbluetooth
 
             try
             {
-                for (auto& [_, service] : gatt_services_)
                 {
-                    if (service && service->provider)
-                        service->provider.StopAdvertising();
+                    std::scoped_lock lock(le_->services_mutex);
+                    for (auto& [_, service] : le_->gatt_services)
+                    {
+                        if (service && service->provider)
+                            service->provider.StopAdvertising();
+                    }
                 }
                 release_advertiser_noexcept();
-                le_advertising_.store(false);
+                le_->le_advertising.store(false);
                 message.clear();
                 return Error::Ok;
             }
             catch (const winrt::hresult_error& error)
             {
-                le_advertising_.store(false);
+                le_->le_advertising.store(false);
                 release_advertiser_noexcept();
                 message = winrt::to_string(error.message());
                 return Error::OperationFailed;
@@ -3770,7 +4705,7 @@ namespace gmbluetooth
 
         bool le_advertise_is_running() const override
         {
-            return le_advertising_.load();
+            return le_->le_advertising.load();
         }
 
         // ===== BLE GATT Server =====
@@ -3799,7 +4734,7 @@ namespace gmbluetooth
             clear_queued_notifies(notify_queue_);
             complete_parked_gatt_requests_noexcept();
             clear_gatt_services_noexcept();
-            release_server_sessions_noexcept();
+            release_server_sessions_noexcept(le_);
             message.clear();
             return Error::Ok;
         }
@@ -3817,416 +4752,43 @@ namespace gmbluetooth
                 return Error::InvalidHandle;
             }
 
-            const auto root = json::parse(service_json);
-            if (!root || !root->is_object())
-            {
-                message = "Invalid BLE service definition";
-                return Error::InvalidArgument;
-            }
+            LocalServiceDefinition definition;
+            const Error parsed = parse_local_service(service_json, definition, message);
+            if (parsed != Error::Ok)
+                return parsed;
 
-            const auto* uuid_field = root->find("uuid");
-            if (!uuid_field || !uuid_field->is_string() || uuid_field->string_value.empty())
+            std::uint64_t generation = 0;
             {
-                message = "BLE service UUID is required";
-                return Error::InvalidArgument;
-            }
-
-            winrt::guid service_guid{};
-            if (!parse_winrt_guid(uuid_field->string_value, service_guid))
-            {
-                message = "Invalid BLE service UUID";
-                return Error::InvalidArgument;
-            }
-
-            // Refused before anything is created: Windows has no protection
-            // level for a signed write.
-            if (const auto* characteristics = root->find("characteristics"); characteristics && characteristics->is_array())
-            {
-                for (const auto& characteristic_value : characteristics->array_value)
-                {
-                    const auto* permissions_field = characteristic_value.is_object()
-                        ? characteristic_value.find("permissions")
-                        : nullptr;
-                    const std::int32_t permissions = permissions_field ? permissions_field->as_int(0) : 0;
-                    if ((permissions & (kPermissionWriteSigned | kPermissionWriteSignedMitm)) != 0)
-                    {
-                        message = "Windows has no signed-write permission: "
-                            "BluetoothLeAttributePermission.WriteSigned and WriteSignedMitm are not supported";
-                        return Error::NotSupported;
-                    }
-                }
-            }
-
-            try
-            {
-                const std::string service_uuid = normalize_uuid(uuid_field->string_value);
-                if (gatt_services_.find(service_uuid) != gatt_services_.end())
+                std::scoped_lock lock(le_->services_mutex);
+                if (le_->gatt_services.find(definition.uuid) != le_->gatt_services.end() ||
+                    le_->adding_services.find(definition.uuid) != le_->adding_services.end())
                 {
                     message = "BLE service already exists";
                     return Error::Busy;
                 }
-
-                const auto provider_result = WDBG::GattServiceProvider::CreateAsync(service_guid).get();
-                if (provider_result.Error() != WDB::BluetoothError::Success || !provider_result.ServiceProvider())
-                {
-                    message = bluetooth_error_message(provider_result.Error());
-                    return map_bluetooth_error(provider_result.Error());
-                }
-
-                auto service_state = std::make_shared<LocalGattServiceState>();
-                service_state->uuid = service_uuid;
-                service_state->provider = provider_result.ServiceProvider();
-
-                if (const auto* characteristics = root->find("characteristics"); characteristics && characteristics->is_array())
-                {
-                    for (const auto& characteristic_value : characteristics->array_value)
-                    {
-                        if (!characteristic_value.is_object())
-                            continue;
-
-                        const auto* char_uuid_field = characteristic_value.find("uuid");
-                        if (!char_uuid_field || !char_uuid_field->is_string())
-                            continue;
-
-                        winrt::guid characteristic_guid{};
-                        if (!parse_winrt_guid(char_uuid_field->string_value, characteristic_guid))
-                        {
-                            message = "Invalid BLE characteristic UUID";
-                            return Error::InvalidArgument;
-                        }
-
-                        const std::string characteristic_uuid = normalize_uuid(char_uuid_field->string_value);
-                        const std::int32_t raw_properties = characteristic_value.find("properties")
-                            ? characteristic_value.find("properties")->as_int(0)
-                            : 0;
-                        const std::int32_t permissions = characteristic_value.find("permissions")
-                            ? characteristic_value.find("permissions")->as_int(0)
-                            : 0;
-
-                        WDBG::GattLocalCharacteristicParameters parameters;
-                        // Windows local GATT rejects Broadcast. All other raw
-                        // BluetoothLeCharacteristicProperty values map directly.
-                        const auto windows_properties = static_cast<WDBG::GattCharacteristicProperties>(raw_properties & ~1);
-                        parameters.CharacteristicProperties(windows_properties);
-                        parameters.ReadProtectionLevel(read_protection_from_permissions(permissions));
-                        parameters.WriteProtectionLevel(write_protection_from_permissions(permissions));
-
-                        if (const auto* initial_value = characteristic_value.find("value");
-                            initial_value && initial_value->is_string() && !initial_value->string_value.empty())
-                        {
-                            parameters.StaticValue(bytes_to_buffer(json::base64_decode(initial_value->string_value)));
-                        }
-
-                        const auto characteristic_result = service_state->provider.Service()
-                            .CreateCharacteristicAsync(characteristic_guid, parameters).get();
-                        if (characteristic_result.Error() != WDB::BluetoothError::Success || !characteristic_result.Characteristic())
-                        {
-                            message = bluetooth_error_message(characteristic_result.Error());
-                            return map_bluetooth_error(characteristic_result.Error());
-                        }
-
-                        auto characteristic_state = std::make_shared<LocalGattCharacteristicState>();
-                        characteristic_state->service_uuid = service_uuid;
-                        characteristic_state->characteristic_uuid = characteristic_uuid;
-                        characteristic_state->characteristic = characteristic_result.Characteristic();
-
-                        characteristic_state->subscribed_token = characteristic_state->characteristic.SubscribedClientsChanged(
-                            [this](const WDBG::GattLocalCharacteristic& characteristic, const winrt::Windows::Foundation::IInspectable&)
-                            {
-                                try
-                                {
-                                    for (const auto& client : characteristic.SubscribedClients())
-                                    {
-                                        std::string address;
-                                        bool is_new = false;
-                                        const std::string central = note_server_session(client.Session(), address, is_new);
-                                        if (is_new)
-                                            push_server_connection_state(central, address, true);
-                                    }
-                                }
-                                catch (...)
-                                {
-                                }
-                            });
-
-                        characteristic_state->read_token = characteristic_state->characteristic.ReadRequested(
-                            [this, service_uuid, characteristic_uuid](
-                                const WDBG::GattLocalCharacteristic&,
-                                const WDBG::GattReadRequestedEventArgs& args)
-                            {
-                                const auto deferral = args.GetDeferral();
-                                try
-                                {
-                                    const auto request = args.GetRequestAsync().get();
-                                    if (!request)
-                                    {
-                                        deferral.Complete();
-                                        return;
-                                    }
-
-                                    const std::int32_t request_id = next_gatt_request_id_.fetch_add(1);
-                                    {
-                                        std::scoped_lock lock(gatt_request_mutex_);
-                                        pending_gatt_reads_[request_id] = PendingGattRead{request, deferral};
-                                    }
-
-                                    std::string central_address;
-                                    bool central_is_new = false;
-                                    const std::string central = note_server_session(args.Session(), central_address, central_is_new);
-
-                                    if (hooks_.push_event)
-                                    {
-                                        BackendEvent event;
-                                        event.type = BackendEventType::LeEvent;
-                                        event.transport = Transport::LowEnergy;
-                                        event.event_type = "bluetooth_le_server_characteristic_read_request";
-                                        event.json = make_server_request_json(
-                                            request_id,
-                                            central,
-                                            central_address,
-                                            service_uuid,
-                                            characteristic_uuid,
-                                            {},
-                                            request.Offset(),
-                                            nullptr);
-                                        hooks_.push_event(std::move(event));
-                                    }
-                                }
-                                catch (...)
-                                {
-                                    deferral.Complete();
-                                }
-                            });
-
-                        characteristic_state->write_token = characteristic_state->characteristic.WriteRequested(
-                            [this, service_uuid, characteristic_uuid](
-                                const WDBG::GattLocalCharacteristic&,
-                                const WDBG::GattWriteRequestedEventArgs& args)
-                            {
-                                const auto deferral = args.GetDeferral();
-                                try
-                                {
-                                    const auto request = args.GetRequestAsync().get();
-                                    if (!request)
-                                    {
-                                        deferral.Complete();
-                                        return;
-                                    }
-
-                                    const std::vector<std::uint8_t> value = buffer_to_bytes(request.Value());
-                                    const bool with_response = request.Option() == WDBG::GattWriteOption::WriteWithResponse;
-                                    const std::int32_t request_id = next_gatt_request_id_.fetch_add(1);
-                                    // A write without response needs no answer: it is completed now and
-                                    // the core keeps its value for GML, instead of the deferral waiting
-                                    // on a respond_write nothing obliges the game to send.
-                                    if (with_response)
-                                    {
-                                        std::scoped_lock lock(gatt_request_mutex_);
-                                        pending_gatt_writes_[request_id] = PendingGattWrite{request, deferral, with_response};
-                                    }
-                                    else
-                                    {
-                                        deferral.Complete();
-                                    }
-
-                                    std::string central_address;
-                                    bool central_is_new = false;
-                                    const std::string central = note_server_session(args.Session(), central_address, central_is_new);
-
-                                    if (hooks_.push_event)
-                                    {
-                                        BackendEvent event;
-                                        event.type = BackendEventType::LeEvent;
-                                        event.transport = Transport::LowEnergy;
-                                        event.event_type = "bluetooth_le_server_characteristic_write_request";
-                                        event.json = make_server_request_json(
-                                            request_id,
-                                            central,
-                                            central_address,
-                                            service_uuid,
-                                            characteristic_uuid,
-                                            {},
-                                            request.Offset(),
-                                            &value,
-                                            with_response);
-                                        hooks_.push_event(std::move(event));
-                                    }
-                                }
-                                catch (...)
-                                {
-                                    deferral.Complete();
-                                }
-                            });
-
-                        if (const auto* descriptors = characteristic_value.find("descriptors"); descriptors && descriptors->is_array())
-                        {
-                            for (const auto& descriptor_value : descriptors->array_value)
-                            {
-                                if (!descriptor_value.is_object())
-                                    continue;
-                                const auto* descriptor_uuid_field = descriptor_value.find("uuid");
-                                if (!descriptor_uuid_field || !descriptor_uuid_field->is_string())
-                                    continue;
-
-                                winrt::guid descriptor_guid{};
-                                if (!parse_winrt_guid(descriptor_uuid_field->string_value, descriptor_guid))
-                                {
-                                    message = "Invalid BLE descriptor UUID";
-                                    return Error::InvalidArgument;
-                                }
-
-                                const std::string descriptor_uuid = normalize_uuid(descriptor_uuid_field->string_value);
-
-                                // Windows creates the Client Characteristic Configuration
-                                // descriptor automatically for Notify/Indicate characteristics.
-                                if (descriptor_uuid == "00002902-0000-1000-8000-00805f9b34fb")
-                                    continue;
-
-                                WDBG::GattLocalDescriptorParameters descriptor_parameters;
-                                descriptor_parameters.ReadProtectionLevel(WDBG::GattProtectionLevel::Plain);
-                                descriptor_parameters.WriteProtectionLevel(WDBG::GattProtectionLevel::Plain);
-
-                                const auto descriptor_result = characteristic_state->characteristic
-                                    .CreateDescriptorAsync(descriptor_guid, descriptor_parameters).get();
-                                if (descriptor_result.Error() != WDB::BluetoothError::Success || !descriptor_result.Descriptor())
-                                {
-                                    message = bluetooth_error_message(descriptor_result.Error());
-                                    return map_bluetooth_error(descriptor_result.Error());
-                                }
-
-                                auto descriptor_state = std::make_shared<LocalGattDescriptorState>();
-                                descriptor_state->descriptor = descriptor_result.Descriptor();
-                                descriptor_state->read_token = descriptor_state->descriptor.ReadRequested(
-                                    [this, service_uuid, characteristic_uuid, descriptor_uuid](
-                                        const WDBG::GattLocalDescriptor&,
-                                        const WDBG::GattReadRequestedEventArgs& args)
-                                    {
-                                        const auto deferral = args.GetDeferral();
-                                        try
-                                        {
-                                            const auto request = args.GetRequestAsync().get();
-                                            if (!request)
-                                            {
-                                                deferral.Complete();
-                                                return;
-                                            }
-
-                                            const std::int32_t request_id = next_gatt_request_id_.fetch_add(1);
-                                            {
-                                                std::scoped_lock lock(gatt_request_mutex_);
-                                                pending_gatt_reads_[request_id] = PendingGattRead{request, deferral};
-                                            }
-
-                                            std::string central_address;
-                                            bool central_is_new = false;
-                                            const std::string central = note_server_session(args.Session(), central_address, central_is_new);
-
-                                            if (hooks_.push_event)
-                                            {
-                                                BackendEvent event;
-                                                event.type = BackendEventType::LeEvent;
-                                                event.transport = Transport::LowEnergy;
-                                                event.event_type = "bluetooth_le_server_descriptor_read_request";
-                                                event.json = make_server_request_json(
-                                                    request_id,
-                                                    central,
-                                                    central_address,
-                                                    service_uuid,
-                                                    characteristic_uuid,
-                                                    descriptor_uuid,
-                                                    request.Offset(),
-                                                    nullptr);
-                                                hooks_.push_event(std::move(event));
-                                            }
-                                        }
-                                        catch (...)
-                                        {
-                                            deferral.Complete();
-                                        }
-                                    });
-
-                                descriptor_state->write_token = descriptor_state->descriptor.WriteRequested(
-                                    [this, service_uuid, characteristic_uuid, descriptor_uuid](
-                                        const WDBG::GattLocalDescriptor&,
-                                        const WDBG::GattWriteRequestedEventArgs& args)
-                                    {
-                                        const auto deferral = args.GetDeferral();
-                                        try
-                                        {
-                                            const auto request = args.GetRequestAsync().get();
-                                            if (!request)
-                                            {
-                                                deferral.Complete();
-                                                return;
-                                            }
-
-                                            const std::vector<std::uint8_t> value = buffer_to_bytes(request.Value());
-                                            const bool with_response = request.Option() == WDBG::GattWriteOption::WriteWithResponse;
-                                            const std::int32_t request_id = next_gatt_request_id_.fetch_add(1);
-                                            // A write without response needs no answer: it is completed now and
-                                            // the core keeps its value for GML, instead of the deferral waiting
-                                            // on a respond_write nothing obliges the game to send.
-                                            if (with_response)
-                                            {
-                                                std::scoped_lock lock(gatt_request_mutex_);
-                                                pending_gatt_writes_[request_id] = PendingGattWrite{request, deferral, with_response};
-                                            }
-                                            else
-                                            {
-                                                deferral.Complete();
-                                            }
-
-                                            std::string central_address;
-                                            bool central_is_new = false;
-                                            const std::string central = note_server_session(args.Session(), central_address, central_is_new);
-
-                                            if (hooks_.push_event)
-                                            {
-                                                BackendEvent event;
-                                                event.type = BackendEventType::LeEvent;
-                                                event.transport = Transport::LowEnergy;
-                                                event.event_type = "bluetooth_le_server_descriptor_write_request";
-                                                event.json = make_server_request_json(
-                                                    request_id,
-                                                    central,
-                                                    central_address,
-                                                    service_uuid,
-                                                    characteristic_uuid,
-                                                    descriptor_uuid,
-                                                    request.Offset(),
-                                                    &value,
-                                                    with_response);
-                                                hooks_.push_event(std::move(event));
-                                            }
-                                        }
-                                        catch (...)
-                                        {
-                                            deferral.Complete();
-                                        }
-                                    });
-
-                                characteristic_state->descriptors.push_back(std::move(descriptor_state));
-                            }
-                        }
-
-                        service_state->characteristics[characteristic_uuid] = characteristic_state;
-                    }
-                }
-
-                gatt_services_[service_uuid] = service_state;
-                if (le_advertising_.load())
-                    start_service_advertising(service_state);
-
-                push_le_completion_async(op_id);
-
-                message.clear();
-                return Error::Ok;
+                le_->adding_services.insert(definition.uuid);
+                generation = le_->server_generation;
             }
-            catch (const winrt::hresult_error& error)
+
+            // Creating the provider and each attribute waits on WinRT, so it
+            // runs on the worker, which completes op_id (R1-103).
+            const auto le = le_;
+            const bool posted = le_worker_ && le_worker_->post(
+                [le, op_id, definition, generation]()
+                {
+                    build_local_service(le, op_id, definition, generation);
+                });
+
+            if (!posted)
             {
-                message = winrt::to_string(error.message());
+                std::scoped_lock lock(le_->services_mutex);
+                le_->adding_services.erase(definition.uuid);
+                message = "The Bluetooth worker thread is not running";
                 return Error::OperationFailed;
             }
+
+            message.clear();
+            return Error::Ok;
         }
 
         Error le_server_clear_services(std::string& message) override
@@ -4246,21 +4808,19 @@ namespace gmbluetooth
         {
             PendingGattRead pending;
             {
-                std::scoped_lock lock(gatt_request_mutex_);
-                const auto it = pending_gatt_reads_.find(request_id);
-                if (it == pending_gatt_reads_.end())
+                std::scoped_lock lock(le_->gatt_request_mutex);
+                const auto it = le_->pending_gatt_reads.find(request_id);
+                if (it == le_->pending_gatt_reads.end())
                 {
                     message = "BLE read request not found";
                     return Error::NotFound;
                 }
                 pending = it->second;
-                pending_gatt_reads_.erase(it);
+                le_->pending_gatt_reads.erase(it);
             }
 
             try
             {
-                WinrtWorkerApartment apartment;
-
                 GMBT_LOG(
                     "Responding to GATT read: request_id=%d status=%d request_state=%d request_offset=%u bytes=%zu",
                     request_id,
@@ -4310,21 +4870,19 @@ namespace gmbluetooth
         {
             PendingGattWrite pending;
             {
-                std::scoped_lock lock(gatt_request_mutex_);
-                const auto it = pending_gatt_writes_.find(request_id);
-                if (it == pending_gatt_writes_.end())
+                std::scoped_lock lock(le_->gatt_request_mutex);
+                const auto it = le_->pending_gatt_writes.find(request_id);
+                if (it == le_->pending_gatt_writes.end())
                 {
                     message = "BLE write request not found";
                     return Error::NotFound;
                 }
                 pending = it->second;
-                pending_gatt_writes_.erase(it);
+                le_->pending_gatt_writes.erase(it);
             }
 
             try
             {
-                WinrtWorkerApartment apartment;
-
                 GMBT_LOG(
                     "Responding to GATT write: request_id=%d status=%d with_response=%d request_state=%d bytes=%u",
                     request_id,
@@ -4375,19 +4933,24 @@ namespace gmbluetooth
             const std::string& value_base64,
             std::string& message) override
         {
-            const auto service_it = gatt_services_.find(normalize_uuid(service_uuid));
-            if (service_it == gatt_services_.end() || !service_it->second)
+            WDBG::GattLocalCharacteristic characteristic{nullptr};
             {
-                message = "BLE service not found";
-                return Error::NotFound;
-            }
+                std::scoped_lock lock(le_->services_mutex);
+                const auto service_it = le_->gatt_services.find(normalize_uuid(service_uuid));
+                if (service_it == le_->gatt_services.end() || !service_it->second)
+                {
+                    message = "BLE service not found";
+                    return Error::NotFound;
+                }
 
-            const auto characteristic_it = service_it->second->characteristics.find(normalize_uuid(characteristic_uuid));
-            if (characteristic_it == service_it->second->characteristics.end() ||
-                !characteristic_it->second || !characteristic_it->second->characteristic)
-            {
-                message = "BLE characteristic not found";
-                return Error::NotFound;
+                const auto characteristic_it = service_it->second->characteristics.find(normalize_uuid(characteristic_uuid));
+                if (characteristic_it == service_it->second->characteristics.end() ||
+                    !characteristic_it->second || !characteristic_it->second->characteristic)
+                {
+                    message = "BLE characteristic not found";
+                    return Error::NotFound;
+                }
+                characteristic = characteristic_it->second->characteristic;
             }
 
             // A notify to one central goes to its subscription only (R1-48).
@@ -4396,7 +4959,7 @@ namespace gmbluetooth
             {
                 try
                 {
-                    for (const auto& subscribed : characteristic_it->second->characteristic.SubscribedClients())
+                    for (const auto& subscribed : characteristic.SubscribedClients())
                     {
                         if (winrt::to_string(subscribed.Session().DeviceId().Id()) == central)
                         {
@@ -4429,7 +4992,7 @@ namespace gmbluetooth
                 }
 
                 PendingNotify pending;
-                pending.characteristic = characteristic_it->second->characteristic;
+                pending.characteristic = characteristic;
                 pending.client = client;
                 pending.bytes = json::base64_decode(value_base64);
                 notifies->queue.push_back(std::move(pending));
@@ -4613,6 +5176,23 @@ namespace gmbluetooth
                 return Error::InvalidArgument;
             }
 
+            // An already-paired device completes at once, as Android does
+            // (R1-111); the core registered the callback before this call.
+            if (is_paired(device))
+            {
+                if (hooks_.push_event)
+                {
+                    BackendEvent event;
+                    event.type = BackendEventType::DevicePaired;
+                    event.transport = Transport::Classic;
+                    event.device = device_handle;
+                    event.error = Error::Ok;
+                    hooks_.push_event(std::move(event));
+                }
+                message.clear();
+                return Error::Ok;
+            }
+
             const auto shared = classic_;
             const auto alive = classic_->alive;
 
@@ -4636,14 +5216,21 @@ namespace gmbluetooth
                 event.transport = Transport::Classic;
                 event.device = device_handle;
 
-                if (result == ERROR_SUCCESS)
+                // ERROR_NO_MORE_ITEMS: the device was already authenticated.
+                // A cancel keeps OperationFailed - no other platform can tell
+                // it apart - but says so.
+                if (result == ERROR_SUCCESS || result == ERROR_NO_MORE_ITEMS)
                 {
                     event.error = Error::Ok;
                 }
                 else
                 {
                     event.error = Error::OperationFailed;
-                    event.message = "BluetoothAuthenticateDeviceEx failed: " + std::to_string(result);
+                    event.message = system_error_message(
+                        result == ERROR_CANCELLED
+                            ? "Pairing was cancelled by the user: BluetoothAuthenticateDeviceEx"
+                            : "BluetoothAuthenticateDeviceEx",
+                        result);
                 }
 
                 shared->hooks.push_event(std::move(event));
@@ -4983,20 +5570,27 @@ namespace gmbluetooth
             }
             BluetoothFindRadioClose(find);
 
+            // Incoming connections are a system setting; whatever this turns
+            // on is turned back off by the stop or the expiry (R1-184).
+            const bool restore_connectable = BluetoothIsConnectable(radio_handle) == FALSE;
+
             if (!BluetoothEnableIncomingConnections(radio_handle, TRUE))
             {
+                message = system_error_message("BluetoothEnableIncomingConnections", GetLastError());
                 CloseHandle(radio_handle);
-                message = "BluetoothEnableIncomingConnections failed";
                 return Error::OperationFailed;
             }
 
             if (!BluetoothEnableDiscovery(radio_handle, TRUE))
             {
+                message = system_error_message("BluetoothEnableDiscovery", GetLastError());
+                if (restore_connectable)
+                    BluetoothEnableIncomingConnections(radio_handle, FALSE);
                 CloseHandle(radio_handle);
-                message = "BluetoothEnableDiscovery failed";
                 return Error::OperationFailed;
             }
 
+            discoverable_restore_connectable_ = restore_connectable;
             discoverable_radio_ = radio_handle;
             classic_discoverable_active_.store(true);
             {
@@ -5023,8 +5617,7 @@ namespace gmbluetooth
                     // classic_discoverable_stop() owns disabling/closing the radio.
                     if (!stopped)
                     {
-                        if (discoverable_radio_)
-                            BluetoothEnableDiscovery(discoverable_radio_, FALSE);
+                        end_discoverable(discoverable_radio_);
                         classic_discoverable_active_.store(false);
                     }
                 });
@@ -5032,6 +5625,17 @@ namespace gmbluetooth
 
             message.clear();
             return Error::Ok;
+        }
+
+        // Discovery off, and incoming connections back off when start turned
+        // them on; the restore happens once, on expiry or on stop.
+        void end_discoverable(HANDLE radio)
+        {
+            if (!radio)
+                return;
+            BluetoothEnableDiscovery(radio, FALSE);
+            if (discoverable_restore_connectable_.exchange(false))
+                BluetoothEnableIncomingConnections(radio, FALSE);
         }
 
         Error classic_discoverable_stop(std::string& message) override
@@ -5047,7 +5651,7 @@ namespace gmbluetooth
 
             if (discoverable_radio_)
             {
-                BluetoothEnableDiscovery(discoverable_radio_, FALSE);
+                end_discoverable(discoverable_radio_);
                 CloseHandle(discoverable_radio_);
                 discoverable_radio_ = nullptr;
             }
@@ -5079,135 +5683,6 @@ namespace gmbluetooth
         }
 
     private:
-        // A remote central's GattSession, kept from its first server event
-        // until it closes. Windows has no "central connected" event for a
-        // GATT server; the first request or subscription stands for it, and
-        // the session closing is the disconnect (R1-23).
-        struct ServerSession
-        {
-            WDBG::GattSession session{nullptr};
-            winrt::event_token status_token{};
-        };
-
-        // The key the core knows the central by - its session's device id -
-        // registering the session on first sight; is_new says it was. Empty
-        // for a session that names no device.
-        std::string note_server_session(const WDBG::GattSession& session, std::string& address, bool& is_new)
-        {
-            is_new = false;
-            if (!session)
-                return std::string();
-
-            std::string central;
-            try
-            {
-                central = winrt::to_string(session.DeviceId().Id());
-            }
-            catch (...)
-            {
-                return std::string();
-            }
-            address = address_from_device_id(central);
-
-            std::scoped_lock lock(server_sessions_mutex_);
-            if (server_sessions_.find(central) != server_sessions_.end())
-                return central;
-
-            ServerSession entry;
-            entry.session = session;
-            try
-            {
-                entry.status_token = session.SessionStatusChanged(
-                    [this, central, address](const WDBG::GattSession&, const WDBG::GattSessionStatusChangedEventArgs& args)
-                    {
-                        if (args.Status() == WDBG::GattSessionStatus::Closed)
-                            server_session_closed(central, address);
-                    });
-            }
-            catch (...)
-            {
-            }
-            server_sessions_.emplace(central, std::move(entry));
-            is_new = true;
-            return central;
-        }
-
-        void push_server_connection_state(const std::string& central, const std::string& address, bool connected)
-        {
-            if (!hooks_.push_event || central.empty())
-                return;
-
-            BackendEvent event;
-            event.type = BackendEventType::LeEvent;
-            event.transport = Transport::LowEnergy;
-            event.event_type = "bluetooth_le_server_connection_state_changed";
-            event.json = std::string("{\"connected\":") + (connected ? "true" : "false") + "," +
-                server_central_json(central, address) + "}";
-            hooks_.push_event(std::move(event));
-        }
-
-        void server_session_closed(const std::string& central, const std::string& address)
-        {
-            ServerSession entry;
-            {
-                std::scoped_lock lock(server_sessions_mutex_);
-                const auto it = server_sessions_.find(central);
-                if (it == server_sessions_.end())
-                    return;
-                entry = std::move(it->second);
-                server_sessions_.erase(it);
-            }
-
-            try
-            {
-                entry.session.SessionStatusChanged(entry.status_token);
-            }
-            catch (...)
-            {
-            }
-            push_server_connection_state(central, address, false);
-        }
-
-        // The server stopped: the core retires every central itself, so the
-        // sessions are only let go.
-        void release_server_sessions_noexcept() noexcept
-        {
-            std::unordered_map<std::string, ServerSession> sessions;
-            {
-                std::scoped_lock lock(server_sessions_mutex_);
-                sessions.swap(server_sessions_);
-            }
-
-            for (auto& [_, entry] : sessions)
-            {
-                try
-                {
-                    entry.session.SessionStatusChanged(entry.status_token);
-                }
-                catch (...)
-                {
-                }
-            }
-        }
-
-        void start_service_advertising(const std::shared_ptr<LocalGattServiceState>& service)
-        {
-            if (!service || !service->provider)
-                return;
-            if (advertise_service_uuids_.find(service->uuid) == advertise_service_uuids_.end())
-                return;
-
-            WDBG::GattServiceProviderAdvertisingParameters parameters;
-            parameters.IsConnectable(advertise_connectable_);
-            parameters.IsDiscoverable(advertise_discoverable_);
-
-            const auto data_it = advertise_service_data_.find(service->uuid);
-            if (data_it != advertise_service_data_.end() && !data_it->second.empty())
-                parameters.ServiceData(bytes_to_buffer(data_it->second));
-
-            service->provider.StartAdvertising(parameters);
-        }
-
         // Completes every request still parked, so no central waits out the ATT
         // timeout on a server that stopped or dropped its services. The core
         // answers the ones it holds first; this catches anything left.
@@ -5216,52 +5691,45 @@ namespace gmbluetooth
             std::unordered_map<std::int32_t, PendingGattRead> reads;
             std::unordered_map<std::int32_t, PendingGattWrite> writes;
             {
-                std::scoped_lock lock(gatt_request_mutex_);
-                reads.swap(pending_gatt_reads_);
-                writes.swap(pending_gatt_writes_);
+                std::scoped_lock lock(le_->gatt_request_mutex);
+                reads.swap(le_->pending_gatt_reads);
+                writes.swap(le_->pending_gatt_writes);
             }
-            if (reads.empty() && writes.empty())
-                return;
 
             constexpr std::uint8_t unlikely_error = 0x0E;
-            try
+            for (auto& [request_id, pending] : reads)
             {
-                WinrtWorkerApartment apartment;
-                for (auto& [request_id, pending] : reads)
-                {
-                    (void)request_id;
-                    try { pending.request.RespondWithProtocolError(unlikely_error); } catch (...) {}
-                    try { if (pending.deferral) pending.deferral.Complete(); } catch (...) {}
-                }
-                for (auto& [request_id, pending] : writes)
-                {
-                    (void)request_id;
-                    if (pending.with_response)
-                    {
-                        try { pending.request.RespondWithProtocolError(unlikely_error); } catch (...) {}
-                    }
-                    try { if (pending.deferral) pending.deferral.Complete(); } catch (...) {}
-                }
+                (void)request_id;
+                try { pending.request.RespondWithProtocolError(unlikely_error); } catch (...) {}
+                try { if (pending.deferral) pending.deferral.Complete(); } catch (...) {}
             }
-            catch (...)
+            for (auto& [request_id, pending] : writes)
             {
+                (void)request_id;
+                if (pending.with_response)
+                {
+                    try { pending.request.RespondWithProtocolError(unlikely_error); } catch (...) {}
+                }
+                try { if (pending.deferral) pending.deferral.Complete(); } catch (...) {}
             }
         }
 
+        // Drops every service with its handlers revoked; an add still in
+        // flight sees the new generation and is dropped too.
         void clear_gatt_services_noexcept() noexcept
         {
-            try
+            std::unordered_map<std::string, std::shared_ptr<LocalGattServiceState>> services;
             {
-                for (auto& [_, service] : gatt_services_)
-                {
-                    if (service && service->provider)
-                        service->provider.StopAdvertising();
-                }
+                std::scoped_lock lock(le_->services_mutex);
+                services.swap(le_->gatt_services);
+                ++le_->server_generation;
             }
-            catch (...)
+
+            for (auto& [_, service] : services)
             {
+                if (service)
+                    release_local_service_noexcept(*service);
             }
-            gatt_services_.clear();
         }
 
         void release_advertiser_noexcept() noexcept
@@ -5288,17 +5756,24 @@ namespace gmbluetooth
 
         void release_radio_noexcept() noexcept
         {
+            WDR::Radio radio{nullptr};
+            winrt::event_token token{};
+            {
+                std::scoped_lock lock(le_->radio_mutex);
+                radio = le_->radio;
+                token = le_->radio_state_token;
+                le_->radio = nullptr;
+                le_->radio_state_token = {};
+            }
+
             try
             {
-                if (bluetooth_radio_ && radio_state_token_.value != 0)
-                    bluetooth_radio_.StateChanged(radio_state_token_);
+                if (radio && token.value != 0)
+                    radio.StateChanged(token);
             }
             catch (...)
             {
             }
-            radio_state_token_ = {};
-            bluetooth_radio_ = nullptr;
-            bluetooth_adapter_ = nullptr;
         }
 
         void release_watcher_noexcept() noexcept
@@ -5330,46 +5805,26 @@ namespace gmbluetooth
         std::shared_ptr<WorkerTracker> workers_ = std::make_shared<WorkerTracker>();
         std::shared_ptr<SharedClassicState> classic_;
         std::shared_ptr<SharedLeClientState> le_client_;
+        std::shared_ptr<SharedLeState> le_ = std::make_shared<SharedLeState>();
+        // Runs the adapter query, service creation and the close of a link
+        // the peer dropped; started by initialize, stopped last by shutdown.
+        std::shared_ptr<SerialWorker> le_worker_;
         std::shared_ptr<NotifyQueueState> notify_queue_ = std::make_shared<NotifyQueueState>();
         std::shared_ptr<AdvertiseStartTracker> advertise_tracker_;
-        std::atomic<std::uint64_t> advertise_generation_{0};
 
         bool initialized_ = false;
-        bool owns_apartment_ = false;
         bool winsock_initialized_ = false;
 
-        std::atomic_bool le_scanning_{false};
         WDBA::BluetoothLEAdvertisementWatcher watcher_{nullptr};
         winrt::event_token received_token_{};
         winrt::event_token stopped_token_{};
 
-        WDB::BluetoothAdapter bluetooth_adapter_{nullptr};
-        WDR::Radio bluetooth_radio_{nullptr};
-        winrt::event_token radio_state_token_{};
-        std::atomic<std::int32_t> bluetooth_state_{0};
-        bool ble_supported_ = true;
-        bool le_peripheral_supported_ = true;
-
-        std::atomic_bool le_advertising_{false};
         WDBA::BluetoothLEAdvertisementPublisher advertiser_{nullptr};
         winrt::event_token advertiser_status_token_{};
-        bool advertise_connectable_ = true;
-        bool advertise_discoverable_ = true;
         bool advertise_include_power_ = false;
         std::optional<std::int16_t> advertise_tx_power_;
-        // The registered services advertise_start listed: only these advertise.
-        std::unordered_set<std::string> advertise_service_uuids_;
-
-        std::mutex server_sessions_mutex_;
-        std::unordered_map<std::string, ServerSession> server_sessions_;
-        std::unordered_map<std::string, std::vector<std::uint8_t>> advertise_service_data_;
 
         std::atomic_bool le_server_open_{false};
-        std::unordered_map<std::string, std::shared_ptr<LocalGattServiceState>> gatt_services_;
-        std::mutex gatt_request_mutex_;
-        std::unordered_map<std::int32_t, PendingGattRead> pending_gatt_reads_;
-        std::unordered_map<std::int32_t, PendingGattWrite> pending_gatt_writes_;
-        std::atomic<std::int32_t> next_gatt_request_id_{1};
 
         std::shared_ptr<ClassicScanState> classic_scan_ = std::make_shared<ClassicScanState>();
         // The newest inquiry thread. Joined by the next scan's thread, or by
@@ -5392,6 +5847,8 @@ namespace gmbluetooth
         bool classic_discoverable_stop_requested_ = false; // under discoverable_mutex_
         std::thread discoverable_timer_thread_;
         HANDLE discoverable_radio_ = nullptr;
+        // Start turned incoming connections on, so the end turns them off.
+        std::atomic_bool discoverable_restore_connectable_{false};
     };
 
     std::unique_ptr<Backend> create_platform_backend(CoreHooks hooks)

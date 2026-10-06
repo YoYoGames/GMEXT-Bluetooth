@@ -1855,7 +1855,16 @@ bool bluetooth_initialize()
         g_backend->supports_classic() ? 1 : 0,
         g_backend->supports_classic_server() ? 1 : 0);
 
-    return error == Error::Ok;
+    // A backend whose initialize failed is let go, so bluetooth_is_initialized
+    // says false and a retry really retries (R1-52). The error stays set.
+    if (error != Error::Ok)
+    {
+        g_backend->shutdown();
+        g_backend.reset();
+        return false;
+    }
+
+    return true;
 }
 
 void bluetooth_shutdown()
