@@ -29,9 +29,12 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.location.LocationManager;
 import android.os.Build;
 import android.os.ParcelUuid;
+import android.provider.Settings;
 import android.util.Base64;
 
 import org.json.JSONArray;
@@ -200,6 +203,12 @@ public class GMBluetooth extends GMBluetoothInternal
             switch (current.getState())
             {
                 case BluetoothAdapter.STATE_ON:
+                    // On, but the app may not use it: Android 12+ grants the
+                    // nearby-devices permissions at runtime, and Apple
+                    // reports the same situation as Unauthorized.
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                        (!hasScanPermission() || !hasConnectPermission()))
+                        return STATE_UNAUTHORIZED;
                     return STATE_POWERED_ON;
                 case BluetoothAdapter.STATE_OFF:
                     return STATE_POWERED_OFF;
@@ -472,7 +481,9 @@ public class GMBluetooth extends GMBluetoothInternal
 
     private static final class LeServerRequestEntry
     {
-        int requestId;
+        // The stack's id, which it allocates per link: two centrals can use
+        // the same one, so GML sees the extension's own id instead.
+        int stackRequestId;
         long connection;
         BluetoothDevice device;
         String serviceUuid = "";
@@ -482,11 +493,47 @@ public class GMBluetooth extends GMBluetoothInternal
         boolean responseNeeded;
         byte[] writeValue = new byte[0];
         long receivedAtNanos = System.nanoTime();
+
+        // Set for one attribute of an executed prepared write; the execute is
+        // answered once, through the batch.
+        LeServerWriteBatch batch;
+    }
+
+    // An Execute Write: one write request per attribute the central prepared,
+    // answered once when the last of them is - the first error, or success.
+    private static final class LeServerWriteBatch
+    {
+        BluetoothDevice device;
+        int stackRequestId;
+        int remaining;
+        int status = BluetoothGatt.GATT_SUCCESS;
+    }
+
+    // The fragments a central has prepared for one attribute, laid out at
+    // their offsets, until its Execute Write.
+    private static final class LeServerPreparedWrite
+    {
+        BluetoothGattCharacteristic characteristic;
+        BluetoothGattDescriptor descriptor;
+        byte[] value = new byte[0];
     }
 
     // A write without response needs no answer, so nothing else removes it.
     // It is kept this long for GML to read its value, then dropped.
     private static final long NO_RESPONSE_WRITE_TTL_NANOS = 5_000_000_000L;
+
+    // The ATT transaction timeout: a request still waiting after this has
+    // already cost the central its link.
+    private static final long SERVER_REQUEST_TTL_NANOS = 30_000_000_000L;
+
+    // The longest attribute value ATT allows.
+    private static final int MAX_ATTRIBUTE_LENGTH = 512;
+
+    // ATT error codes the extension answers with when GML does not.
+    private static final int ATT_REQUEST_NOT_SUPPORTED = 0x06;
+    private static final int ATT_INVALID_OFFSET = 0x07;
+    private static final int ATT_INVALID_ATTRIBUTE_LENGTH = 0x0D;
+    private static final int ATT_UNLIKELY_ERROR = 0x0E;
 
     private final Object leConnectionLock = new Object();
     private final HashMap<Long, LeConnectionEntry> leConnections = new HashMap<>();
@@ -529,6 +576,19 @@ public class GMBluetooth extends GMBluetoothInternal
 
     private final Object leServerRequestLock = new Object();
     private final HashMap<Integer, LeServerRequestEntry> leServerRequests = new HashMap<>();
+    private int nextLeServerRequestId = 1;
+
+    // Per central (by address), the attributes it has prepared writes for, in
+    // the order it first wrote them. Guarded by leServerRequestLock.
+    private final HashMap<String, LinkedHashMap<Object, LeServerPreparedWrite>> leServerPreparedWrites =
+        new HashMap<>();
+
+    // Initial values from add_service, served here without reaching GML, as
+    // Windows (StaticValue) and Apple (a cached value) serve theirs. Keyed by
+    // the characteristic object the server hands back in its read requests.
+    private final Object leServerInitialValueLock = new Object();
+    private final IdentityHashMap<BluetoothGattCharacteristic, byte[]> leServerInitialValues =
+        new IdentityHashMap<>();
 
     // Android does not track who subscribed to notify/indicate for a locally
     // hosted characteristic - this is populated from CCCD descriptor writes
@@ -578,6 +638,22 @@ public class GMBluetooth extends GMBluetoothInternal
     {
         Activity current = activity();
         return current != null ? current.getApplicationContext() : null;
+    }
+
+
+    // A UUID from GML. A 4- or 8-hex-digit SIG UUID ("180D") is expanded onto
+    // the Bluetooth base UUID, as CoreBluetooth and the native core read it;
+    // UUID.fromString alone takes only the 36-character form.
+    private static UUID parseUuid(String text)
+    {
+        String value = text != null ? text.trim() : "";
+
+        if (value.length() == 4)
+            value = "0000" + value + "-0000-1000-8000-00805f9b34fb";
+        else if (value.length() == 8)
+            value = value + "-0000-1000-8000-00805f9b34fb";
+
+        return UUID.fromString(value);
     }
 
 
@@ -823,19 +899,56 @@ public class GMBluetooth extends GMBluetoothInternal
     }
 
 
+    // From Android 12, BLUETOOTH_SCAN is declared with neverForLocation, so a
+    // scan needs it alone; before, a scan needs FINE location.
     private boolean hasScanPermission()
     {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-        {
-            return hasPermission(Manifest.permission.ACCESS_FINE_LOCATION) &&
-                   hasPermission(Manifest.permission.BLUETOOTH_SCAN);
-        }
+            return hasPermission(Manifest.permission.BLUETOOTH_SCAN);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
             return hasPermission(Manifest.permission.ACCESS_FINE_LOCATION);
 
         return true;
     }
+
+
+    // Android 6 to 11 deliver no scan results while system Location is off,
+    // even with the permission granted. Android 12+ scans without it.
+    private boolean scanNeedsLocationOn()
+    {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+            return false;
+
+        Context current = context();
+
+        if (current == null)
+            return false;
+
+        try
+        {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)
+            {
+                LocationManager manager =
+                    (LocationManager) current.getSystemService(Context.LOCATION_SERVICE);
+                return manager != null && !manager.isLocationEnabled();
+            }
+
+            return Settings.Secure.getInt(
+                current.getContentResolver(),
+                Settings.Secure.LOCATION_MODE,
+                Settings.Secure.LOCATION_MODE_OFF) == Settings.Secure.LOCATION_MODE_OFF;
+        }
+        catch (Throwable ignored)
+        {
+            return false;
+        }
+    }
+
+
+    private static final String LOCATION_OFF_MESSAGE =
+        "System Location is off; Android 11 and below need it on to scan";
 
 
     private boolean hasConnectPermission()
@@ -1464,9 +1577,13 @@ public class GMBluetooth extends GMBluetoothInternal
         return value != null ? String.valueOf(value) : "";
     }
 
+    // The generated records carry an optional field as java.util.Optional;
+    // String.valueOf would turn it into the text "Optional[...]".
     private static String objectNullableString(Object object, String name) throws Exception
     {
         Object value = objectField(object, name);
+        if (value instanceof java.util.Optional)
+            value = ((java.util.Optional<?>) value).orElse(null);
         return value != null ? String.valueOf(value) : null;
     }
 
@@ -1647,6 +1764,12 @@ public class GMBluetooth extends GMBluetoothInternal
         synchronized (leServerRequestLock)
         {
             leServerRequests.clear();
+            leServerPreparedWrites.clear();
+        }
+
+        synchronized (leServerInitialValueLock)
+        {
+            leServerInitialValues.clear();
         }
 
         synchronized (leServerSubscriberLock)
@@ -1807,11 +1930,70 @@ public class GMBluetooth extends GMBluetoothInternal
         if (!initialized)
             return PERMISSION_UNKNOWN;
 
-        return hasScanPermission() &&
-               hasConnectPermission() &&
-               hasAdvertisePermission()
-            ? PERMISSION_GRANTED
-            : PERMISSION_DENIED_STATUS;
+        if (hasScanPermission() && hasConnectPermission() && hasAdvertisePermission())
+            return PERMISSION_GRANTED;
+
+        // Android cannot tell "never asked" from "denied", so the extension
+        // remembers asking; Unknown until then, as Apple's notDetermined.
+        return permissionRequested() ? PERMISSION_DENIED_STATUS : PERMISSION_UNKNOWN;
+    }
+
+
+    private static final String PREFERENCES_NAME = "GMBluetooth";
+    private static final String PREFERENCE_PERMISSION_REQUESTED = "permission_requested";
+
+    // Kept in the app's own preferences, so it survives restarts and is
+    // cleared with the app's data, as the grants are.
+    private boolean permissionRequested()
+    {
+        Context current = context();
+
+        if (current == null)
+            return false;
+
+        try
+        {
+            return current
+                .getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+                .getBoolean(PREFERENCE_PERMISSION_REQUESTED, false);
+        }
+        catch (Throwable ignored)
+        {
+            return false;
+        }
+    }
+
+
+    private void markPermissionRequested()
+    {
+        Context current = context();
+
+        if (current == null)
+            return;
+
+        try
+        {
+            SharedPreferences.Editor editor = current
+                .getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+                .edit();
+            editor.putBoolean(PREFERENCE_PERMISSION_REQUESTED, true);
+            editor.apply();
+        }
+        catch (Throwable ignored)
+        {
+        }
+    }
+
+
+    // The runner forwards the result of every permission request; the state
+    // callback hears whether Bluetooth is now usable (R1-63).
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults)
+    {
+        if (requestCode != REQUEST_CODE_BLUETOOTH || !initialized)
+            return;
+
+        invoke(callbackStateChanged, currentBluetoothState());
     }
 
 
@@ -1837,9 +2019,9 @@ public class GMBluetooth extends GMBluetoothInternal
         {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
             {
+                markPermissionRequested();
                 current.requestPermissions(
                     new String[] {
-                        Manifest.permission.ACCESS_FINE_LOCATION,
                         Manifest.permission.BLUETOOTH_SCAN,
                         Manifest.permission.BLUETOOTH_CONNECT,
                         Manifest.permission.BLUETOOTH_ADVERTISE
@@ -1848,9 +2030,11 @@ public class GMBluetooth extends GMBluetoothInternal
             }
             else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
             {
+                markPermissionRequested();
                 current.requestPermissions(
                     new String[] {
-                        Manifest.permission.ACCESS_FINE_LOCATION
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
                     },
                     REQUEST_CODE_BLUETOOTH);
             }
@@ -1932,6 +2116,9 @@ public class GMBluetooth extends GMBluetoothInternal
             return result(
                 PERMISSION_DENIED,
                 "Bluetooth scan permission is not granted");
+
+        if (scanNeedsLocationOn())
+            return result(PERMISSION_DENIED, LOCATION_OFF_MESSAGE);
 
         if (!adapterEnabled())
             return result(
@@ -3266,7 +3453,7 @@ public class GMBluetooth extends GMBluetoothInternal
                     {
                         JSONObject service = services.getJSONObject(i);
                         ParcelUuid uuid =
-                            new ParcelUuid(UUID.fromString(service.getString("uuid")));
+                            new ParcelUuid(parseUuid(service.getString("uuid")));
 
                         if (service.has("data"))
                             dataBuilder.addServiceData(
@@ -3431,6 +3618,10 @@ public class GMBluetooth extends GMBluetoothInternal
                 connection = leServerConnectionByDevice.remove(deviceHandle);
             }
 
+            // Its requests can no longer be answered, and its prepared writes
+            // will never be executed.
+            dropLeServerRequestsOf(device);
+
             if (connection != null)
             {
                 eraseLeConnection(connection);
@@ -3553,32 +3744,35 @@ public class GMBluetooth extends GMBluetoothInternal
                 if (generation.get() != workerGeneration)
                     return;
 
-                long connection = resolveServerConnection(device);
-                String serviceUuid = characteristicServiceUuid(characteristic);
-                String characteristicUuid = characteristicUuidOf(characteristic);
+                // An initial value is served here and GML never sees the
+                // request, as on Windows and Apple.
+                byte[] initialValue;
 
-                LeServerRequestEntry request = new LeServerRequestEntry();
-                request.requestId = requestId;
-                request.connection = connection;
-                request.device = device;
-                request.serviceUuid = serviceUuid;
-                request.characteristicUuid = characteristicUuid;
-                request.isWrite = false;
-                request.responseNeeded = true;
-
-                synchronized (leServerRequestLock)
+                synchronized (leServerInitialValueLock)
                 {
-                    leServerRequests.put(requestId, request);
+                    initialValue = leServerInitialValues.get(characteristic);
                 }
 
-                invoke(
-                    callbackLeServerReadRequest,
+                if (initialValue != null)
+                {
+                    if (offset < 0 || offset > initialValue.length)
+                        sendServerResponse(device, requestId, ATT_INVALID_OFFSET, offset, null);
+                    else
+                        sendServerResponse(
+                            device,
+                            requestId,
+                            BluetoothGatt.GATT_SUCCESS,
+                            offset,
+                            Arrays.copyOfRange(initialValue, offset, initialValue.length));
+                    return;
+                }
+
+                handleServerReadRequest(
+                    device,
                     requestId,
-                    (double) connection,
-                    serviceUuid,
-                    characteristicUuid,
-                    "",
-                    offset);
+                    offset,
+                    characteristic,
+                    "");
             }
 
 
@@ -3595,33 +3789,19 @@ public class GMBluetooth extends GMBluetoothInternal
                 if (generation.get() != workerGeneration)
                     return;
 
-                long connection = resolveServerConnection(device);
-                String serviceUuid = characteristicServiceUuid(characteristic);
-                String characteristicUuid = characteristicUuidOf(characteristic);
-
-                LeServerRequestEntry request = new LeServerRequestEntry();
-                request.requestId = requestId;
-                request.connection = connection;
-                request.device = device;
-                request.serviceUuid = serviceUuid;
-                request.characteristicUuid = characteristicUuid;
-                request.isWrite = true;
-                request.responseNeeded = responseNeeded;
-                request.writeValue = value != null ? value : new byte[0];
-
-                synchronized (leServerRequestLock)
+                if (preparedWrite)
                 {
-                    expireNoResponseWrites();
-                    leServerRequests.put(requestId, request);
+                    handlePreparedWrite(device, requestId, characteristic, null, responseNeeded, offset, value);
+                    return;
                 }
 
-                invoke(
-                    callbackLeServerWriteRequest,
+                handleServerWriteRequest(
+                    device,
                     requestId,
-                    (double) connection,
-                    serviceUuid,
-                    characteristicUuid,
-                    "");
+                    characteristic,
+                    "",
+                    responseNeeded,
+                    value);
             }
 
 
@@ -3638,36 +3818,16 @@ public class GMBluetooth extends GMBluetoothInternal
                 BluetoothGattCharacteristic parent =
                     descriptor != null ? descriptor.getCharacteristic() : null;
 
-                long connection = resolveServerConnection(device);
-                String serviceUuid = characteristicServiceUuid(parent);
-                String characteristicUuid = characteristicUuidOf(parent);
                 String descriptorUuid = descriptor != null && descriptor.getUuid() != null
                     ? descriptor.getUuid().toString()
                     : "";
 
-                LeServerRequestEntry request = new LeServerRequestEntry();
-                request.requestId = requestId;
-                request.connection = connection;
-                request.device = device;
-                request.serviceUuid = serviceUuid;
-                request.characteristicUuid = characteristicUuid;
-                request.descriptorUuid = descriptorUuid;
-                request.isWrite = false;
-                request.responseNeeded = true;
-
-                synchronized (leServerRequestLock)
-                {
-                    leServerRequests.put(requestId, request);
-                }
-
-                invoke(
-                    callbackLeServerReadRequest,
+                handleServerReadRequest(
+                    device,
                     requestId,
-                    (double) connection,
-                    serviceUuid,
-                    characteristicUuid,
-                    descriptorUuid,
-                    offset);
+                    offset,
+                    parent,
+                    descriptorUuid);
             }
 
 
@@ -3730,66 +3890,410 @@ public class GMBluetooth extends GMBluetoothInternal
                     }
 
                     if (responseNeeded)
-                    {
-                        BluetoothGattServer server = gattServer;
-
-                        if (server != null)
-                        {
-                            try
-                            {
-                                server.sendResponse(
-                                    device,
-                                    requestId,
-                                    BluetoothGatt.GATT_SUCCESS,
-                                    offset,
-                                    value);
-                            }
-                            catch (Throwable ignored)
-                            {
-                            }
-                        }
-                    }
+                        sendServerResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value);
 
                     return;
                 }
 
-                long connection = resolveServerConnection(device);
+                if (preparedWrite)
+                {
+                    handlePreparedWrite(device, requestId, parent, descriptor, responseNeeded, offset, value);
+                    return;
+                }
+
                 String descriptorUuid = descriptor != null && descriptor.getUuid() != null
                     ? descriptor.getUuid().toString()
                     : "";
 
-                LeServerRequestEntry request = new LeServerRequestEntry();
-                request.requestId = requestId;
-                request.connection = connection;
-                request.device = device;
-                request.serviceUuid = serviceUuid;
-                request.characteristicUuid = characteristicUuid;
-                request.descriptorUuid = descriptorUuid;
-                request.isWrite = true;
-                request.responseNeeded = responseNeeded;
-                request.writeValue = value != null ? value : new byte[0];
+                handleServerWriteRequest(
+                    device,
+                    requestId,
+                    parent,
+                    descriptorUuid,
+                    responseNeeded,
+                    value);
+            }
+
+
+            // The end of a prepared (long) write: each attribute the central
+            // prepared reaches GML as one write request with its fragments
+            // assembled, and the execute is answered once, when GML has
+            // answered all of them.
+            @Override
+            public void onExecuteWrite(
+                BluetoothDevice device,
+                int requestId,
+                boolean execute)
+            {
+                if (generation.get() != workerGeneration)
+                    return;
+
+                LinkedHashMap<Object, LeServerPreparedWrite> prepared;
 
                 synchronized (leServerRequestLock)
                 {
-                    expireNoResponseWrites();
-                    leServerRequests.put(requestId, request);
+                    prepared = leServerPreparedWrites.remove(safeAddress(device));
                 }
 
-                invoke(
-                    callbackLeServerWriteRequest,
-                    requestId,
-                    (double) connection,
-                    serviceUuid,
-                    characteristicUuid,
-                    descriptorUuid);
+                // Cancelled, or nothing was prepared: nothing to deliver.
+                if (!execute || prepared == null || prepared.isEmpty())
+                {
+                    sendServerResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null);
+                    return;
+                }
+
+                GMFunction callback = callbackLeServerWriteRequest;
+
+                if (callback == null)
+                {
+                    sendServerResponse(device, requestId, ATT_REQUEST_NOT_SUPPORTED, 0, null);
+                    return;
+                }
+
+                long connection = resolveServerConnection(device);
+
+                LeServerWriteBatch batch = new LeServerWriteBatch();
+                batch.device = device;
+                batch.stackRequestId = requestId;
+                batch.remaining = prepared.size();
+
+                ArrayList<Integer> ids = new ArrayList<>();
+                ArrayList<LeServerRequestEntry> requests = new ArrayList<>();
+
+                synchronized (leServerRequestLock)
+                {
+                    for (LeServerPreparedWrite write : prepared.values())
+                    {
+                        LeServerRequestEntry request = new LeServerRequestEntry();
+                        request.stackRequestId = requestId;
+                        request.connection = connection;
+                        request.device = device;
+                        request.serviceUuid = characteristicServiceUuid(write.characteristic);
+                        request.characteristicUuid = characteristicUuidOf(write.characteristic);
+                        request.descriptorUuid = write.descriptor != null && write.descriptor.getUuid() != null
+                            ? write.descriptor.getUuid().toString()
+                            : "";
+                        request.isWrite = true;
+                        request.responseNeeded = true;
+                        request.writeValue = write.value;
+                        request.batch = batch;
+
+                        ids.add(storeLeServerRequest(request));
+                        requests.add(request);
+                    }
+                }
+
+                for (int i = 0; i < ids.size(); i++)
+                {
+                    LeServerRequestEntry request = requests.get(i);
+                    invoke(
+                        callback,
+                        ids.get(i),
+                        (double) connection,
+                        request.serviceUuid,
+                        request.characteristicUuid,
+                        request.descriptorUuid);
+                }
             }
         };
+    }
+
+
+    private void sendServerResponse(
+        BluetoothDevice device,
+        int stackRequestId,
+        int status,
+        int offset,
+        byte[] value)
+    {
+        BluetoothGattServer server = gattServer;
+
+        if (server == null || device == null)
+            return;
+
+        try
+        {
+            server.sendResponse(device, stackRequestId, status, offset, value);
+        }
+        catch (Throwable ignored)
+        {
+        }
+    }
+
+
+    // A read GML answers. With no handler registered nobody will, so the
+    // central hears now instead of waiting out the ATT timeout.
+    private void handleServerReadRequest(
+        BluetoothDevice device,
+        int stackRequestId,
+        int offset,
+        BluetoothGattCharacteristic characteristic,
+        String descriptorUuid)
+    {
+        GMFunction callback = callbackLeServerReadRequest;
+
+        if (callback == null)
+        {
+            sendServerResponse(device, stackRequestId, ATT_REQUEST_NOT_SUPPORTED, offset, null);
+            return;
+        }
+
+        long connection = resolveServerConnection(device);
+
+        LeServerRequestEntry request = new LeServerRequestEntry();
+        request.stackRequestId = stackRequestId;
+        request.connection = connection;
+        request.device = device;
+        request.serviceUuid = characteristicServiceUuid(characteristic);
+        request.characteristicUuid = characteristicUuidOf(characteristic);
+        request.descriptorUuid = descriptorUuid;
+        request.isWrite = false;
+        request.responseNeeded = true;
+
+        int requestId;
+
+        synchronized (leServerRequestLock)
+        {
+            requestId = storeLeServerRequest(request);
+        }
+
+        invoke(
+            callback,
+            requestId,
+            (double) connection,
+            request.serviceUuid,
+            request.characteristicUuid,
+            request.descriptorUuid,
+            offset);
+    }
+
+
+    // A write that is not part of a prepared write.
+    private void handleServerWriteRequest(
+        BluetoothDevice device,
+        int stackRequestId,
+        BluetoothGattCharacteristic characteristic,
+        String descriptorUuid,
+        boolean responseNeeded,
+        byte[] value)
+    {
+        GMFunction callback = callbackLeServerWriteRequest;
+
+        if (callback == null)
+        {
+            if (responseNeeded)
+                sendServerResponse(device, stackRequestId, ATT_REQUEST_NOT_SUPPORTED, 0, null);
+            return;
+        }
+
+        long connection = resolveServerConnection(device);
+
+        LeServerRequestEntry request = new LeServerRequestEntry();
+        request.stackRequestId = stackRequestId;
+        request.connection = connection;
+        request.device = device;
+        request.serviceUuid = characteristicServiceUuid(characteristic);
+        request.characteristicUuid = characteristicUuidOf(characteristic);
+        request.descriptorUuid = descriptorUuid;
+        request.isWrite = true;
+        request.responseNeeded = responseNeeded;
+        request.writeValue = value != null ? value : new byte[0];
+
+        int requestId;
+
+        synchronized (leServerRequestLock)
+        {
+            requestId = storeLeServerRequest(request);
+        }
+
+        invoke(
+            callback,
+            requestId,
+            (double) connection,
+            request.serviceUuid,
+            request.characteristicUuid,
+            request.descriptorUuid);
+    }
+
+
+    // One fragment of a prepared write: laid out at its offset in the
+    // attribute's buffer and echoed back, until the Execute Write.
+    private void handlePreparedWrite(
+        BluetoothDevice device,
+        int stackRequestId,
+        BluetoothGattCharacteristic characteristic,
+        BluetoothGattDescriptor descriptor,
+        boolean responseNeeded,
+        int offset,
+        byte[] value)
+    {
+        byte[] fragment = value != null ? value : new byte[0];
+        boolean tooLong = offset < 0 || offset + fragment.length > MAX_ATTRIBUTE_LENGTH;
+
+        if (!tooLong)
+        {
+            synchronized (leServerRequestLock)
+            {
+                String key = safeAddress(device);
+                LinkedHashMap<Object, LeServerPreparedWrite> writes = leServerPreparedWrites.get(key);
+
+                if (writes == null)
+                {
+                    writes = new LinkedHashMap<>();
+                    leServerPreparedWrites.put(key, writes);
+                }
+
+                Object attribute = descriptor != null ? descriptor : characteristic;
+                LeServerPreparedWrite prepared = writes.get(attribute);
+
+                if (prepared == null)
+                {
+                    prepared = new LeServerPreparedWrite();
+                    prepared.characteristic = characteristic;
+                    prepared.descriptor = descriptor;
+                    writes.put(attribute, prepared);
+                }
+
+                int length = Math.max(prepared.value.length, offset + fragment.length);
+
+                if (length > prepared.value.length)
+                    prepared.value = Arrays.copyOf(prepared.value, length);
+
+                System.arraycopy(fragment, 0, prepared.value, offset, fragment.length);
+            }
+        }
+
+        if (responseNeeded)
+            sendServerResponse(
+                device,
+                stackRequestId,
+                tooLong ? ATT_INVALID_ATTRIBUTE_LENGTH : BluetoothGatt.GATT_SUCCESS,
+                offset,
+                tooLong ? null : fragment);
+    }
+
+
+    // Caller holds leServerRequestLock. Stores a request under a new extension
+    // id, after dropping the ones past their lifetime.
+    private int storeLeServerRequest(LeServerRequestEntry request)
+    {
+        expireLeServerRequests();
+
+        int requestId = nextLeServerRequestId++;
+
+        if (nextLeServerRequestId <= 0)
+            nextLeServerRequestId = 1;
+
+        leServerRequests.put(requestId, request);
+        return requestId;
+    }
+
+
+    // Caller holds leServerRequestLock. Runs on each new request, so neither
+    // the no-response writes of a streaming central nor requests nobody
+    // answered can pile up.
+    private void expireLeServerRequests()
+    {
+        long now = System.nanoTime();
+        Iterator<Map.Entry<Integer, LeServerRequestEntry>> iterator =
+            leServerRequests.entrySet().iterator();
+
+        while (iterator.hasNext())
+        {
+            LeServerRequestEntry request = iterator.next().getValue();
+            long ttl = request.responseNeeded
+                ? SERVER_REQUEST_TTL_NANOS
+                : NO_RESPONSE_WRITE_TTL_NANOS;
+
+            if (now - request.receivedAtNanos > ttl)
+                iterator.remove();
+        }
+    }
+
+
+    // A central that disconnected can no longer be answered.
+    private void dropLeServerRequestsOf(BluetoothDevice device)
+    {
+        String address = safeAddress(device);
+
+        synchronized (leServerRequestLock)
+        {
+            leServerPreparedWrites.remove(address);
+
+            Iterator<Map.Entry<Integer, LeServerRequestEntry>> iterator =
+                leServerRequests.entrySet().iterator();
+
+            while (iterator.hasNext())
+            {
+                LeServerRequestEntry request = iterator.next().getValue();
+
+                if (address.equals(safeAddress(request.device)))
+                    iterator.remove();
+            }
+        }
+    }
+
+
+    // Answers every request still waiting, before the server stops or drops
+    // its services. An executed prepared write is answered once.
+    private void answerPendingLeServerRequests()
+    {
+        ArrayList<LeServerRequestEntry> pending;
+
+        synchronized (leServerRequestLock)
+        {
+            pending = new ArrayList<>(leServerRequests.values());
+            leServerRequests.clear();
+            leServerPreparedWrites.clear();
+        }
+
+        Set<LeServerWriteBatch> answeredBatches =
+            java.util.Collections.newSetFromMap(new IdentityHashMap<LeServerWriteBatch, Boolean>());
+
+        for (LeServerRequestEntry request : pending)
+        {
+            if (!request.responseNeeded)
+                continue;
+
+            if (request.batch != null && !answeredBatches.add(request.batch))
+                continue;
+
+            sendServerResponse(request.device, request.stackRequestId, ATT_UNLIKELY_ERROR, 0, null);
+        }
+    }
+
+
+    // One attribute of an executed prepared write has been answered; the
+    // execute itself is answered after the last one, with the first error.
+    private void finishLeServerWriteBatchPart(LeServerWriteBatch batch, int status)
+    {
+        boolean done;
+
+        synchronized (leServerRequestLock)
+        {
+            if (status != BluetoothGatt.GATT_SUCCESS && batch.status == BluetoothGatt.GATT_SUCCESS)
+                batch.status = status;
+
+            batch.remaining--;
+            done = batch.remaining == 0;
+        }
+
+        if (done)
+            sendServerResponse(batch.device, batch.stackRequestId, batch.status, 0, null);
     }
 
 
     private void stopLeServerInternal(int addError, String addMessage)
     {
         leServerRunning.set(false);
+
+        // Answered while the server can still send; it forgets them on close.
+        answerPendingLeServerRequests();
+
+        synchronized (leServerInitialValueLock)
+        {
+            leServerInitialValues.clear();
+        }
 
         BluetoothGattServer server = gattServer;
         gattServer = null;
@@ -3819,6 +4323,7 @@ public class GMBluetooth extends GMBluetoothInternal
         synchronized (leServerRequestLock)
         {
             leServerRequests.clear();
+            leServerPreparedWrites.clear();
         }
 
         synchronized (leServerSubscriberLock)
@@ -4008,6 +4513,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
         final BluetoothGattService gattService;
         final String serviceUuid;
+        final IdentityHashMap<BluetoothGattCharacteristic, byte[]> initialValues = new IdentityHashMap<>();
 
         try
         {
@@ -4015,7 +4521,7 @@ public class GMBluetooth extends GMBluetoothInternal
             if (serviceUuid == null || serviceUuid.isEmpty())
                 return result(INVALID_ARGUMENT, "service.uuid cannot be empty");
 
-            UUID parsedServiceUuid = UUID.fromString(serviceUuid);
+            UUID parsedServiceUuid = parseUuid(serviceUuid);
 
             gattService = new BluetoothGattService(
                 parsedServiceUuid,
@@ -4033,13 +4539,17 @@ public class GMBluetooth extends GMBluetoothInternal
 
                 BluetoothGattCharacteristic characteristic =
                     new BluetoothGattCharacteristic(
-                        UUID.fromString(characteristicUuid),
+                        parseUuid(characteristicUuid),
                         properties,
                         permissions);
 
                 String initialValue = objectNullableString(characteristicObject, "value");
                 if (initialValue != null && !initialValue.isEmpty())
-                    characteristic.setValue(decodeBase64(initialValue));
+                {
+                    byte[] bytes = decodeBase64(initialValue);
+                    characteristic.setValue(bytes);
+                    initialValues.put(characteristic, bytes);
+                }
 
                 Object[] descriptors = objectArray(characteristicObject, "descriptors");
                 for (Object descriptorObject : descriptors)
@@ -4050,7 +4560,7 @@ public class GMBluetooth extends GMBluetoothInternal
                     String descriptorUuid = objectString(descriptorObject, "uuid");
                     characteristic.addDescriptor(
                         new BluetoothGattDescriptor(
-                            UUID.fromString(descriptorUuid),
+                            parseUuid(descriptorUuid),
                             BluetoothGattDescriptor.PERMISSION_READ |
                                 BluetoothGattDescriptor.PERMISSION_WRITE));
                 }
@@ -4078,6 +4588,11 @@ public class GMBluetooth extends GMBluetoothInternal
             return result(
                 INVALID_ARGUMENT,
                 "Invalid service definition: " + throwableMessage(throwable));
+        }
+
+        synchronized (leServerInitialValueLock)
+        {
+            leServerInitialValues.putAll(initialValues);
         }
 
         // A failure from here on, the stack refusing the add included, is
@@ -4108,6 +4623,14 @@ public class GMBluetooth extends GMBluetoothInternal
         if (server == null)
             return result(OPERATION_FAILED, "BLE server is not running");
 
+        // The services the requests name are going away.
+        answerPendingLeServerRequests();
+
+        synchronized (leServerInitialValueLock)
+        {
+            leServerInitialValues.clear();
+        }
+
         try
         {
             server.clearServices();
@@ -4137,19 +4660,24 @@ public class GMBluetooth extends GMBluetoothInternal
         if (!initialized)
             return result(NOT_INITIALIZED, "Bluetooth is not initialized");
 
+        // Everything is checked before the request is removed, so a bad call
+        // can be retried instead of leaving the central to time out.
         LeServerRequestEntry request;
 
         synchronized (leServerRequestLock)
         {
-            request = leServerRequests.remove(request_id);
+            request = leServerRequests.get(request_id);
         }
 
         if (request == null)
-            return result(INVALID_ARGUMENT, "Unknown request_id");
+            return result(INVALID_HANDLE, "Unknown or expired request_id");
 
-        BluetoothGattServer server = gattServer;
+        if (request.isWrite)
+            return result(
+                INVALID_ARGUMENT,
+                "request_id is a write request; answer it with bluetooth_le_server_respond_write");
 
-        if (server == null)
+        if (gattServer == null)
             return result(OPERATION_FAILED, "BLE server is not running");
 
         byte[] payload = new byte[0];
@@ -4168,44 +4696,32 @@ public class GMBluetooth extends GMBluetoothInternal
             view.get(payload, 0, size);
         }
 
+        synchronized (leServerRequestLock)
+        {
+            if (leServerRequests.remove(request_id) == null)
+                return result(INVALID_HANDLE, "Unknown or expired request_id");
+        }
+
         int status = error_code == OK
             ? BluetoothGatt.GATT_SUCCESS
             : BluetoothGatt.GATT_FAILURE;
+
+        BluetoothGattServer server = gattServer;
+
+        if (server == null)
+            return result(OPERATION_FAILED, "BLE server is not running");
 
         try
         {
             // The response payload above is already the exact slice the
             // caller intends to answer with, so the ATT-level offset
             // handed back to Android is always 0.
-            server.sendResponse(request.device, request_id, status, 0, payload);
+            server.sendResponse(request.device, request.stackRequestId, status, 0, payload);
             return result(OK, "");
         }
         catch (Throwable throwable)
         {
             return result(OPERATION_FAILED, throwableMessage(throwable));
-        }
-    }
-
-
-    // Caller holds leServerRequestLock. Runs on each new write request, so the
-    // no-response writes of a streaming central cannot pile up.
-    private void expireNoResponseWrites()
-    {
-        long now = System.nanoTime();
-        Iterator<Map.Entry<Integer, LeServerRequestEntry>> iterator =
-            leServerRequests.entrySet().iterator();
-
-        while (iterator.hasNext())
-        {
-            LeServerRequestEntry request = iterator.next().getValue();
-
-            if (
-                request.isWrite &&
-                !request.responseNeeded &&
-                now - request.receivedAtNanos > NO_RESPONSE_WRITE_TTL_NANOS)
-            {
-                iterator.remove();
-            }
         }
     }
 
@@ -4220,17 +4736,27 @@ public class GMBluetooth extends GMBluetoothInternal
 
         synchronized (leServerRequestLock)
         {
-            request = leServerRequests.remove(request_id);
+            request = leServerRequests.get(request_id);
         }
 
         if (request == null)
-            return result(INVALID_ARGUMENT, "Unknown request_id");
+            return result(INVALID_HANDLE, "Unknown or expired request_id");
 
-        BluetoothGattServer server = gattServer;
+        if (!request.isWrite)
+            return result(
+                INVALID_ARGUMENT,
+                "request_id is a read request; answer it with bluetooth_le_server_respond_read");
 
-        if (server == null)
+        if (gattServer == null)
             return result(OPERATION_FAILED, "BLE server is not running");
 
+        synchronized (leServerRequestLock)
+        {
+            if (leServerRequests.remove(request_id) == null)
+                return result(INVALID_HANDLE, "Unknown or expired request_id");
+        }
+
+        // A write without response was never waiting on an answer.
         if (!request.responseNeeded)
             return result(OK, "");
 
@@ -4238,9 +4764,20 @@ public class GMBluetooth extends GMBluetoothInternal
             ? BluetoothGatt.GATT_SUCCESS
             : BluetoothGatt.GATT_FAILURE;
 
+        if (request.batch != null)
+        {
+            finishLeServerWriteBatchPart(request.batch, status);
+            return result(OK, "");
+        }
+
+        BluetoothGattServer server = gattServer;
+
+        if (server == null)
+            return result(OPERATION_FAILED, "BLE server is not running");
+
         try
         {
-            server.sendResponse(request.device, request_id, status, 0, request.writeValue);
+            server.sendResponse(request.device, request.stackRequestId, status, 0, request.writeValue);
             return result(OK, "");
         }
         catch (Throwable throwable)
@@ -4315,7 +4852,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
         try
         {
-            service = server.getService(UUID.fromString(service_uuid));
+            service = server.getService(parseUuid(service_uuid));
         }
         catch (Throwable throwable)
         {
@@ -4327,7 +4864,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
         try
         {
-            characteristic = service.getCharacteristic(UUID.fromString(characteristic_uuid));
+            characteristic = service.getCharacteristic(parseUuid(characteristic_uuid));
         }
         catch (Throwable throwable)
         {
@@ -4775,6 +5312,9 @@ public class GMBluetooth extends GMBluetoothInternal
                 PERMISSION_DENIED,
                 "Bluetooth scan/connect permission is not granted");
 
+        if (scanNeedsLocationOn())
+            return result(PERMISSION_DENIED, LOCATION_OFF_MESSAGE);
+
         if (!adapterEnabled())
             return result(
                 BLUETOOTH_DISABLED,
@@ -5040,7 +5580,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
         try
         {
-            uuid = UUID.fromString(service_uuid);
+            uuid = parseUuid(service_uuid);
         }
         catch (Throwable throwable)
         {
@@ -5740,7 +6280,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
         try
         {
-            uuid = UUID.fromString(service_uuid);
+            uuid = parseUuid(service_uuid);
         }
         catch (Throwable throwable)
         {

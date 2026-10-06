@@ -229,7 +229,7 @@
     {
       "name": "linux-clang-x64-debug",
       "displayName": "Linux x64 Debug (clang)",
-      "hidden": false,
+      "hidden": true,
       "inherits": "base-ninja",
       "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" },
       "environment": { "CC": "clang", "CXX": "clang++" },
@@ -241,7 +241,7 @@
     {
       "name": "linux-clang-x64-release",
       "displayName": "Linux x64 Release (clang)",
-      "hidden": false,
+      "hidden": true,
       "inherits": "base-ninja",
       "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" },
       "environment": { "CC": "clang", "CXX": "clang++" },

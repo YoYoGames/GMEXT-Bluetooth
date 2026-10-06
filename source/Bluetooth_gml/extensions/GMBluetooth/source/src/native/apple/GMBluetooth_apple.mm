@@ -104,6 +104,16 @@
 @property (nonatomic, strong) NSMutableArray<GMBTQueuedDescriptorWithData *> *writeDescriptor;
 @end
 
+// One didReceiveWriteRequests array. CoreBluetooth wants it treated as a unit
+// and answered once, through its first request. Each attribute in it reaches
+// GML as one write request with its fragments assembled, and the batch is
+// answered when the last of those is: the first error, or success.
+@interface GMBTWriteBatch : NSObject
+@property (nonatomic, strong) CBATTRequest *firstRequest;
+@property (nonatomic) NSUInteger remaining;
+@property (nonatomic) CBATTError result;
+@end
+
 @interface GMBluetoothAppleTransport:NSObject<CBCentralManagerDelegate,CBPeripheralDelegate,CBPeripheralManagerDelegate>
 
 @property(nonatomic, copy) void (^eventSink)(NSString *type, NSDictionary *params);
@@ -143,7 +153,7 @@
 @property(nonatomic, strong) NSMapTable <CBMutableCharacteristic *, NSData *> *initialValues;
 
 @property(nonatomic, strong) NSMutableDictionary <NSNumber *, CBATTRequest *> *readRequestsLookup;
-@property(nonatomic, strong) NSMutableDictionary <NSNumber *, CBATTRequest *> *writeRequestsLookup;
+@property(nonatomic, strong) NSMutableDictionary <NSNumber *, GMBTWriteBatch *> *writeRequestsLookup;
 
 @end
 
@@ -256,6 +266,9 @@
     }
     return self;
 }
+@end
+
+@implementation GMBTWriteBatch
 @end
 
 @implementation GMBluetoothAppleTransport
@@ -517,6 +530,8 @@ static bool _scanPendingPowerOn = false;
     // The core fails the ops these held once the backend is gone.
     [_peripheralQueues removeAllObjects];
     [_initialValues removeAllObjects];
+    [_readRequestsLookup removeAllObjects];
+    [_writeRequestsLookup removeAllObjects];
 
     _centralManager = nil;
     _peripheralManager = nil;
@@ -879,9 +894,12 @@ static bool _scanPendingPowerOn = false;
 - (double) bt_le_server_clear_services {
     
     if (!_isServerOpen) return -1;
-    
+
     [_peripheralManager removeAllServices];
     [_initialValues removeAllObjects];
+    // The core answered the requests these held before asking.
+    [_readRequestsLookup removeAllObjects];
+    [_writeRequestsLookup removeAllObjects];
 
     [self notifyResult:@"bt_le_server_clear_services" errorCode:nil extraParams:nil];
 
@@ -894,6 +912,9 @@ static bool _scanPendingPowerOn = false;
     _isServerOpen = false;
     [_peripheralManager removeAllServices];
     [_initialValues removeAllObjects];
+    // The core answered the requests these held before asking.
+    [_readRequestsLookup removeAllObjects];
+    [_writeRequestsLookup removeAllObjects];
 
     if ([_peripheralManager isAdvertising]) {
         [_peripheralManager stopAdvertising];
@@ -940,23 +961,25 @@ static bool _scanPendingPowerOn = false;
 - (double) bt_le_server_respond_write:(double) requestId status:(double) status {
     // Convert the requestId to NSNumber for dictionary lookup
     NSNumber *requestKey = [NSNumber numberWithDouble:requestId];
-    
-    CBATTRequest *request = nil;
 
-    // Retrieve the corresponding CBATTRequest from _writeRequests dictionary
-    request = _writeRequestsLookup[requestKey];
-    
-    if (!request) {
+    GMBTWriteBatch *batch = _writeRequestsLookup[requestKey];
+    if (!batch) {
         NSLog(@"Write request with ID %f not found", requestId);
         return 0;
     }
-    
-    // Respond to the write request
-    [_peripheralManager respondToRequest:request withResult:(CBATTError)status];
-    
-    // Remove the request from the _writeRequests dictionary
     [_writeRequestsLookup removeObjectForKey:requestKey];
-    
+
+    // The batch is answered once, after its last part, with the first error.
+    if ((CBATTError)status != CBATTErrorSuccess && batch.result == CBATTErrorSuccess) {
+        batch.result = (CBATTError)status;
+    }
+    if (batch.remaining > 0) {
+        batch.remaining--;
+    }
+    if (batch.remaining == 0) {
+        [_peripheralManager respondToRequest:batch.firstRequest withResult:batch.result];
+    }
+
     return 1; // Indicate success
 }
 
@@ -1153,6 +1176,8 @@ static bool _scanPendingPowerOn = false;
     params[@"request_id"] = @(requestId);
     params[@"service_uuid"] = request.characteristic.service.UUID.UUIDString;
     params[@"characteristic_uuid"] = request.characteristic.UUID.UUIDString;
+    // A Read Blob continues a long value; GML answers from this offset on.
+    params[@"offset"] = @(request.offset);
 
     // Loop through the characteristic's descriptors to check UUIDs
     for (CBDescriptor *descriptor in request.characteristic.descriptors) {
@@ -1173,41 +1198,67 @@ static bool _scanPendingPowerOn = false;
 }
 
 - (void) peripheralManager:(CBPeripheralManager *)peripheral didReceiveWriteRequests:(NSArray<CBATTRequest *> *)requests {
+    if (requests.count == 0) return;
+
+    // Group by characteristic in arrival order: a prepared (long) write comes
+    // as several requests on one characteristic, each at its own offset.
+    // CoreBluetooth hands the app characteristic writes only; descriptor
+    // writes never reach it.
+    NSMutableArray<CBCharacteristic *> *order = [NSMutableArray array];
+    NSMapTable<CBCharacteristic *, NSMutableArray<CBATTRequest *> *> *groups =
+        [NSMapTable mapTableWithKeyOptions:(NSPointerFunctionsStrongMemory | NSPointerFunctionsObjectPointerPersonality)
+                              valueOptions:NSPointerFunctionsStrongMemory];
     for (CBATTRequest *request in requests) {
-        NSMutableDictionary *params = [NSMutableDictionary dictionary];
-        BOOL isDescriptorRequest = NO;
-
-        int requestId = [self generateRequestId];
-
-        // Storing the CBATTRequest object with the requestId for future use
-        _writeRequestsLookup[@(requestId)] = request;
-
-        // Creating params dictionary
-        params[@"request_id"] = @(requestId);
-        params[@"service_uuid"] = request.characteristic.service.UUID.UUIDString;
-        params[@"characteristic_uuid"] = request.characteristic.UUID.UUIDString;
-
-        if (request.value) {
-            NSString *base64Value = [request.value base64EncodedStringWithOptions:0];
-            params[@"value"] = base64Value;
+        NSMutableArray<CBATTRequest *> *group = [groups objectForKey:request.characteristic];
+        if (!group) {
+            group = [NSMutableArray array];
+            [groups setObject:group forKey:request.characteristic];
+            [order addObject:request.characteristic];
         }
+        [group addObject:request];
+    }
 
-        // Loop through the characteristic's descriptors to check UUIDs
-        for (CBDescriptor *descriptor in request.characteristic.descriptors) {
-            // Assuming you store descriptor's UUID when it's read
-            if ([descriptor.UUID isEqual:request.characteristic.UUID]) {
-                params[@"descriptor_uuid"] = descriptor.UUID.UUIDString;
-                isDescriptorRequest = YES;
-                break;
+    // Each group's fragments laid out by offset, from its lowest one.
+    NSMutableArray<NSData *> *values = [NSMutableArray array];
+    for (CBCharacteristic *characteristic in order) {
+        NSArray<CBATTRequest *> *group = [groups objectForKey:characteristic];
+        NSUInteger start = NSUIntegerMax;
+        NSUInteger end = 0;
+        for (CBATTRequest *request in group) {
+            start = MIN(start, request.offset);
+            end = MAX(end, request.offset + request.value.length);
+        }
+        // 512 bytes is the longest attribute value ATT allows.
+        if (end - start > 512) {
+            [peripheral respondToRequest:requests.firstObject withResult:CBATTErrorInvalidAttributeValueLength];
+            return;
+        }
+        NSMutableData *value = [NSMutableData dataWithLength:end - start];
+        for (CBATTRequest *request in group) {
+            if (request.value.length > 0) {
+                [value replaceBytesInRange:NSMakeRange(request.offset - start, request.value.length) withBytes:request.value.bytes];
             }
         }
+        [values addObject:value];
+    }
 
-        NSString* eventType = @"bt_le_server_characteristic_write_request";
-        if (isDescriptorRequest) {
-            eventType = @"bt_le_server_descriptor_write_request";
-        }
-        
-        [self notifyOperation:eventType extraParams:params];
+    GMBTWriteBatch *batch = [GMBTWriteBatch new];
+    batch.firstRequest = requests.firstObject;
+    batch.remaining = order.count;
+    batch.result = CBATTErrorSuccess;
+
+    for (NSUInteger i = 0; i < order.count; ++i) {
+        CBCharacteristic *characteristic = order[i];
+        int requestId = [self generateRequestId];
+        _writeRequestsLookup[@(requestId)] = batch;
+
+        NSMutableDictionary *params = [NSMutableDictionary dictionary];
+        params[@"request_id"] = @(requestId);
+        params[@"service_uuid"] = characteristic.service.UUID.UUIDString;
+        params[@"characteristic_uuid"] = characteristic.UUID.UUIDString;
+        params[@"value"] = [values[i] base64EncodedStringWithOptions:0];
+
+        [self notifyOperation:@"bt_le_server_characteristic_write_request" extraParams:params];
     }
 }
 
@@ -2016,6 +2067,26 @@ static void gmbt_release_after_callback(id object)
     dispatch_async(dispatch_get_main_queue(), ^{ (void)object; });
 }
 
+// An SDP query handler the backend let go of while IOBluetooth may still call
+// it. Its block is nilled first, so a late call does nothing; it is kept here
+// until that call, so IOBluetooth never calls a freed object.
+static NSMutableSet* gmbt_parked_objects()
+{
+    static NSMutableSet* parked = [NSMutableSet new];
+    return parked;
+}
+
+static void gmbt_park(id object)
+{
+    if (object) [gmbt_parked_objects() addObject:object];
+}
+
+static void gmbt_unpark(id object)
+{
+    if (!object) return;
+    dispatch_async(dispatch_get_main_queue(), ^{ [gmbt_parked_objects() removeObject:object]; });
+}
+
 // Bluetooth Classic (RFCOMM) support is macOS-only: IOBluetooth is not
 // available on iOS. These small delegate/notification shims translate
 // IOBluetooth's target+selector and delegate-protocol callbacks into blocks
@@ -2062,6 +2133,7 @@ static void gmbt_release_after_callback(id object)
 @implementation GMBTSDPQueryHandler
 - (void)sdpQueryComplete:(IOBluetoothDevice *)device status:(IOReturn)status {
     if (self.onComplete) self.onComplete(device, status);
+    gmbt_unpark(self);
 }
 @end
 
@@ -2337,8 +2409,13 @@ namespace
 
             GMBTClassicInquiryDelegate* delegate = [GMBTClassicInquiryDelegate new];
             AppleBackend* self = this;
-            delegate.onDeviceFound = ^(IOBluetoothDevice* device) { self->handle_classic_device_found(device); };
+            std::weak_ptr<int> alive = lifetime_;
+            delegate.onDeviceFound = ^(IOBluetoothDevice* device) {
+                if (alive.expired()) return;
+                self->handle_classic_device_found(device);
+            };
             delegate.onComplete = ^(IOReturn error, BOOL aborted) {
+                if (alive.expired()) return;
                 GMBT_LOG("Classic inquiry complete: IOReturn=0x%08x aborted=%d", error, aborted ? 1 : 0);
                 self->handle_classic_inquiry_complete(error);
             };
@@ -2407,8 +2484,10 @@ namespace
 
             GMBTSDPQueryHandler* sdpHandler = [GMBTSDPQueryHandler new];
             AppleBackend* self = this;
+            std::weak_ptr<int> alive = lifetime_;
             const std::string uuidCopy = service_uuid;
             sdpHandler.onComplete = ^(IOBluetoothDevice* d, IOReturn status) {
+                if (alive.expired()) return;
                 self->handle_classic_sdp_complete(connection, d, status, uuidCopy);
             };
             {
@@ -2425,7 +2504,6 @@ namespace
             {
                 // Fail the connect instead of leaving the GML callback waiting
                 // forever if IOBluetooth never delivers sdpQueryComplete:.
-                std::weak_ptr<int> alive = lifetime_;
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kClassicSdpTimeoutSeconds * NSEC_PER_SEC)),
                                dispatch_get_main_queue(), ^{
                     if (alive.expired()) return;
@@ -2447,13 +2525,39 @@ namespace
         Error classic_disconnect(std::uint64_t connection, std::string& message) override
         {
             std::shared_ptr<ClassicConnectionState> state;
+            GMBTSDPQueryHandler* sdp = nil;
+            bool connecting = false;
             {
                 std::scoped_lock lock(classic_mutex_);
                 auto it = classic_connections_.find(connection);
                 if (it == classic_connections_.end()) return invalid_connection(message);
                 state = it->second;
+
+                // A connect still in SDP or opening is cancelled: its record
+                // goes now, so a late SDP or open completion finds nothing, and
+                // the core fires the connect callback once as cancelled.
+                connecting = !state->connected;
+                if (connecting)
+                {
+                    classic_connections_.erase(it);
+                    auto pending = classic_pending_sdp_.find(connection);
+                    if (pending != classic_pending_sdp_.end())
+                    {
+                        sdp = pending->second;
+                        classic_pending_sdp_.erase(pending);
+                    }
+                }
             }
-            [state->channel closeChannel];
+
+            if (sdp)
+            {
+                sdp.onComplete = nil;
+                gmbt_park(sdp);
+            }
+            if (connecting)
+                classic_detach_channel(state->channel, state->delegate);
+            else
+                [state->channel closeChannel];
             message.clear();
             return Error::Ok;
         }
@@ -2551,7 +2655,11 @@ namespace
 
             GMBTClassicServerHub* hub = [GMBTClassicServerHub new];
             AppleBackend* self = this;
-            hub.onChannelOpened = ^(IOBluetoothRFCOMMChannel* channel) { self->handle_classic_server_channel_opened(channel); };
+            std::weak_ptr<int> alive = lifetime_;
+            hub.onChannelOpened = ^(IOBluetoothRFCOMMChannel* channel) {
+                if (alive.expired()) return;
+                self->handle_classic_server_channel_opened(channel);
+            };
 
             IOBluetoothUserNotification* notification =
                 [IOBluetoothRFCOMMChannel registerForChannelOpenNotifications:hub
@@ -2577,6 +2685,7 @@ namespace
         {
             if (classic_server_notification_) { [classic_server_notification_ unregister]; classic_server_notification_ = nil; }
             if (classic_server_record_) { [classic_server_record_ removeServiceRecord]; classic_server_record_ = nil; }
+            if (classic_server_hub_) classic_server_hub_.onChannelOpened = nil;
             classic_server_hub_ = nil;
             classic_server_running_ = false;
             message.clear();
@@ -2614,13 +2723,18 @@ namespace
 
             GMBTDevicePairDelegate* delegate = [GMBTDevicePairDelegate new];
             AppleBackend* self = this;
-            delegate.onFinished = ^(IOReturn error) { self->handle_pair_finished(device_handle, error); };
+            std::weak_ptr<int> alive = lifetime_;
+            delegate.onFinished = ^(IOReturn error) {
+                if (alive.expired()) return;
+                self->handle_pair_finished(device_handle, error);
+            };
             pair.delegate = delegate;
 
+            std::uint64_t generation = 0;
             {
                 std::scoped_lock lock(pair_mutex_);
-                pending_pairs_[device_handle] = pair;
-                pending_pair_delegates_[device_handle] = delegate;
+                generation = ++pair_generation_;
+                pending_pairs_[device_handle] = PendingPair{ pair, delegate, generation };
             }
 
             const IOReturn status = [pair start];
@@ -2628,10 +2742,17 @@ namespace
             {
                 std::scoped_lock lock(pair_mutex_);
                 pending_pairs_.erase(device_handle);
-                pending_pair_delegates_.erase(device_handle);
                 message = "Bluetooth pairing could not start";
                 return Error::OperationFailed;
             }
+
+            // A dismissed pairing dialog or a peer that never answers would
+            // otherwise leave the pair callback waiting forever.
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kPairTimeoutSeconds * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                if (alive.expired()) return;
+                self->handle_pair_timeout(device_handle, generation);
+            });
 
             message.clear();
             return Error::Ok;
@@ -2835,7 +2956,9 @@ namespace
                 std::scoped_lock lock(classic_mutex_);
                 auto sdp = classic_pending_sdp_.find(connection);
                 if (sdp == classic_pending_sdp_.end()) return; // already completed
-                gmbt_release_after_callback(sdp->second);
+                // IOBluetooth may still deliver sdpQueryComplete: to it.
+                sdp->second.onComplete = nil;
+                gmbt_park(sdp->second);
                 classic_pending_sdp_.erase(sdp);
             }
             GMBT_LOG("Classic SDP query timed out after %.0fs (connection %llu)",
@@ -2874,9 +2997,19 @@ namespace
         {
             GMBTClassicChannelDelegate* delegate = [GMBTClassicChannelDelegate new];
             AppleBackend* self = this;
-            delegate.onOpenComplete = ^(IOReturn openStatus) { self->handle_classic_channel_open_complete(connection, openStatus); };
-            delegate.onData = ^(NSData* data) { self->handle_classic_channel_data(connection, data); };
-            delegate.onClose = ^{ self->handle_classic_channel_closed(connection); };
+            std::weak_ptr<int> alive = lifetime_;
+            delegate.onOpenComplete = ^(IOReturn openStatus) {
+                if (alive.expired()) return;
+                self->handle_classic_channel_open_complete(connection, openStatus);
+            };
+            delegate.onData = ^(NSData* data) {
+                if (alive.expired()) return;
+                self->handle_classic_channel_data(connection, data);
+            };
+            delegate.onClose = ^{
+                if (alive.expired()) return;
+                self->handle_classic_channel_closed(connection);
+            };
 
             IOBluetoothRFCOMMChannel* channel = nil;
             const IOReturn openStatus = [device openRFCOMMChannelAsync:&channel withChannelID:channelID delegate:delegate];
@@ -2887,11 +3020,21 @@ namespace
                 return;
             }
 
-            std::scoped_lock lock(classic_mutex_);
-            auto it = classic_connections_.find(connection);
-            if (it == classic_connections_.end()) { [channel closeChannel]; return; }
-            it->second->channel = channel;
-            it->second->delegate = delegate;
+            {
+                std::scoped_lock lock(classic_mutex_);
+                auto it = classic_connections_.find(connection);
+                if (it != classic_connections_.end())
+                {
+                    it->second->channel = channel;
+                    it->second->delegate = delegate;
+                    return;
+                }
+            }
+
+            // Disconnected meanwhile. Closed with the lock released: a close
+            // that calls rfcommChannelClosed: synchronously would otherwise
+            // re-lock classic_mutex_ on this thread.
+            classic_detach_channel(channel, delegate);
         }
 
         void handle_classic_channel_open_complete(std::uint64_t connection, IOReturn status)
@@ -2933,18 +3076,86 @@ namespace
             hooks_.push_event(std::move(ev));
         }
 
+        static constexpr double kPairTimeoutSeconds = 60.0;
+
+        struct PendingPair
+        {
+            IOBluetoothDevicePair* pair = nil;
+            GMBTDevicePairDelegate* delegate = nil;
+            // Tells a timeout for this pairing from one for a later pairing of
+            // the same device.
+            std::uint64_t generation = 0;
+        };
+
         mutable std::mutex pair_mutex_;
-        std::unordered_map<std::uint64_t, IOBluetoothDevicePair*> pending_pairs_;
-        std::unordered_map<std::uint64_t, GMBTDevicePairDelegate*> pending_pair_delegates_;
+        std::unordered_map<std::uint64_t, PendingPair> pending_pairs_;
+        std::uint64_t pair_generation_ = 0;
+
+        // Stops a pairing the backend gives up on, with nothing of ours left
+        // for IOBluetooth to call.
+        static void classic_abandon_pair(const PendingPair& pending)
+        {
+            if (pending.delegate) pending.delegate.onFinished = nil;
+            if (pending.pair)
+            {
+                pending.pair.delegate = nil;
+                [pending.pair stop];
+            }
+            gmbt_release_after_callback(pending.pair);
+            gmbt_release_after_callback(pending.delegate);
+        }
+
+        // Detaches a channel from its delegate before closing and releasing
+        // it, so a close or a late open completion calls nothing of ours.
+        static void classic_detach_channel(IOBluetoothRFCOMMChannel* channel, GMBTClassicChannelDelegate* delegate)
+        {
+            if (delegate)
+            {
+                delegate.onOpenComplete = nil;
+                delegate.onData = nil;
+                delegate.onClose = nil;
+            }
+            if (channel)
+            {
+                [channel setDelegate:nil];
+                [channel closeChannel];
+            }
+            gmbt_release_after_callback(channel);
+            gmbt_release_after_callback(delegate);
+        }
+
+        void handle_pair_timeout(std::uint64_t device_handle, std::uint64_t generation)
+        {
+            PendingPair pending;
+            {
+                std::scoped_lock lock(pair_mutex_);
+                auto it = pending_pairs_.find(device_handle);
+                if (it == pending_pairs_.end() || it->second.generation != generation) return; // already finished
+                pending = it->second;
+                pending_pairs_.erase(it);
+            }
+            GMBT_LOG("Bluetooth pairing timed out after %.0fs (device %llu)",
+                kPairTimeoutSeconds, static_cast<unsigned long long>(device_handle));
+            classic_abandon_pair(pending);
+
+            BackendEvent ev;
+            ev.type = BackendEventType::DevicePaired;
+            ev.transport = Transport::Classic;
+            ev.device = device_handle;
+            ev.error = Error::Timeout;
+            ev.message = "Bluetooth pairing timed out";
+            hooks_.push_event(std::move(ev));
+        }
 
         void handle_pair_finished(std::uint64_t device_handle, IOReturn error)
         {
             {
                 std::scoped_lock lock(pair_mutex_);
-                auto p = pending_pairs_.find(device_handle);
-                if (p != pending_pairs_.end()) { gmbt_release_after_callback(p->second); pending_pairs_.erase(p); }
-                auto d = pending_pair_delegates_.find(device_handle);
-                if (d != pending_pair_delegates_.end()) { gmbt_release_after_callback(d->second); pending_pair_delegates_.erase(d); }
+                auto it = pending_pairs_.find(device_handle);
+                if (it == pending_pairs_.end()) return; // timed out meanwhile
+                gmbt_release_after_callback(it->second.pair);
+                gmbt_release_after_callback(it->second.delegate);
+                pending_pairs_.erase(it);
             }
 
             BackendEvent ev;
@@ -3028,8 +3239,15 @@ namespace
 
             GMBTClassicChannelDelegate* delegate = [GMBTClassicChannelDelegate new];
             AppleBackend* self = this;
-            delegate.onData = ^(NSData* data) { self->handle_classic_channel_data(connection, data); };
-            delegate.onClose = ^{ self->handle_classic_channel_closed(connection); };
+            std::weak_ptr<int> alive = lifetime_;
+            delegate.onData = ^(NSData* data) {
+                if (alive.expired()) return;
+                self->handle_classic_channel_data(connection, data);
+            };
+            delegate.onClose = ^{
+                if (alive.expired()) return;
+                self->handle_classic_channel_closed(connection);
+            };
             [channel setDelegate:delegate];
             state->channel = channel;
             state->delegate = delegate;
@@ -3047,22 +3265,61 @@ namespace
             hooks_.push_event(std::move(ev));
         }
 
+        // Every IOBluetooth object still in flight is detached before it is let
+        // go: its blocks are nilled, its delegate cleared, and anything that
+        // may still be called is kept alive until then. The blocks also check
+        // lifetime_, which expires with this backend.
         void classic_shutdown()
         {
-            if (classic_inquiry_) { [classic_inquiry_ stop]; classic_inquiry_ = nil; }
+            if (classic_inquiry_delegate_)
+            {
+                classic_inquiry_delegate_.onDeviceFound = nil;
+                classic_inquiry_delegate_.onComplete = nil;
+            }
+            if (classic_inquiry_)
+            {
+                [classic_inquiry_ setDelegate:nil];
+                [classic_inquiry_ stop];
+            }
+            gmbt_release_after_callback(classic_inquiry_);
+            gmbt_release_after_callback(classic_inquiry_delegate_);
+            classic_inquiry_ = nil;
             classic_inquiry_delegate_ = nil;
 
             std::unordered_map<std::uint64_t, std::shared_ptr<ClassicConnectionState>> connections;
+            std::unordered_map<std::uint64_t, GMBTSDPQueryHandler*> pending_sdp;
             {
                 std::scoped_lock lock(classic_mutex_);
                 connections.swap(classic_connections_);
+                pending_sdp.swap(classic_pending_sdp_);
                 classic_devices_by_address_.clear();
-                classic_pending_sdp_.clear();
             }
-            for (auto& [connection, state] : connections) { (void)connection; [state->channel closeChannel]; }
+            for (auto& [connection, state] : connections)
+            {
+                (void)connection;
+                classic_detach_channel(state->channel, state->delegate);
+            }
+            for (auto& [connection, handler] : pending_sdp)
+            {
+                (void)connection;
+                handler.onComplete = nil;
+                gmbt_park(handler);
+            }
+
+            std::unordered_map<std::uint64_t, PendingPair> pairs;
+            {
+                std::scoped_lock lock(pair_mutex_);
+                pairs.swap(pending_pairs_);
+            }
+            for (auto& [device_handle, pending] : pairs)
+            {
+                (void)device_handle;
+                classic_abandon_pair(pending);
+            }
 
             if (classic_server_notification_) { [classic_server_notification_ unregister]; classic_server_notification_ = nil; }
             if (classic_server_record_) { [classic_server_record_ removeServiceRecord]; classic_server_record_ = nil; }
+            if (classic_server_hub_) classic_server_hub_.onChannelOpened = nil;
             classic_server_hub_ = nil;
             classic_server_running_ = false;
         }

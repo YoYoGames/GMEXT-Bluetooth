@@ -100,6 +100,17 @@ namespace gmbluetooth
             return out;
         }
 
+        // A 4- or 8-hex-digit SIG UUID ("180D") onto the Bluetooth base UUID;
+        // any other string unchanged.
+        std::string expand_short_uuid(const std::string& text)
+        {
+            if (text.size() == 4)
+                return "0000" + text + "-0000-1000-8000-00805f9b34fb";
+            if (text.size() == 8)
+                return text + "-0000-1000-8000-00805f9b34fb";
+            return text;
+        }
+
         bool parse_guid(const std::string& text, GUID& out)
         {
             if (text.empty())
@@ -109,9 +120,10 @@ namespace gmbluetooth
             // an unbraced "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" string returns
             // CO_E_CLASSSTRING). Normalize to the braced form before parsing so
             // callers can pass either format.
-            const std::string braced = (text.front() == '{')
-                ? text
-                : "{" + text + "}";
+            const std::string expanded = expand_short_uuid(text);
+            const std::string braced = (expanded.front() == '{')
+                ? expanded
+                : "{" + expanded + "}";
 
             std::wstring wide = utf8_to_wide(braced);
             if (wide.empty())
@@ -227,6 +239,8 @@ namespace gmbluetooth
         }
 
 
+        // The 36-character lowercase form. A 4- or 8-hex-digit SIG UUID ("180D")
+        // is expanded onto the Bluetooth base, the way CoreBluetooth reads it.
         std::string normalize_uuid(std::string value)
         {
             value.erase(
@@ -235,6 +249,7 @@ namespace gmbluetooth
                     return std::isspace(c) != 0 || c == '{' || c == '}';
                 }),
                 value.end());
+            value = expand_short_uuid(value);
             std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c)
             {
                 return static_cast<char>(std::tolower(c));
@@ -317,7 +332,8 @@ namespace gmbluetooth
             const std::string& characteristic_uuid,
             const std::string& descriptor_uuid,
             std::uint32_t offset,
-            const std::vector<std::uint8_t>* value)
+            const std::vector<std::uint8_t>* value,
+            bool response_needed = true)
         {
             std::string out = "{\"request_id\":" + std::to_string(request_id) +
                 ",\"service_uuid\":\"" + json_escape(service_uuid) +
@@ -331,6 +347,9 @@ namespace gmbluetooth
                 out += json::base64_encode(value->data(), value->size());
                 out += "\"";
             }
+
+            if (!response_needed)
+                out += ",\"response_needed\":false";
 
             out += "}";
             return out;
@@ -2744,12 +2763,8 @@ namespace gmbluetooth
         {
             le_server_open_.store(false);
             clear_queued_notifies(notify_queue_);
+            complete_parked_gatt_requests_noexcept();
             clear_gatt_services_noexcept();
-            {
-                std::scoped_lock lock(gatt_request_mutex_);
-                pending_gatt_reads_.clear();
-                pending_gatt_writes_.clear();
-            }
             message.clear();
             return Error::Ok;
         }
@@ -2922,9 +2937,17 @@ namespace gmbluetooth
                                     const std::vector<std::uint8_t> value = buffer_to_bytes(request.Value());
                                     const bool with_response = request.Option() == WDBG::GattWriteOption::WriteWithResponse;
                                     const std::int32_t request_id = next_gatt_request_id_.fetch_add(1);
+                                    // A write without response needs no answer: it is completed now and
+                                    // the core keeps its value for GML, instead of the deferral waiting
+                                    // on a respond_write nothing obliges the game to send.
+                                    if (with_response)
                                     {
                                         std::scoped_lock lock(gatt_request_mutex_);
                                         pending_gatt_writes_[request_id] = PendingGattWrite{request, deferral, with_response};
+                                    }
+                                    else
+                                    {
+                                        deferral.Complete();
                                     }
 
                                     if (hooks_.push_event)
@@ -2939,7 +2962,8 @@ namespace gmbluetooth
                                             characteristic_uuid,
                                             {},
                                             request.Offset(),
-                                            &value);
+                                            &value,
+                                            with_response);
                                         hooks_.push_event(std::move(event));
                                     }
                                 }
@@ -3048,9 +3072,17 @@ namespace gmbluetooth
                                             const std::vector<std::uint8_t> value = buffer_to_bytes(request.Value());
                                             const bool with_response = request.Option() == WDBG::GattWriteOption::WriteWithResponse;
                                             const std::int32_t request_id = next_gatt_request_id_.fetch_add(1);
+                                            // A write without response needs no answer: it is completed now and
+                                            // the core keeps its value for GML, instead of the deferral waiting
+                                            // on a respond_write nothing obliges the game to send.
+                                            if (with_response)
                                             {
                                                 std::scoped_lock lock(gatt_request_mutex_);
                                                 pending_gatt_writes_[request_id] = PendingGattWrite{request, deferral, with_response};
+                                            }
+                                            else
+                                            {
+                                                deferral.Complete();
                                             }
 
                                             if (hooks_.push_event)
@@ -3065,7 +3097,8 @@ namespace gmbluetooth
                                                     characteristic_uuid,
                                                     descriptor_uuid,
                                                     request.Offset(),
-                                                    &value);
+                                                    &value,
+                                                    with_response);
                                                 hooks_.push_event(std::move(event));
                                             }
                                         }
@@ -3102,12 +3135,8 @@ namespace gmbluetooth
         Error le_server_clear_services(std::string& message) override
         {
             clear_queued_notifies(notify_queue_);
+            complete_parked_gatt_requests_noexcept();
             clear_gatt_services_noexcept();
-            {
-                std::scoped_lock lock(gatt_request_mutex_);
-                pending_gatt_reads_.clear();
-                pending_gatt_writes_.clear();
-            }
             message.clear();
             return Error::Ok;
         }
@@ -4004,6 +4033,46 @@ namespace gmbluetooth
                 parameters.ServiceData(bytes_to_buffer(data_it->second));
 
             service->provider.StartAdvertising(parameters);
+        }
+
+        // Completes every request still parked, so no central waits out the ATT
+        // timeout on a server that stopped or dropped its services. The core
+        // answers the ones it holds first; this catches anything left.
+        void complete_parked_gatt_requests_noexcept() noexcept
+        {
+            std::unordered_map<std::int32_t, PendingGattRead> reads;
+            std::unordered_map<std::int32_t, PendingGattWrite> writes;
+            {
+                std::scoped_lock lock(gatt_request_mutex_);
+                reads.swap(pending_gatt_reads_);
+                writes.swap(pending_gatt_writes_);
+            }
+            if (reads.empty() && writes.empty())
+                return;
+
+            constexpr std::uint8_t unlikely_error = 0x0E;
+            try
+            {
+                WinrtWorkerApartment apartment;
+                for (auto& [request_id, pending] : reads)
+                {
+                    (void)request_id;
+                    try { pending.request.RespondWithProtocolError(unlikely_error); } catch (...) {}
+                    try { if (pending.deferral) pending.deferral.Complete(); } catch (...) {}
+                }
+                for (auto& [request_id, pending] : writes)
+                {
+                    (void)request_id;
+                    if (pending.with_response)
+                    {
+                        try { pending.request.RespondWithProtocolError(unlikely_error); } catch (...) {}
+                    }
+                    try { if (pending.deferral) pending.deferral.Complete(); } catch (...) {}
+                }
+            }
+            catch (...)
+            {
+            }
         }
 
         void clear_gatt_services_noexcept() noexcept

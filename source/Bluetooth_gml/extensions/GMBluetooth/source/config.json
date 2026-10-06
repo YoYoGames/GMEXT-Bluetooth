@@ -15,7 +15,6 @@
   "targets": {
     "windows":{},
     "macos":{},
-    "linux":{},
     "android":{
       "mode": "java"
     },

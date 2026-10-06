@@ -6,10 +6,13 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cstring>
 #include <map>
 #include <mutex>
 #include <optional>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 using namespace gm::wire;
@@ -65,49 +68,54 @@ namespace
     std::mutex g_pending_pair_mutex;
     std::unordered_map<std::uint64_t, GMFunction> g_pending_pair_callbacks;
 
+    // Device handles count up and are never reused: clear() forgets every
+    // device, and one found again afterwards gets a new handle, so a handle a
+    // connection or a pending pair still holds can never name another device.
     class DeviceManager
     {
     public:
         std::uint64_t upsert_device(const DiscoveredDevice& device)
         {
             std::scoped_lock lock(mutex_);
-            const auto it = std::find_if(devices_.begin(), devices_.end(),
-                [&device](const auto& d) { return d.id == device.id; });
-
-            if (it != devices_.end())
+            if (const auto it = by_id_.find(device.id); it != by_id_.end())
             {
-                *it = device;
-                return std::distance(devices_.begin(), it) + 1;
+                merge(devices_.at(it->second), device);
+                return it->second;
             }
 
-            devices_.push_back(device);
-            return devices_.size();
+            const std::uint64_t handle = next_handle_++;
+            devices_.emplace(handle, device);
+            by_id_.emplace(device.id, handle);
+            order_.push_back(handle);
+            return handle;
         }
 
         void clear()
         {
             std::scoped_lock lock(mutex_);
             devices_.clear();
+            by_id_.clear();
+            order_.clear();
         }
 
         int get_count() const
         {
             std::scoped_lock lock(mutex_);
-            return static_cast<int>(devices_.size());
+            return static_cast<int>(order_.size());
         }
 
         std::uint64_t get_at(int index) const
         {
             std::scoped_lock lock(mutex_);
-            if (index < 0 || index >= static_cast<int>(devices_.size()))
+            if (index < 0 || index >= static_cast<int>(order_.size()))
                 return 0;
-            return static_cast<std::uint64_t>(index) + 1;
+            return order_[static_cast<std::size_t>(index)];
         }
 
         bool is_valid(std::uint64_t handle) const
         {
             std::scoped_lock lock(mutex_);
-            return handle > 0 && handle <= static_cast<std::uint64_t>(devices_.size());
+            return devices_.find(handle) != devices_.end();
         }
 
         // Returns a copy: backend threads upsert concurrently, so neither an
@@ -115,18 +123,46 @@ namespace
         std::optional<DiscoveredDevice> get_device(std::uint64_t handle) const
         {
             std::scoped_lock lock(mutex_);
-            if (handle <= 0 || handle > static_cast<std::uint64_t>(devices_.size()))
+            const auto it = devices_.find(handle);
+            if (it == devices_.end())
                 return std::nullopt;
-            return devices_[handle - 1];
+            return it->second;
         }
 
     private:
+        // An advertisement or a scan response carries only some fields (no
+        // LocalName, connectable false), so an update overwrites only what it
+        // actually carries.
+        static void merge(DiscoveredDevice& stored, const DiscoveredDevice& update)
+        {
+            stored.transport = update.transport;
+            if (!update.name.empty())
+                stored.name = update.name;
+            if (update.address_available)
+            {
+                stored.address = update.address;
+                stored.address_available = true;
+            }
+            if (update.rssi_available)
+            {
+                stored.rssi = update.rssi;
+                stored.rssi_available = true;
+            }
+            stored.connectable = stored.connectable || update.connectable;
+        }
+
         mutable std::mutex mutex_;
-        std::vector<DiscoveredDevice> devices_;
+        std::unordered_map<std::uint64_t, DiscoveredDevice> devices_;
+        std::unordered_map<std::string, std::uint64_t> by_id_;
+        std::vector<std::uint64_t> order_;
+        std::uint64_t next_handle_ = 1;
     };
 
     DeviceManager g_device_manager;
 
+    // A Classic handle outlives a remote hang-up while the backend still holds
+    // bytes the game has not read (R1-25), so the disconnect event only marks
+    // it closed; the game-thread calls retire it once nothing is left.
     class ClassicConnectionManager
     {
     public:
@@ -134,7 +170,7 @@ namespace
         {
             std::scoped_lock lock(mutex_);
             const std::uint64_t handle = next_handle_++;
-            connections_[handle] = device;
+            connections_[handle] = Record{ device, false };
             return handle;
         }
 
@@ -142,6 +178,20 @@ namespace
         {
             std::scoped_lock lock(mutex_);
             connections_.erase(handle);
+        }
+
+        void mark_closed(std::uint64_t handle)
+        {
+            std::scoped_lock lock(mutex_);
+            if (const auto it = connections_.find(handle); it != connections_.end())
+                it->second.closed = true;
+        }
+
+        bool is_closed(std::uint64_t handle) const
+        {
+            std::scoped_lock lock(mutex_);
+            const auto it = connections_.find(handle);
+            return it != connections_.end() && it->second.closed;
         }
 
         // next_handle_ keeps counting, so a handle from before the clear
@@ -162,12 +212,18 @@ namespace
         {
             std::scoped_lock lock(mutex_);
             const auto it = connections_.find(handle);
-            return it != connections_.end() ? it->second : 0;
+            return it != connections_.end() ? it->second.device : 0;
         }
 
     private:
+        struct Record
+        {
+            std::uint64_t device = 0;
+            bool closed = false;
+        };
+
         mutable std::mutex mutex_;
-        std::unordered_map<std::uint64_t, std::uint64_t> connections_;
+        std::unordered_map<std::uint64_t, Record> connections_;
         std::uint64_t next_handle_ = 1;
     };
 
@@ -280,62 +336,51 @@ namespace
     }
 
     // Parent-scoped handle caches for GATT services/characteristics/descriptors.
-    // Handles are 1-based indices into a flat vector, same idiom as DeviceManager;
-    // find_or_insert is idempotent so re-running discovery doesn't mint duplicates.
-    struct ServiceEntry
-    {
-        std::uint64_t connection = 0;
-        std::string uuid;
-    };
-
-    class ServiceCache
+    // Handles count up and are never reused, like device handles; an entry
+    // leaves when its LE connection is retired, so a reconnect does not pile
+    // fresh entries on top of the old ones. The map is ordered by handle, which
+    // is creation order, so get_at enumerates in discovery order. find_or_insert
+    // is idempotent so re-running discovery doesn't mint duplicates. UUIDs are
+    // stored canonical, the one form GML ever sees (R1-14).
+    template <typename Entry>
+    class AttributeCache
     {
     public:
-        std::uint64_t find_or_insert(std::uint64_t connection, const std::string& uuid)
+        std::uint64_t find_by_uuid(std::uint64_t parent, const std::string& uuid) const
         {
             const std::string key = canonical_uuid(uuid);
             std::scoped_lock lock(mutex_);
-            for (std::size_t i = 0; i < entries_.size(); ++i)
+            for (const auto& [handle, entry] : entries_)
             {
-                if (entries_[i].connection == connection && canonical_uuid(entries_[i].uuid) == key)
-                    return i + 1;
-            }
-            entries_.push_back(ServiceEntry{ connection, uuid });
-            return entries_.size();
-        }
-
-        std::uint64_t find_by_uuid(std::uint64_t connection, const std::string& uuid) const
-        {
-            const std::string key = canonical_uuid(uuid);
-            std::scoped_lock lock(mutex_);
-            for (std::size_t i = 0; i < entries_.size(); ++i)
-            {
-                if (entries_[i].connection == connection && canonical_uuid(entries_[i].uuid) == key)
-                    return i + 1;
+                if (entry.parent == parent && entry.uuid == key)
+                    return handle;
             }
             return 0;
         }
 
-        int get_count(std::uint64_t connection) const
+        int get_count(std::uint64_t parent) const
         {
             std::scoped_lock lock(mutex_);
             int count = 0;
-            for (const auto& e : entries_)
-                if (e.connection == connection)
+            for (const auto& [handle, entry] : entries_)
+            {
+                (void)handle;
+                if (entry.parent == parent)
                     ++count;
+            }
             return count;
         }
 
-        std::uint64_t get_at(std::uint64_t connection, int index) const
+        std::uint64_t get_at(std::uint64_t parent, int index) const
         {
             std::scoped_lock lock(mutex_);
             int seen = 0;
-            for (std::size_t i = 0; i < entries_.size(); ++i)
+            for (const auto& [handle, entry] : entries_)
             {
-                if (entries_[i].connection != connection)
+                if (entry.parent != parent)
                     continue;
                 if (seen == index)
-                    return i + 1;
+                    return handle;
                 ++seen;
             }
             return 0;
@@ -344,23 +389,42 @@ namespace
         bool is_valid(std::uint64_t handle) const
         {
             std::scoped_lock lock(mutex_);
-            return handle > 0 && handle <= entries_.size();
+            return entries_.find(handle) != entries_.end();
         }
 
         std::string get_uuid(std::uint64_t handle) const
         {
             std::scoped_lock lock(mutex_);
-            if (handle == 0 || handle > entries_.size())
-                return {};
-            return entries_[handle - 1].uuid;
+            const auto it = entries_.find(handle);
+            return it != entries_.end() ? it->second.uuid : std::string();
         }
 
         std::uint64_t get_parent(std::uint64_t handle) const
         {
             std::scoped_lock lock(mutex_);
-            if (handle == 0 || handle > entries_.size())
-                return 0;
-            return entries_[handle - 1].connection;
+            const auto it = entries_.find(handle);
+            return it != entries_.end() ? it->second.parent : 0;
+        }
+
+        // Erases every entry whose parent is in parents; returns the erased
+        // handles, the parents of the next level down.
+        std::vector<std::uint64_t> erase_children(const std::vector<std::uint64_t>& parents)
+        {
+            std::vector<std::uint64_t> erased;
+            std::scoped_lock lock(mutex_);
+            for (auto it = entries_.begin(); it != entries_.end();)
+            {
+                if (std::find(parents.begin(), parents.end(), it->second.parent) != parents.end())
+                {
+                    erased.push_back(it->first);
+                    it = entries_.erase(it);
+                }
+                else
+                {
+                    ++it;
+                }
+            }
+            return erased;
         }
 
         void clear()
@@ -369,262 +433,147 @@ namespace
             entries_.clear();
         }
 
-    private:
+    protected:
+        // Caller holds mutex_. Returns the existing entry's handle or a new one.
+        std::uint64_t find_or_insert_locked(std::uint64_t parent, const std::string& uuid, Entry*& entry)
+        {
+            const std::string key = canonical_uuid(uuid);
+            for (auto& [handle, existing] : entries_)
+            {
+                if (existing.parent == parent && existing.uuid == key)
+                {
+                    entry = &existing;
+                    return handle;
+                }
+            }
+
+            const std::uint64_t handle = next_handle_++;
+            Entry& inserted = entries_[handle];
+            inserted.parent = parent;
+            inserted.uuid = key;
+            entry = &inserted;
+            return handle;
+        }
+
         mutable std::mutex mutex_;
-        std::vector<ServiceEntry> entries_;
+        std::map<std::uint64_t, Entry> entries_;
+        std::uint64_t next_handle_ = 1;
+    };
+
+    // parent: the LE connection.
+    struct ServiceEntry
+    {
+        std::uint64_t parent = 0;
+        std::string uuid;
+    };
+
+    class ServiceCache : public AttributeCache<ServiceEntry>
+    {
+    public:
+        std::uint64_t find_or_insert(std::uint64_t connection, const std::string& uuid)
+        {
+            std::scoped_lock lock(mutex_);
+            ServiceEntry* entry = nullptr;
+            return find_or_insert_locked(connection, uuid, entry);
+        }
     };
 
     ServiceCache g_service_cache;
 
+    // parent: the service.
     struct CharacteristicEntry
     {
-        std::uint64_t service = 0;
+        std::uint64_t parent = 0;
         std::string uuid;
         std::int32_t properties = 0;
         std::vector<std::uint8_t> value;
         bool has_value = false;
     };
 
-    class CharacteristicCache
-    {
-    public:
-        std::uint64_t find_or_insert(std::uint64_t service, const std::string& uuid, std::int32_t properties)
-        {
-            const std::string key = canonical_uuid(uuid);
-            std::scoped_lock lock(mutex_);
-            for (std::size_t i = 0; i < entries_.size(); ++i)
-            {
-                if (entries_[i].service == service && canonical_uuid(entries_[i].uuid) == key)
-                {
-                    entries_[i].properties = properties;
-                    return i + 1;
-                }
-            }
-            CharacteristicEntry entry;
-            entry.service = service;
-            entry.uuid = uuid;
-            entry.properties = properties;
-            entries_.push_back(std::move(entry));
-            return entries_.size();
-        }
-
-        std::uint64_t find_by_uuid(std::uint64_t service, const std::string& uuid) const
-        {
-            const std::string key = canonical_uuid(uuid);
-            std::scoped_lock lock(mutex_);
-            for (std::size_t i = 0; i < entries_.size(); ++i)
-            {
-                if (entries_[i].service == service && canonical_uuid(entries_[i].uuid) == key)
-                    return i + 1;
-            }
-            return 0;
-        }
-
-        int get_count(std::uint64_t service) const
-        {
-            std::scoped_lock lock(mutex_);
-            int count = 0;
-            for (const auto& e : entries_)
-                if (e.service == service)
-                    ++count;
-            return count;
-        }
-
-        std::uint64_t get_at(std::uint64_t service, int index) const
-        {
-            std::scoped_lock lock(mutex_);
-            int seen = 0;
-            for (std::size_t i = 0; i < entries_.size(); ++i)
-            {
-                if (entries_[i].service != service)
-                    continue;
-                if (seen == index)
-                    return i + 1;
-                ++seen;
-            }
-            return 0;
-        }
-
-        bool is_valid(std::uint64_t handle) const
-        {
-            std::scoped_lock lock(mutex_);
-            return handle > 0 && handle <= entries_.size();
-        }
-
-        std::string get_uuid(std::uint64_t handle) const
-        {
-            std::scoped_lock lock(mutex_);
-            if (handle == 0 || handle > entries_.size())
-                return {};
-            return entries_[handle - 1].uuid;
-        }
-
-        std::uint64_t get_parent(std::uint64_t handle) const
-        {
-            std::scoped_lock lock(mutex_);
-            if (handle == 0 || handle > entries_.size())
-                return 0;
-            return entries_[handle - 1].service;
-        }
-
-        std::int32_t get_properties(std::uint64_t handle) const
-        {
-            std::scoped_lock lock(mutex_);
-            if (handle == 0 || handle > entries_.size())
-                return 0;
-            return entries_[handle - 1].properties;
-        }
-
-        void set_value(std::uint64_t handle, std::vector<std::uint8_t> value)
-        {
-            std::scoped_lock lock(mutex_);
-            if (handle == 0 || handle > entries_.size())
-                return;
-            entries_[handle - 1].value = std::move(value);
-            entries_[handle - 1].has_value = true;
-        }
-
-        std::int32_t get_value(std::uint64_t handle, std::uint8_t* out, std::size_t max_size) const
-        {
-            std::scoped_lock lock(mutex_);
-            if (handle == 0 || handle > entries_.size() || !entries_[handle - 1].has_value)
-                return 0;
-            const auto& value = entries_[handle - 1].value;
-            const std::size_t n = std::min(max_size, value.size());
-            if (n > 0 && out)
-                std::memcpy(out, value.data(), n);
-            return static_cast<std::int32_t>(n);
-        }
-
-        void clear()
-        {
-            std::scoped_lock lock(mutex_);
-            entries_.clear();
-        }
-
-    private:
-        mutable std::mutex mutex_;
-        std::vector<CharacteristicEntry> entries_;
-    };
-
-    CharacteristicCache g_characteristic_cache;
-
+    // parent: the characteristic.
     struct DescriptorEntry
     {
-        std::uint64_t characteristic = 0;
+        std::uint64_t parent = 0;
         std::string uuid;
         std::vector<std::uint8_t> value;
         bool has_value = false;
     };
 
-    class DescriptorCache
+    // The last value read or notified, for the two caches that hold one.
+    template <typename Entry>
+    class ValueCache : public AttributeCache<Entry>
     {
     public:
-        std::uint64_t find_or_insert(std::uint64_t characteristic, const std::string& uuid)
-        {
-            const std::string key = canonical_uuid(uuid);
-            std::scoped_lock lock(mutex_);
-            for (std::size_t i = 0; i < entries_.size(); ++i)
-            {
-                if (entries_[i].characteristic == characteristic && canonical_uuid(entries_[i].uuid) == key)
-                    return i + 1;
-            }
-            entries_.push_back(DescriptorEntry{ characteristic, uuid, {}, false });
-            return entries_.size();
-        }
-
-        std::uint64_t find_by_uuid(std::uint64_t characteristic, const std::string& uuid) const
-        {
-            const std::string key = canonical_uuid(uuid);
-            std::scoped_lock lock(mutex_);
-            for (std::size_t i = 0; i < entries_.size(); ++i)
-            {
-                if (entries_[i].characteristic == characteristic && canonical_uuid(entries_[i].uuid) == key)
-                    return i + 1;
-            }
-            return 0;
-        }
-
-        int get_count(std::uint64_t characteristic) const
-        {
-            std::scoped_lock lock(mutex_);
-            int count = 0;
-            for (const auto& e : entries_)
-                if (e.characteristic == characteristic)
-                    ++count;
-            return count;
-        }
-
-        std::uint64_t get_at(std::uint64_t characteristic, int index) const
-        {
-            std::scoped_lock lock(mutex_);
-            int seen = 0;
-            for (std::size_t i = 0; i < entries_.size(); ++i)
-            {
-                if (entries_[i].characteristic != characteristic)
-                    continue;
-                if (seen == index)
-                    return i + 1;
-                ++seen;
-            }
-            return 0;
-        }
-
-        bool is_valid(std::uint64_t handle) const
-        {
-            std::scoped_lock lock(mutex_);
-            return handle > 0 && handle <= entries_.size();
-        }
-
-        std::string get_uuid(std::uint64_t handle) const
-        {
-            std::scoped_lock lock(mutex_);
-            if (handle == 0 || handle > entries_.size())
-                return {};
-            return entries_[handle - 1].uuid;
-        }
-
-        std::uint64_t get_parent(std::uint64_t handle) const
-        {
-            std::scoped_lock lock(mutex_);
-            if (handle == 0 || handle > entries_.size())
-                return 0;
-            return entries_[handle - 1].characteristic;
-        }
-
         void set_value(std::uint64_t handle, std::vector<std::uint8_t> value)
         {
-            std::scoped_lock lock(mutex_);
-            if (handle == 0 || handle > entries_.size())
+            std::scoped_lock lock(this->mutex_);
+            const auto it = this->entries_.find(handle);
+            if (it == this->entries_.end())
                 return;
-            entries_[handle - 1].value = std::move(value);
-            entries_[handle - 1].has_value = true;
+            it->second.value = std::move(value);
+            it->second.has_value = true;
         }
 
         std::int32_t get_value(std::uint64_t handle, std::uint8_t* out, std::size_t max_size) const
         {
-            std::scoped_lock lock(mutex_);
-            if (handle == 0 || handle > entries_.size() || !entries_[handle - 1].has_value)
+            std::scoped_lock lock(this->mutex_);
+            const auto it = this->entries_.find(handle);
+            if (it == this->entries_.end() || !it->second.has_value)
                 return 0;
-            const auto& value = entries_[handle - 1].value;
+            const auto& value = it->second.value;
             const std::size_t n = std::min(max_size, value.size());
             if (n > 0 && out)
                 std::memcpy(out, value.data(), n);
             return static_cast<std::int32_t>(n);
         }
+    };
 
-        void clear()
+    class CharacteristicCache : public ValueCache<CharacteristicEntry>
+    {
+    public:
+        std::uint64_t find_or_insert(std::uint64_t service, const std::string& uuid, std::int32_t properties)
         {
             std::scoped_lock lock(mutex_);
-            entries_.clear();
+            CharacteristicEntry* entry = nullptr;
+            const std::uint64_t handle = find_or_insert_locked(service, uuid, entry);
+            entry->properties = properties;
+            return handle;
         }
 
-    private:
-        mutable std::mutex mutex_;
-        std::vector<DescriptorEntry> entries_;
+        std::int32_t get_properties(std::uint64_t handle) const
+        {
+            std::scoped_lock lock(mutex_);
+            const auto it = entries_.find(handle);
+            return it != entries_.end() ? it->second.properties : 0;
+        }
+    };
+
+    CharacteristicCache g_characteristic_cache;
+
+    class DescriptorCache : public ValueCache<DescriptorEntry>
+    {
+    public:
+        std::uint64_t find_or_insert(std::uint64_t characteristic, const std::string& uuid)
+        {
+            std::scoped_lock lock(mutex_);
+            DescriptorEntry* entry = nullptr;
+            return find_or_insert_locked(characteristic, uuid, entry);
+        }
     };
 
     DescriptorCache g_descriptor_cache;
+
+    // Drops what discovery cached for one LE connection: its services, their
+    // characteristics and those characteristics' descriptors.
+    void erase_le_connection_attributes(std::uint64_t connection)
+    {
+        const auto services = g_service_cache.erase_children({ connection });
+        if (services.empty())
+            return;
+        const auto characteristics = g_characteristic_cache.erase_children(services);
+        if (!characteristics.empty())
+            g_descriptor_cache.erase_children(characteristics);
+    }
 
     enum class LeOpKind : std::uint8_t
     {
@@ -842,6 +791,17 @@ namespace
         fail_le_ops(std::move(ops), Error::Disconnected, "LE connection closed before the operation completed");
     }
 
+    // Retires an LE connection whose link is gone: its waiting ops fail, its
+    // handle stops validating and what discovery cached for it is dropped.
+    void retire_le_connection(std::uint64_t connection)
+    {
+        if (connection == 0)
+            return;
+        purge_le_connection(connection);
+        g_le_connection_manager.remove_connection(connection);
+        erase_le_connection_attributes(connection);
+    }
+
     struct PendingLeServerRequest
     {
         std::uint64_t connection = 0;
@@ -849,11 +809,126 @@ namespace
         std::string characteristic_uuid;
         std::string descriptor_uuid;
         bool is_write = false;
+        // False only for a write without response, which the backend has
+        // already completed; the entry is kept for GML to read its value.
+        bool response_needed = true;
         std::vector<std::uint8_t> write_value;
+        std::chrono::steady_clock::time_point received_at = std::chrono::steady_clock::now();
     };
 
     std::mutex g_pending_le_server_requests_mutex;
     std::unordered_map<std::int32_t, PendingLeServerRequest> g_pending_le_server_requests;
+
+    // ATT error codes the core answers with when GML does not.
+    constexpr std::int32_t k_att_request_not_supported = 0x06;
+    constexpr std::int32_t k_att_unlikely_error = 0x0E;
+
+    // The ATT transaction timeout is 30 s: a request still waiting after that
+    // has already cost the central its link. A write without response is kept
+    // only long enough for GML to read its value, as on Android.
+    constexpr auto k_le_server_request_ttl = std::chrono::seconds(30);
+    constexpr auto k_le_server_no_response_write_ttl = std::chrono::seconds(5);
+
+    // Answers a request through the backend without GML - a default, an expiry
+    // or a stop - so the backend's own request object is completed too.
+    void answer_le_server_request(std::int32_t request_id, bool is_write, std::int32_t att_error)
+    {
+        if (!g_backend)
+            return;
+
+        std::string message;
+        const Error error = is_write
+            ? g_backend->le_server_respond_write(request_id, att_error, message)
+            : g_backend->le_server_respond_read(request_id, att_error, std::string(), message);
+        if (error != Error::Ok)
+            GMBT_LOG("LE server request %d could not be answered (0x%02x): %s", request_id, att_error, message.c_str());
+    }
+
+    // Drops the requests past their lifetime, answering those a central still
+    // waits on. Runs on each new request, so nothing piles up while a server
+    // runs; the answers are sent with no lock held.
+    void expire_le_server_requests()
+    {
+        const auto now = std::chrono::steady_clock::now();
+        std::vector<std::pair<std::int32_t, bool>> to_answer;
+        {
+            std::scoped_lock lock(g_pending_le_server_requests_mutex);
+            for (auto it = g_pending_le_server_requests.begin(); it != g_pending_le_server_requests.end();)
+            {
+                const auto& request = it->second;
+                const auto ttl = request.response_needed ? k_le_server_request_ttl : k_le_server_no_response_write_ttl;
+                if (now - request.received_at < ttl)
+                {
+                    ++it;
+                    continue;
+                }
+                if (request.response_needed)
+                    to_answer.emplace_back(it->first, request.is_write);
+                it = g_pending_le_server_requests.erase(it);
+            }
+        }
+
+        for (const auto& [request_id, is_write] : to_answer)
+        {
+            GMBT_LOG("LE server request %d was never answered, expiring it", request_id);
+            answer_le_server_request(request_id, is_write, k_att_unlikely_error);
+        }
+    }
+
+    // Answers every request still waiting, before the server stops or drops
+    // its services and the backend forgets them.
+    void answer_pending_le_server_requests()
+    {
+        std::unordered_map<std::int32_t, PendingLeServerRequest> pending;
+        {
+            std::scoped_lock lock(g_pending_le_server_requests_mutex);
+            pending.swap(g_pending_le_server_requests);
+        }
+
+        for (const auto& [request_id, request] : pending)
+        {
+            if (request.response_needed)
+                answer_le_server_request(request_id, request.is_write, k_att_unlikely_error);
+        }
+    }
+
+    // The pre-flight for respond_*: the id names a waiting request of the
+    // kind being answered. Nothing is consumed, so a bad call can be retried.
+    bool check_le_server_request(std::int32_t request_id, bool is_write, const char* other_function)
+    {
+        std::scoped_lock lock(g_pending_le_server_requests_mutex);
+        const auto it = g_pending_le_server_requests.find(request_id);
+        if (it == g_pending_le_server_requests.end())
+        {
+            g_last_error = Error::InvalidHandle;
+            g_last_error_message = "Unknown or expired LE server request id " + std::to_string(request_id);
+            return false;
+        }
+        if (it->second.is_write != is_write)
+        {
+            g_last_error = Error::InvalidArgument;
+            g_last_error_message = "LE server request " + std::to_string(request_id) + " is a " +
+                (it->second.is_write ? "write" : "read") + " request; answer it with " + other_function;
+            return false;
+        }
+        return true;
+    }
+
+    // Removes a checked request; empty if the expiry sweep took it meanwhile.
+    std::optional<PendingLeServerRequest> take_le_server_request(std::int32_t request_id)
+    {
+        std::scoped_lock lock(g_pending_le_server_requests_mutex);
+        const auto it = g_pending_le_server_requests.find(request_id);
+        if (it == g_pending_le_server_requests.end())
+        {
+            g_last_error = Error::InvalidHandle;
+            g_last_error_message = "Unknown or expired LE server request id " + std::to_string(request_id);
+            return std::nullopt;
+        }
+        PendingLeServerRequest request = std::move(it->second);
+        g_pending_le_server_requests.erase(it);
+        return request;
+    }
 
     // --- LE event JSON helpers ---
 
@@ -1028,8 +1103,7 @@ namespace
             if (failed)
             {
                 // The link never came up: nothing queued on it can complete.
-                purge_le_connection(connection);
-                g_le_connection_manager.remove_connection(connection);
+                retire_le_connection(connection);
             }
             try
             {
@@ -1045,9 +1119,9 @@ namespace
         {
             // Apple: the backend resolves the peripheral's address to its
             // connection. 0 only if the peripheral was never connected through
-            // bluetooth_le_connect, and then there is nothing to purge.
+            // bluetooth_le_connect, and then there is nothing to retire.
             const std::uint64_t connection = le_event_connection(root);
-            purge_le_connection(connection);
+            retire_le_connection(connection);
 
             GMFunction callback;
             { std::scoped_lock lock(g_callback_mutex); callback = g_callback_le_disconnected; }
@@ -1080,7 +1154,7 @@ namespace
             }
 
             const std::uint64_t connection = le_event_connection(root);
-            purge_le_connection(connection);
+            retire_le_connection(connection);
 
             GMFunction callback;
             { std::scoped_lock lock(g_callback_mutex); callback = g_callback_le_disconnected; }
@@ -1182,10 +1256,24 @@ namespace
         {
             const auto* request_id_field = root.find("request_id");
             const std::int32_t request_id = request_id_field ? request_id_field->as_int(0) : 0;
-            const std::string service_uuid = le_event_string(root, "service_uuid");
-            const std::string characteristic_uuid = le_event_string(root, "characteristic_uuid");
-            const std::string descriptor_uuid = le_event_string(root, "descriptor_uuid");
+            const std::string service_uuid = canonical_uuid(le_event_string(root, "service_uuid"));
+            const std::string characteristic_uuid = canonical_uuid(le_event_string(root, "characteristic_uuid"));
+            const std::string descriptor_uuid = canonical_uuid(le_event_string(root, "descriptor_uuid"));
+            const auto* offset_field = root.find("offset");
+            const std::int32_t offset = offset_field ? offset_field->as_int(0) : 0;
 
+            GMFunction callback;
+            { std::scoped_lock lock(g_callback_mutex); callback = g_callback_le_server_read_request; }
+            if (!callback)
+            {
+                // Nobody will answer it, so the central hears now instead of
+                // waiting out the ATT timeout and dropping the link.
+                answer_le_server_request(request_id, false, k_att_request_not_supported);
+                g_dropped_events++;
+                return;
+            }
+
+            expire_le_server_requests();
             {
                 std::scoped_lock lock(g_pending_le_server_requests_mutex);
                 PendingLeServerRequest request;
@@ -1197,23 +1285,15 @@ namespace
                 g_pending_le_server_requests[request_id] = std::move(request);
             }
 
-            GMFunction callback;
-            { std::scoped_lock lock(g_callback_mutex); callback = g_callback_le_server_read_request; }
-            if (callback)
+            try
             {
-                try
-                {
-                    // callback(request_id, connection, service_uuid, characteristic_uuid, descriptor_uuid_or_empty, offset)
-                    callback.call(static_cast<double>(request_id), 0.0, service_uuid, characteristic_uuid, descriptor_uuid, 0.0);
-                }
-                catch (const std::exception& e)
-                {
-                    GMBT_LOG("Error dispatching le_server_read_request callback: %s", e.what());
-                }
+                // callback(request_id, connection, service_uuid, characteristic_uuid, descriptor_uuid_or_empty, offset)
+                // GML answers with the value's bytes from offset on, as on Android.
+                callback.call(static_cast<double>(request_id), 0.0, service_uuid, characteristic_uuid, descriptor_uuid, static_cast<double>(offset));
             }
-            else
+            catch (const std::exception& e)
             {
-                g_dropped_events++;
+                GMBT_LOG("Error dispatching le_server_read_request callback: %s", e.what());
             }
         }
         else if (type == "bluetooth_le_server_characteristic_write_request" ||
@@ -1221,14 +1301,28 @@ namespace
         {
             const auto* request_id_field = root.find("request_id");
             const std::int32_t request_id = request_id_field ? request_id_field->as_int(0) : 0;
-            const std::string service_uuid = le_event_string(root, "service_uuid");
-            const std::string characteristic_uuid = le_event_string(root, "characteristic_uuid");
-            const std::string descriptor_uuid = le_event_string(root, "descriptor_uuid");
+            const std::string service_uuid = canonical_uuid(le_event_string(root, "service_uuid"));
+            const std::string characteristic_uuid = canonical_uuid(le_event_string(root, "characteristic_uuid"));
+            const std::string descriptor_uuid = canonical_uuid(le_event_string(root, "descriptor_uuid"));
+            const auto* response_needed_field = root.find("response_needed");
+            const bool response_needed = !response_needed_field || response_needed_field->as_bool(true);
+
+            GMFunction callback;
+            { std::scoped_lock lock(g_callback_mutex); callback = g_callback_le_server_write_request; }
+            if (!callback)
+            {
+                // As for a read; a write without response needs no answer.
+                if (response_needed)
+                    answer_le_server_request(request_id, true, k_att_request_not_supported);
+                g_dropped_events++;
+                return;
+            }
 
             std::vector<std::uint8_t> value;
             if (const auto* value_field = root.find("value"); value_field && value_field->is_string())
                 value = json::base64_decode(value_field->string_value);
 
+            expire_le_server_requests();
             {
                 std::scoped_lock lock(g_pending_le_server_requests_mutex);
                 PendingLeServerRequest request;
@@ -1237,27 +1331,19 @@ namespace
                 request.characteristic_uuid = characteristic_uuid;
                 request.descriptor_uuid = descriptor_uuid;
                 request.is_write = true;
+                request.response_needed = response_needed;
                 request.write_value = std::move(value);
                 g_pending_le_server_requests[request_id] = std::move(request);
             }
 
-            GMFunction callback;
-            { std::scoped_lock lock(g_callback_mutex); callback = g_callback_le_server_write_request; }
-            if (callback)
+            try
             {
-                try
-                {
-                    // callback(request_id, connection, service_uuid, characteristic_uuid, descriptor_uuid_or_empty)
-                    callback.call(static_cast<double>(request_id), 0.0, service_uuid, characteristic_uuid, descriptor_uuid);
-                }
-                catch (const std::exception& e)
-                {
-                    GMBT_LOG("Error dispatching le_server_write_request callback: %s", e.what());
-                }
+                // callback(request_id, connection, service_uuid, characteristic_uuid, descriptor_uuid_or_empty)
+                callback.call(static_cast<double>(request_id), 0.0, service_uuid, characteristic_uuid, descriptor_uuid);
             }
-            else
+            catch (const std::exception& e)
             {
-                g_dropped_events++;
+                GMBT_LOG("Error dispatching le_server_write_request callback: %s", e.what());
             }
         }
         else
@@ -1329,6 +1415,10 @@ namespace
             // not one of the persistently-registered callbacks below.
             if (event.type == BackendEventType::ClassicConnected)
             {
+                // A connect that failed leaves nothing behind its handle.
+                if (event.error != Error::Ok)
+                    g_classic_connection_manager.remove_connection(event.connection);
+
                 GMFunction callback;
                 {
                     std::scoped_lock lock(g_pending_connect_mutex);
@@ -1405,6 +1495,11 @@ namespace
                 dispatch_le_event(event);
                 return;
             }
+
+            // Retired by the game-thread calls once the backend holds no unread
+            // bytes for it; nothing is asked of the backend from its own thread.
+            if (event.type == BackendEventType::ClassicDisconnected)
+                g_classic_connection_manager.mark_closed(event.connection);
 
             GMFunction callback;
 
@@ -1511,9 +1606,10 @@ void bluetooth_shutdown()
         static_cast<unsigned long long>(g_dropped_events.load()));
 
     // The backend goes first, so no event arrives while the state below is
-    // failed and cleared.
+    // failed and cleared; the server requests it holds are answered before.
     if (g_backend)
     {
+        answer_pending_le_server_requests();
         g_backend->shutdown();
         g_backend.reset();
     }
@@ -1559,6 +1655,8 @@ void bluetooth_shutdown()
     { std::scoped_lock lock(g_pending_pair_mutex); pair_callbacks.swap(g_pending_pair_callbacks); }
     for (const auto& [device, callback] : pair_callbacks)
     {
+        if (!callback)
+            continue;
         try
         {
             // callback(error_code, message, device)
@@ -1903,9 +2001,16 @@ std::int32_t bluetooth_pair(std::uint64_t device, const gm::wire::GMFunction& ca
 
     // Registered before calling the backend: pairing runs asynchronously and may
     // push its DevicePaired completion event before this call even returns.
-    if (callback)
+    // Recorded with or without a callback, so a second pair of the same device
+    // is refused instead of overwriting the first one's callback.
     {
         std::scoped_lock lock(g_pending_pair_mutex);
+        if (g_pending_pair_callbacks.find(device) != g_pending_pair_callbacks.end())
+        {
+            g_last_error = Error::Busy;
+            g_last_error_message = "A pairing for this device is already in progress";
+            return static_cast<std::int32_t>(Error::Busy);
+        }
         g_pending_pair_callbacks[device] = callback;
     }
 
@@ -1938,15 +2043,68 @@ std::int32_t bluetooth_classic_disconnect(std::uint64_t connection)
         return static_cast<std::int32_t>(Error::NotInitialized);
     }
 
+    const bool remote_closed = g_classic_connection_manager.is_closed(connection);
+
     std::string message;
-    const Error error = g_backend->classic_disconnect(connection, message);
+    Error error = g_backend->classic_disconnect(connection, message);
+
+    // The peer already hung up and the backend dropped its side: the game
+    // releasing the handle is still a success.
+    if (remote_closed && error == Error::InvalidHandle)
+    {
+        error = Error::Ok;
+        message.clear();
+    }
     g_last_error = error;
     g_last_error_message = message;
+
+    // A connect still in flight is cancelled, not completed: its callback
+    // fires now, and a late completion from the backend finds none.
+    GMFunction connect_callback;
+    {
+        std::scoped_lock lock(g_pending_connect_mutex);
+        const auto it = g_pending_connect_callbacks.find(connection);
+        if (it != g_pending_connect_callbacks.end())
+        {
+            connect_callback = it->second;
+            g_pending_connect_callbacks.erase(it);
+        }
+    }
+    const std::uint64_t device = g_classic_connection_manager.get_device(connection);
+    g_classic_connection_manager.remove_connection(connection);
+    if (connect_callback)
+    {
+        try
+        {
+            // callback(error_code, message, connection, device)
+            connect_callback.call(static_cast<double>(Error::ConnectionFailed), std::string("Connection cancelled by bluetooth_classic_disconnect"), static_cast<double>(connection), static_cast<double>(device));
+        }
+        catch (const std::exception& e)
+        {
+            GMBT_LOG("Error dispatching classic_connect callback: %s", e.what());
+        }
+    }
+
     return static_cast<std::int32_t>(error);
+}
+
+namespace
+{
+    // A handle whose peer hung up stays valid while the backend still holds
+    // bytes for it, and is retired by the first call that finds none.
+    void retire_classic_connection_if_drained(std::uint64_t connection)
+    {
+        if (!g_classic_connection_manager.is_closed(connection))
+            return;
+        if (g_backend && g_backend->classic_receive_available(connection) > 0)
+            return;
+        g_classic_connection_manager.remove_connection(connection);
+    }
 }
 
 bool bluetooth_classic_connection_is_valid(std::uint64_t connection)
 {
+    retire_classic_connection_if_drained(connection);
     return g_classic_connection_manager.is_valid(connection);
 }
 
@@ -1957,12 +2115,18 @@ bool bluetooth_classic_connection_is_connected(std::uint64_t connection)
 
 std::uint64_t bluetooth_classic_connection_get_device(std::uint64_t connection)
 {
+    retire_classic_connection_if_drained(connection);
     return g_classic_connection_manager.get_device(connection);
 }
 
 std::int32_t bluetooth_classic_receive_available(std::uint64_t connection)
 {
-    return g_backend ? g_backend->classic_receive_available(connection) : 0;
+    if (!g_backend)
+        return 0;
+    const std::int32_t available = g_backend->classic_receive_available(connection);
+    if (available == 0)
+        retire_classic_connection_if_drained(connection);
+    return available;
 }
 
 std::int32_t bluetooth_classic_send(std::uint64_t connection, struct gm::wire::GMBuffer data, unsigned int offset, unsigned int size)
@@ -1995,6 +2159,7 @@ std::int32_t bluetooth_classic_receive(std::uint64_t connection, struct gm::wire
 
     std::uint8_t* buffer = static_cast<std::uint8_t*>(data.data()) + offset;
     const std::size_t received = g_backend->classic_receive_bytes(connection, buffer, max_size);
+    retire_classic_connection_if_drained(connection);
     return static_cast<std::int32_t>(received);
 }
 
@@ -2255,8 +2420,9 @@ std::int32_t bluetooth_le_disconnect(std::uint64_t connection)
     g_last_error_message = message;
 
     // Whatever the backend answered, the game is done with this link: no op
-    // waiting on it may outlive the call.
-    purge_le_connection(connection);
+    // waiting on it may outlive the call, and its handle is retired.
+    const std::uint64_t device = g_le_connection_manager.get_device(connection);
+    retire_le_connection(connection);
 
     // A connect still in flight is cancelled, not completed: its callback
     // fires now, and a late open event from the backend finds none.
@@ -2272,7 +2438,6 @@ std::int32_t bluetooth_le_disconnect(std::uint64_t connection)
     }
     if (connect_callback)
     {
-        const std::uint64_t device = g_le_connection_manager.get_device(connection);
         try
         {
             // callback(error_code, message, connection, device)
@@ -2760,6 +2925,9 @@ std::int32_t bluetooth_le_server_stop()
         return static_cast<std::int32_t>(Error::NotInitialized);
     }
 
+    // Answered while the backend still holds them; it forgets them on stop.
+    answer_pending_le_server_requests();
+
     std::string message;
     const Error error = g_backend->le_server_stop(message);
     g_last_error = error;
@@ -2817,6 +2985,9 @@ std::int32_t bluetooth_le_server_clear_services()
         return static_cast<std::int32_t>(Error::NotInitialized);
     }
 
+    // The services the requests name are going away.
+    answer_pending_le_server_requests();
+
     std::string message;
     const Error error = g_backend->le_server_clear_services(message);
     g_last_error = error;
@@ -2833,16 +3004,17 @@ std::int32_t bluetooth_le_server_respond_read(std::int32_t request_id, std::int3
         return static_cast<std::int32_t>(Error::NotInitialized);
     }
 
-    // Checked before the request is erased, so a call with a bad range can be
-    // retried instead of leaving the remote central to time out.
+    // Checked before the request is erased, so a call with a bad id, kind or
+    // range can be retried instead of leaving the remote central to time out.
+    if (!check_le_server_request(request_id, false, "bluetooth_le_server_respond_write"))
+        return static_cast<std::int32_t>(g_last_error);
+
     if (error_code == static_cast<std::int32_t>(Error::Ok) && size > 0 &&
         !buffer_range_valid(data, offset, size, "bluetooth_le_server_respond_read"))
         return static_cast<std::int32_t>(Error::InvalidArgument);
 
-    {
-        std::scoped_lock lock(g_pending_le_server_requests_mutex);
-        g_pending_le_server_requests.erase(request_id);
-    }
+    if (!take_le_server_request(request_id))
+        return static_cast<std::int32_t>(g_last_error);
 
     const std::uint8_t* buffer = static_cast<const std::uint8_t*>(data.data()) + offset;
     const std::string value_base64 = json::base64_encode(buffer, size);
@@ -2863,9 +3035,20 @@ std::int32_t bluetooth_le_server_respond_write(std::int32_t request_id, std::int
         return static_cast<std::int32_t>(Error::NotInitialized);
     }
 
+    if (!check_le_server_request(request_id, true, "bluetooth_le_server_respond_read"))
+        return static_cast<std::int32_t>(g_last_error);
+
+    const auto request = take_le_server_request(request_id);
+    if (!request)
+        return static_cast<std::int32_t>(g_last_error);
+
+    // A write without response was completed when it arrived; answering it is
+    // allowed everywhere and changes nothing (R1-15).
+    if (!request->response_needed)
     {
-        std::scoped_lock lock(g_pending_le_server_requests_mutex);
-        g_pending_le_server_requests.erase(request_id);
+        g_last_error = Error::Ok;
+        g_last_error_message.clear();
+        return static_cast<std::int32_t>(Error::Ok);
     }
 
     std::string message;
