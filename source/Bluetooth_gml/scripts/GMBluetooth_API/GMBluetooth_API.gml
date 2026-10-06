@@ -111,6 +111,13 @@ enum BluetoothLeAdvertiseTxPower
     High = 3
 }
 
+enum BluetoothLeConnectionPriority
+{
+    Balanced = 0,
+    High = 1,
+    LowPower = 2
+}
+
 enum BluetoothState
 {
     Unknown = 0,
@@ -143,7 +150,12 @@ enum BluetoothFeature
     ClassicPairing = 17,
     ClassicDiscoverable = 18,
     ClassicDiscoverableStop = 19,
-    PermissionRequest = 20
+    PermissionRequest = 20,
+    LeMtuRequest = 21,
+    LeReadRssi = 22,
+    LeConnectionPriority = 23,
+    RequestEnable = 24,
+    PairedDevicesQuery = 25
 }
 
 // #####################################################################
@@ -214,6 +226,23 @@ function BluetoothLeAdvertiseManufacturerData() constructor
 }
 
 /**
+ * @returns {Struct.BluetoothLeScanFilter}
+ */
+function BluetoothLeScanFilter() constructor
+{
+    /**
+     * Internally generated hash for quick validation
+     * @ignore
+     */
+    static __uid = 1367205649;
+
+    self.service_uuid = undefined;
+    self.name = undefined;
+    self.company_id = undefined;
+
+}
+
+/**
  * @returns {Struct.BluetoothLeCharacteristicDefinition}
  */
 function BluetoothLeCharacteristicDefinition() constructor
@@ -248,6 +277,24 @@ function BluetoothLeAdvertiseData() constructor
     self.service_uuids = undefined;
     self.service_data = undefined;
     self.manufacturer_data = undefined;
+
+}
+
+/**
+ * @returns {Struct.BluetoothLeAdvertisement}
+ */
+function BluetoothLeAdvertisement() constructor
+{
+    /**
+     * Internally generated hash for quick validation
+     * @ignore
+     */
+    static __uid = 3014871351;
+
+    self.service_uuids = undefined;
+    self.service_data = undefined;
+    self.manufacturer_data = undefined;
+    self.tx_power = undefined;
 
 }
 
@@ -503,6 +550,111 @@ function __BluetoothLeAdvertiseManufacturerData_decode(_buffer, _offset)
 }
 
 /**
+ * @func __BluetoothLeScanFilter_encode(_inst, _buffer, _offset, _where)
+ * @param {Struct.BluetoothLeScanFilter} _inst
+ * @param {Id.Buffer} _buffer
+ * @param {Real} _offset
+ * @param {String} _where
+ * @ignore
+ */
+function __BluetoothLeScanFilter_encode(_inst, _buffer, _offset, _where = _GMFUNCTION_)
+{
+    buffer_seek(_buffer, buffer_seek_start, _offset);
+    with (_inst)
+    {
+        // field: service_uuid, type: optional<String>
+        if (is_undefined(self.service_uuid))
+        {
+            buffer_write(_buffer, buffer_bool, false);
+        }
+        else
+        {
+            buffer_write(_buffer, buffer_bool, true);
+            if (!is_string(self.service_uuid)) show_error($"{_where} :: self.service_uuid expected string", true);
+            buffer_write(_buffer, buffer_u32, string_byte_length(self.service_uuid));
+            buffer_write(_buffer, buffer_string, self.service_uuid);
+        }
+
+        // field: name, type: optional<String>
+        if (is_undefined(self.name))
+        {
+            buffer_write(_buffer, buffer_bool, false);
+        }
+        else
+        {
+            buffer_write(_buffer, buffer_bool, true);
+            if (!is_string(self.name)) show_error($"{_where} :: self.name expected string", true);
+            buffer_write(_buffer, buffer_u32, string_byte_length(self.name));
+            buffer_write(_buffer, buffer_string, self.name);
+        }
+
+        // field: company_id, type: optional<Int32>
+        if (is_undefined(self.company_id))
+        {
+            buffer_write(_buffer, buffer_bool, false);
+        }
+        else
+        {
+            buffer_write(_buffer, buffer_bool, true);
+            if (!is_numeric(self.company_id)) show_error($"{_where} :: self.company_id expected number", true);
+            buffer_write(_buffer, buffer_s32, self.company_id);
+        }
+
+    }
+}
+
+/**
+ * @func __BluetoothLeScanFilter_decode(_buffer, _offset)
+ * @param {Id.Buffer} _buffer
+ * @param {Real} _offset
+ * @returns {Struct.BluetoothLeScanFilter}
+ * @ignore
+ */
+function __BluetoothLeScanFilter_decode(_buffer, _offset)
+{
+    buffer_seek(_buffer, buffer_seek_start, _offset);
+
+    _inst = new BluetoothLeScanFilter();
+    with (_inst)
+    {
+        // field: service_uuid, type: optional<String>
+        if (buffer_read(_buffer, buffer_bool))
+        {
+            buffer_read(_buffer, buffer_u32);
+            self.service_uuid = buffer_read(_buffer, buffer_string);
+        }
+        else
+        {
+            self.service_uuid = undefined;
+        }
+
+        // field: name, type: optional<String>
+        if (buffer_read(_buffer, buffer_bool))
+        {
+            buffer_read(_buffer, buffer_u32);
+            self.name = buffer_read(_buffer, buffer_string);
+        }
+        else
+        {
+            self.name = undefined;
+        }
+
+        // field: company_id, type: optional<Int32>
+        if (buffer_read(_buffer, buffer_bool))
+        {
+            self.company_id = buffer_read(_buffer, buffer_s32);
+        }
+        else
+        {
+            self.company_id = undefined;
+        }
+
+    }
+
+    return _inst;
+}
+
+/**
  * @func __BluetoothLeCharacteristicDefinition_encode(_inst, _buffer, _offset, _where)
  * @param {Struct.BluetoothLeCharacteristicDefinition} _inst
  * @param {Id.Buffer} _buffer
@@ -702,6 +854,119 @@ function __BluetoothLeAdvertiseData_decode(_buffer, _offset)
 }
 
 /**
+ * @func __BluetoothLeAdvertisement_encode(_inst, _buffer, _offset, _where)
+ * @param {Struct.BluetoothLeAdvertisement} _inst
+ * @param {Id.Buffer} _buffer
+ * @param {Real} _offset
+ * @param {String} _where
+ * @ignore
+ */
+function __BluetoothLeAdvertisement_encode(_inst, _buffer, _offset, _where = _GMFUNCTION_)
+{
+    buffer_seek(_buffer, buffer_seek_start, _offset);
+    with (_inst)
+    {
+        // field: service_uuids, type: String[]
+        if (!is_array(self.service_uuids)) show_error($"{_where} :: self.service_uuids expected array", true);
+        var __length__ = array_length(self.service_uuids);
+        buffer_write(_buffer, buffer_u32, __length__);
+        for (var _i = 0; _i < __length__; ++_i)
+        {
+            if (!is_string(self.service_uuids[_i])) show_error($"{_where} :: self.service_uuids[_i] expected string", true);
+            buffer_write(_buffer, buffer_u32, string_byte_length(self.service_uuids[_i]));
+            buffer_write(_buffer, buffer_string, self.service_uuids[_i]);
+        }
+
+        // field: service_data, type: struct BluetoothLeAdvertiseServiceData[]
+        if (!is_array(self.service_data)) show_error($"{_where} :: self.service_data expected array", true);
+        var __length__ = array_length(self.service_data);
+        buffer_write(_buffer, buffer_u32, __length__);
+        for (var _i = 0; _i < __length__; ++_i)
+        {
+            if (self.service_data[_i].__uid != 2689671414) show_error($"{_where} :: self.service_data[_i] expected BluetoothLeAdvertiseServiceData", true);
+            __BluetoothLeAdvertiseServiceData_encode(self.service_data[_i], _buffer, buffer_tell(_buffer), _where);
+        }
+
+        // field: manufacturer_data, type: struct BluetoothLeAdvertiseManufacturerData[]
+        if (!is_array(self.manufacturer_data)) show_error($"{_where} :: self.manufacturer_data expected array", true);
+        var __length__ = array_length(self.manufacturer_data);
+        buffer_write(_buffer, buffer_u32, __length__);
+        for (var _i = 0; _i < __length__; ++_i)
+        {
+            if (self.manufacturer_data[_i].__uid != 3573497498) show_error($"{_where} :: self.manufacturer_data[_i] expected BluetoothLeAdvertiseManufacturerData", true);
+            __BluetoothLeAdvertiseManufacturerData_encode(self.manufacturer_data[_i], _buffer, buffer_tell(_buffer), _where);
+        }
+
+        // field: tx_power, type: optional<Int32>
+        if (is_undefined(self.tx_power))
+        {
+            buffer_write(_buffer, buffer_bool, false);
+        }
+        else
+        {
+            buffer_write(_buffer, buffer_bool, true);
+            if (!is_numeric(self.tx_power)) show_error($"{_where} :: self.tx_power expected number", true);
+            buffer_write(_buffer, buffer_s32, self.tx_power);
+        }
+
+    }
+}
+
+/**
+ * @func __BluetoothLeAdvertisement_decode(_buffer, _offset)
+ * @param {Id.Buffer} _buffer
+ * @param {Real} _offset
+ * @returns {Struct.BluetoothLeAdvertisement}
+ * @ignore
+ */
+function __BluetoothLeAdvertisement_decode(_buffer, _offset)
+{
+    buffer_seek(_buffer, buffer_seek_start, _offset);
+
+    _inst = new BluetoothLeAdvertisement();
+    with (_inst)
+    {
+        // field: service_uuids, type: String[]
+        var __length__ = buffer_read(_buffer, buffer_u32);
+        self.service_uuids = array_create(__length__);
+        for (var _i = 0; _i < __length__; ++_i)
+        {
+            buffer_read(_buffer, buffer_u32);
+            self.service_uuids[_i] = buffer_read(_buffer, buffer_string);
+        }
+
+        // field: service_data, type: struct BluetoothLeAdvertiseServiceData[]
+        var __length__ = buffer_read(_buffer, buffer_u32);
+        self.service_data = array_create(__length__);
+        for (var _i = 0; _i < __length__; ++_i)
+        {
+            self.service_data[_i] = __BluetoothLeAdvertiseServiceData_decode(_buffer, buffer_tell(_buffer));
+        }
+
+        // field: manufacturer_data, type: struct BluetoothLeAdvertiseManufacturerData[]
+        var __length__ = buffer_read(_buffer, buffer_u32);
+        self.manufacturer_data = array_create(__length__);
+        for (var _i = 0; _i < __length__; ++_i)
+        {
+            self.manufacturer_data[_i] = __BluetoothLeAdvertiseManufacturerData_decode(_buffer, buffer_tell(_buffer));
+        }
+
+        // field: tx_power, type: optional<Int32>
+        if (buffer_read(_buffer, buffer_bool))
+        {
+            self.tx_power = buffer_read(_buffer, buffer_s32);
+        }
+        else
+        {
+            self.tx_power = undefined;
+        }
+
+    }
+
+    return _inst;
+}
+
+/**
  * @func __BluetoothLeServiceDefinition_encode(_inst, _buffer, _offset, _where)
  * @param {Struct.BluetoothLeServiceDefinition} _inst
  * @param {Id.Buffer} _buffer
@@ -877,17 +1142,61 @@ function bluetooth_permission_request(_callback)
 }
 
 /**
- * @param {Bool} _active
+ * @param {Function} _callback
  * @returns {Enum.BluetoothError}
  */
-function bluetooth_le_scan_start(_active)
+function bluetooth_request_enable(_callback)
 {
     var __available__ = __GMBluetooth_is_available();
     if (!__available__) return;
 
+    var __dispatcher__ = __GMBluetooth_get_dispatcher();
+
+    var __args_buffer__ = __ext_core_get_args_buffer();
+
+    // param: _callback, type: Function
+    if (!is_callable(_callback)) show_error($"{_GMFUNCTION_} :: _callback expected callable type", true);
+    var _callback_handle = __ext_core_function_register(_callback, __dispatcher__);
+    buffer_write(__args_buffer__, buffer_u64, _callback_handle);
+
     var __ret_buffer__ = __ext_core_get_ret_buffer();
 
-    var __return_value__ = __bluetooth_le_scan_start(_active, buffer_get_address(__ret_buffer__), buffer_get_size(__ret_buffer__));
+    var __return_value__ = __bluetooth_request_enable(buffer_get_address(__args_buffer__), buffer_tell(__args_buffer__), buffer_get_address(__ret_buffer__), buffer_get_size(__ret_buffer__));
+
+    var __result__ = undefined;
+    __result__ = buffer_read(__ret_buffer__, buffer_s32);
+    return __result__;
+}
+
+/**
+ * @param {Bool} _active
+ * @param {Array[Struct.BluetoothLeScanFilter]} _filters
+ * @returns {Enum.BluetoothError}
+ */
+function bluetooth_le_scan_start(_active, _filters)
+{
+    var __available__ = __GMBluetooth_is_available();
+    if (!__available__) return;
+
+    var __args_buffer__ = __ext_core_get_args_buffer();
+
+    // param: _active, type: Bool
+    if (!is_bool(_active)) show_error($"{_GMFUNCTION_} :: _active expected bool", true);
+    buffer_write(__args_buffer__, buffer_bool, _active);
+
+    // param: _filters, type: struct BluetoothLeScanFilter[]
+    if (!is_array(_filters)) show_error($"{_GMFUNCTION_} :: _filters expected array", true);
+    var __length__ = array_length(_filters);
+    buffer_write(__args_buffer__, buffer_u32, __length__);
+    for (var _i = 0; _i < __length__; ++_i)
+    {
+        if (_filters[_i].__uid != 1367205649) show_error($"{_GMFUNCTION_} :: _filters[_i] expected BluetoothLeScanFilter", true);
+        __BluetoothLeScanFilter_encode(_filters[_i], __args_buffer__, buffer_tell(__args_buffer__), _GMFUNCTION_);
+    }
+
+    var __ret_buffer__ = __ext_core_get_ret_buffer();
+
+    var __return_value__ = __bluetooth_le_scan_start(buffer_get_address(__args_buffer__), buffer_tell(__args_buffer__), buffer_get_address(__ret_buffer__), buffer_get_size(__ret_buffer__));
 
     var __result__ = undefined;
     __result__ = buffer_read(__ret_buffer__, buffer_s32);
@@ -1157,6 +1466,114 @@ function bluetooth_device_is_connectable(_device)
     var __return_value__ = __bluetooth_device_is_connectable(buffer_get_address(__args_buffer__), buffer_tell(__args_buffer__));
 
     return bool(__return_value__);
+}
+
+/**
+ * @param {Real} _device
+ * @returns {Struct.BluetoothLeAdvertisement}
+ */
+function bluetooth_device_get_advertisement(_device)
+{
+    var __available__ = __GMBluetooth_is_available();
+    if (!__available__) return;
+
+    var __args_buffer__ = __ext_core_get_args_buffer();
+
+    // param: _device, type: UInt64
+    if (!is_numeric(_device)) show_error($"{_GMFUNCTION_} :: _device expected number", true);
+    buffer_write(__args_buffer__, buffer_u64, _device);
+
+    var __ret_buffer__ = __ext_core_get_ret_buffer();
+
+    var __return_value__ = __bluetooth_device_get_advertisement(buffer_get_address(__args_buffer__), buffer_tell(__args_buffer__), buffer_get_address(__ret_buffer__), buffer_get_size(__ret_buffer__));
+
+    var __result__ = undefined;
+    __result__ = __BluetoothLeAdvertisement_decode(__ret_buffer__, buffer_tell(__ret_buffer__));
+    return __result__;
+}
+
+/**
+ * @param {String} _id
+ * @returns {Real}
+ */
+function bluetooth_device_from_id(_id)
+{
+    var __available__ = __GMBluetooth_is_available();
+    if (!__available__) return;
+
+    var __ret_buffer__ = __ext_core_get_ret_buffer();
+
+    var __return_value__ = __bluetooth_device_from_id(_id, buffer_get_address(__ret_buffer__), buffer_get_size(__ret_buffer__));
+
+    var __result__ = undefined;
+    __result__ = buffer_read(__ret_buffer__, buffer_u64);
+    return __result__;
+}
+
+/**
+ * @param {Array[String]} _service_uuids
+ * @param {Function} _callback
+ * @returns {Enum.BluetoothError}
+ */
+function bluetooth_le_connected_devices_query(_service_uuids, _callback)
+{
+    var __available__ = __GMBluetooth_is_available();
+    if (!__available__) return;
+
+    var __dispatcher__ = __GMBluetooth_get_dispatcher();
+
+    var __args_buffer__ = __ext_core_get_args_buffer();
+
+    // param: _service_uuids, type: String[]
+    if (!is_array(_service_uuids)) show_error($"{_GMFUNCTION_} :: _service_uuids expected array", true);
+    var __length__ = array_length(_service_uuids);
+    buffer_write(__args_buffer__, buffer_u32, __length__);
+    for (var _i = 0; _i < __length__; ++_i)
+    {
+        if (!is_string(_service_uuids[_i])) show_error($"{_GMFUNCTION_} :: _service_uuids[_i] expected string", true);
+        buffer_write(__args_buffer__, buffer_u32, string_byte_length(_service_uuids[_i]));
+        buffer_write(__args_buffer__, buffer_string, _service_uuids[_i]);
+    }
+
+    // param: _callback, type: Function
+    if (!is_callable(_callback)) show_error($"{_GMFUNCTION_} :: _callback expected callable type", true);
+    var _callback_handle = __ext_core_function_register(_callback, __dispatcher__);
+    buffer_write(__args_buffer__, buffer_u64, _callback_handle);
+
+    var __ret_buffer__ = __ext_core_get_ret_buffer();
+
+    var __return_value__ = __bluetooth_le_connected_devices_query(buffer_get_address(__args_buffer__), buffer_tell(__args_buffer__), buffer_get_address(__ret_buffer__), buffer_get_size(__ret_buffer__));
+
+    var __result__ = undefined;
+    __result__ = buffer_read(__ret_buffer__, buffer_s32);
+    return __result__;
+}
+
+/**
+ * @param {Function} _callback
+ * @returns {Enum.BluetoothError}
+ */
+function bluetooth_paired_devices_query(_callback)
+{
+    var __available__ = __GMBluetooth_is_available();
+    if (!__available__) return;
+
+    var __dispatcher__ = __GMBluetooth_get_dispatcher();
+
+    var __args_buffer__ = __ext_core_get_args_buffer();
+
+    // param: _callback, type: Function
+    if (!is_callable(_callback)) show_error($"{_GMFUNCTION_} :: _callback expected callable type", true);
+    var _callback_handle = __ext_core_function_register(_callback, __dispatcher__);
+    buffer_write(__args_buffer__, buffer_u64, _callback_handle);
+
+    var __ret_buffer__ = __ext_core_get_ret_buffer();
+
+    var __return_value__ = __bluetooth_paired_devices_query(buffer_get_address(__args_buffer__), buffer_tell(__args_buffer__), buffer_get_address(__ret_buffer__), buffer_get_size(__ret_buffer__));
+
+    var __result__ = undefined;
+    __result__ = buffer_read(__ret_buffer__, buffer_s32);
+    return __result__;
 }
 
 /**
@@ -1645,6 +2062,125 @@ function bluetooth_le_connection_get_device(_connection)
 
     var __result__ = undefined;
     __result__ = buffer_read(__ret_buffer__, buffer_u64);
+    return __result__;
+}
+
+/**
+ * @param {Real} _connection
+ * @returns {Real}
+ */
+function bluetooth_le_connection_get_mtu(_connection)
+{
+    var __available__ = __GMBluetooth_is_available();
+    if (!__available__) return;
+
+    var __args_buffer__ = __ext_core_get_args_buffer();
+
+    // param: _connection, type: UInt64
+    if (!is_numeric(_connection)) show_error($"{_GMFUNCTION_} :: _connection expected number", true);
+    buffer_write(__args_buffer__, buffer_u64, _connection);
+
+    var __return_value__ = __bluetooth_le_connection_get_mtu(buffer_get_address(__args_buffer__), buffer_tell(__args_buffer__));
+
+    return __return_value__;
+}
+
+/**
+ * @param {Real} _connection
+ * @param {Real} _mtu
+ * @param {Function} _callback
+ * @returns {Enum.BluetoothError}
+ */
+function bluetooth_le_connection_request_mtu(_connection, _mtu, _callback)
+{
+    var __available__ = __GMBluetooth_is_available();
+    if (!__available__) return;
+
+    var __dispatcher__ = __GMBluetooth_get_dispatcher();
+
+    var __args_buffer__ = __ext_core_get_args_buffer();
+
+    // param: _connection, type: UInt64
+    if (!is_numeric(_connection)) show_error($"{_GMFUNCTION_} :: _connection expected number", true);
+    buffer_write(__args_buffer__, buffer_u64, _connection);
+
+    // param: _mtu, type: Int32
+    if (!is_numeric(_mtu)) show_error($"{_GMFUNCTION_} :: _mtu expected number", true);
+    buffer_write(__args_buffer__, buffer_s32, _mtu);
+
+    // param: _callback, type: Function
+    if (!is_callable(_callback)) show_error($"{_GMFUNCTION_} :: _callback expected callable type", true);
+    var _callback_handle = __ext_core_function_register(_callback, __dispatcher__);
+    buffer_write(__args_buffer__, buffer_u64, _callback_handle);
+
+    var __ret_buffer__ = __ext_core_get_ret_buffer();
+
+    var __return_value__ = __bluetooth_le_connection_request_mtu(buffer_get_address(__args_buffer__), buffer_tell(__args_buffer__), buffer_get_address(__ret_buffer__), buffer_get_size(__ret_buffer__));
+
+    var __result__ = undefined;
+    __result__ = buffer_read(__ret_buffer__, buffer_s32);
+    return __result__;
+}
+
+/**
+ * @param {Real} _connection
+ * @param {Function} _callback
+ * @returns {Enum.BluetoothError}
+ */
+function bluetooth_le_connection_read_rssi(_connection, _callback)
+{
+    var __available__ = __GMBluetooth_is_available();
+    if (!__available__) return;
+
+    var __dispatcher__ = __GMBluetooth_get_dispatcher();
+
+    var __args_buffer__ = __ext_core_get_args_buffer();
+
+    // param: _connection, type: UInt64
+    if (!is_numeric(_connection)) show_error($"{_GMFUNCTION_} :: _connection expected number", true);
+    buffer_write(__args_buffer__, buffer_u64, _connection);
+
+    // param: _callback, type: Function
+    if (!is_callable(_callback)) show_error($"{_GMFUNCTION_} :: _callback expected callable type", true);
+    var _callback_handle = __ext_core_function_register(_callback, __dispatcher__);
+    buffer_write(__args_buffer__, buffer_u64, _callback_handle);
+
+    var __ret_buffer__ = __ext_core_get_ret_buffer();
+
+    var __return_value__ = __bluetooth_le_connection_read_rssi(buffer_get_address(__args_buffer__), buffer_tell(__args_buffer__), buffer_get_address(__ret_buffer__), buffer_get_size(__ret_buffer__));
+
+    var __result__ = undefined;
+    __result__ = buffer_read(__ret_buffer__, buffer_s32);
+    return __result__;
+}
+
+/**
+ * @param {Real} _connection
+ * @param {Enum.BluetoothLeConnectionPriority} _priority
+ * @returns {Enum.BluetoothError}
+ */
+function bluetooth_le_connection_request_priority(_connection, _priority)
+{
+    var __available__ = __GMBluetooth_is_available();
+    if (!__available__) return;
+
+    var __args_buffer__ = __ext_core_get_args_buffer();
+
+    // param: _connection, type: UInt64
+    if (!is_numeric(_connection)) show_error($"{_GMFUNCTION_} :: _connection expected number", true);
+    buffer_write(__args_buffer__, buffer_u64, _connection);
+
+    // param: _priority, type: enum BluetoothLeConnectionPriority
+
+    if (!is_numeric(_priority)) show_error($"{_GMFUNCTION_} :: _priority expected number", true);
+    buffer_write(__args_buffer__, buffer_s32, _priority);
+
+    var __ret_buffer__ = __ext_core_get_ret_buffer();
+
+    var __return_value__ = __bluetooth_le_connection_request_priority(buffer_get_address(__args_buffer__), buffer_tell(__args_buffer__), buffer_get_address(__ret_buffer__), buffer_get_size(__ret_buffer__));
+
+    var __result__ = undefined;
+    __result__ = buffer_read(__ret_buffer__, buffer_s32);
     return __result__;
 }
 
@@ -2829,8 +3365,10 @@ function __GMBluetooth_get_decoders()
         __BluetoothLeAdvertiseSettings_decode,
         __BluetoothLeAdvertiseServiceData_decode,
         __BluetoothLeAdvertiseManufacturerData_decode,
+        __BluetoothLeScanFilter_decode,
         __BluetoothLeCharacteristicDefinition_decode,
         __BluetoothLeAdvertiseData_decode,
+        __BluetoothLeAdvertisement_decode,
         __BluetoothLeServiceDefinition_decode
     ];
     return __decoders__;
@@ -2851,4 +3389,4 @@ function __GMBluetooth_is_available()
 // # Exports
 // #####################################################################
 
-#export BluetoothError, BluetoothAttError, BluetoothTransport, BluetoothPermissionStatus, BluetoothLeSubscribeMode, BluetoothLeCharacteristicProperty, BluetoothLeAttributePermission, BluetoothLeWriteType, BluetoothLeAdvertiseTxPower, BluetoothState, BluetoothFeature, BluetoothLeDescriptorDefinition, BluetoothLeAdvertiseSettings, BluetoothLeAdvertiseServiceData, BluetoothLeAdvertiseManufacturerData, BluetoothLeCharacteristicDefinition, BluetoothLeAdvertiseData, BluetoothLeServiceDefinition, bluetooth_last_error_code, bluetooth_feature_is_supported, bluetooth_permission_get_status, bluetooth_permission_request, bluetooth_le_scan_start, bluetooth_le_scan_stop, bluetooth_classic_scan_start, bluetooth_classic_scan_stop, bluetooth_device_get_at, bluetooth_device_is_valid, bluetooth_device_get_transport, bluetooth_device_get_id, bluetooth_device_get_name, bluetooth_device_has_address, bluetooth_device_get_address, bluetooth_device_has_rssi, bluetooth_device_get_rssi, bluetooth_device_is_connectable, bluetooth_classic_connect, bluetooth_classic_disconnect, bluetooth_classic_connection_is_valid, bluetooth_classic_connection_is_connected, bluetooth_classic_connection_get_device, bluetooth_classic_receive_available, bluetooth_classic_send, bluetooth_classic_receive, bluetooth_classic_server_start, bluetooth_classic_server_stop, bluetooth_classic_discoverable_start, bluetooth_classic_discoverable_stop, bluetooth_pairing_is_supported, bluetooth_pair, bluetooth_device_is_paired, bluetooth_le_connect, bluetooth_le_disconnect, bluetooth_le_connection_is_valid, bluetooth_le_connection_is_connected, bluetooth_le_connection_get_device, bluetooth_le_services_discover, bluetooth_le_service_get_count, bluetooth_le_service_get_at, bluetooth_le_service_get_uuid, bluetooth_le_characteristics_discover, bluetooth_le_characteristic_get_count, bluetooth_le_characteristic_get_at, bluetooth_le_characteristic_get_uuid, bluetooth_le_characteristic_get_properties, bluetooth_le_descriptors_discover, bluetooth_le_descriptor_get_count, bluetooth_le_descriptor_get_at, bluetooth_le_descriptor_get_uuid, bluetooth_le_characteristic_read, bluetooth_le_characteristic_write, bluetooth_le_characteristic_subscribe, bluetooth_le_descriptor_read, bluetooth_le_descriptor_write, bluetooth_le_value_copy, bluetooth_le_value_release, bluetooth_le_advertise_start, bluetooth_le_advertise_stop, bluetooth_le_server_start, bluetooth_le_server_stop, bluetooth_le_server_add_service, bluetooth_le_server_clear_services, bluetooth_le_server_respond_read, bluetooth_le_server_respond_write, bluetooth_le_server_write_request_get_value, bluetooth_le_server_notify_value, bluetooth_set_callback_state_changed, bluetooth_set_callback_device_found, bluetooth_set_callback_scan_stopped, bluetooth_set_callback_classic_client_connected, bluetooth_set_callback_classic_data, bluetooth_set_callback_classic_disconnected, bluetooth_set_callback_le_disconnected, bluetooth_set_callback_le_characteristic_value_changed, bluetooth_set_callback_le_server_connection_state_changed, bluetooth_set_callback_le_server_read_request, bluetooth_set_callback_le_server_write_request
+#export BluetoothError, BluetoothAttError, BluetoothTransport, BluetoothPermissionStatus, BluetoothLeSubscribeMode, BluetoothLeCharacteristicProperty, BluetoothLeAttributePermission, BluetoothLeWriteType, BluetoothLeAdvertiseTxPower, BluetoothLeConnectionPriority, BluetoothState, BluetoothFeature, BluetoothLeDescriptorDefinition, BluetoothLeAdvertiseSettings, BluetoothLeAdvertiseServiceData, BluetoothLeAdvertiseManufacturerData, BluetoothLeScanFilter, BluetoothLeCharacteristicDefinition, BluetoothLeAdvertiseData, BluetoothLeAdvertisement, BluetoothLeServiceDefinition, bluetooth_last_error_code, bluetooth_feature_is_supported, bluetooth_permission_get_status, bluetooth_permission_request, bluetooth_request_enable, bluetooth_le_scan_start, bluetooth_le_scan_stop, bluetooth_classic_scan_start, bluetooth_classic_scan_stop, bluetooth_device_get_at, bluetooth_device_is_valid, bluetooth_device_get_transport, bluetooth_device_get_id, bluetooth_device_get_name, bluetooth_device_has_address, bluetooth_device_get_address, bluetooth_device_has_rssi, bluetooth_device_get_rssi, bluetooth_device_is_connectable, bluetooth_device_get_advertisement, bluetooth_device_from_id, bluetooth_le_connected_devices_query, bluetooth_paired_devices_query, bluetooth_classic_connect, bluetooth_classic_disconnect, bluetooth_classic_connection_is_valid, bluetooth_classic_connection_is_connected, bluetooth_classic_connection_get_device, bluetooth_classic_receive_available, bluetooth_classic_send, bluetooth_classic_receive, bluetooth_classic_server_start, bluetooth_classic_server_stop, bluetooth_classic_discoverable_start, bluetooth_classic_discoverable_stop, bluetooth_pairing_is_supported, bluetooth_pair, bluetooth_device_is_paired, bluetooth_le_connect, bluetooth_le_disconnect, bluetooth_le_connection_is_valid, bluetooth_le_connection_is_connected, bluetooth_le_connection_get_device, bluetooth_le_connection_get_mtu, bluetooth_le_connection_request_mtu, bluetooth_le_connection_read_rssi, bluetooth_le_connection_request_priority, bluetooth_le_services_discover, bluetooth_le_service_get_count, bluetooth_le_service_get_at, bluetooth_le_service_get_uuid, bluetooth_le_characteristics_discover, bluetooth_le_characteristic_get_count, bluetooth_le_characteristic_get_at, bluetooth_le_characteristic_get_uuid, bluetooth_le_characteristic_get_properties, bluetooth_le_descriptors_discover, bluetooth_le_descriptor_get_count, bluetooth_le_descriptor_get_at, bluetooth_le_descriptor_get_uuid, bluetooth_le_characteristic_read, bluetooth_le_characteristic_write, bluetooth_le_characteristic_subscribe, bluetooth_le_descriptor_read, bluetooth_le_descriptor_write, bluetooth_le_value_copy, bluetooth_le_value_release, bluetooth_le_advertise_start, bluetooth_le_advertise_stop, bluetooth_le_server_start, bluetooth_le_server_stop, bluetooth_le_server_add_service, bluetooth_le_server_clear_services, bluetooth_le_server_respond_read, bluetooth_le_server_respond_write, bluetooth_le_server_write_request_get_value, bluetooth_le_server_notify_value, bluetooth_set_callback_state_changed, bluetooth_set_callback_device_found, bluetooth_set_callback_scan_stopped, bluetooth_set_callback_classic_client_connected, bluetooth_set_callback_classic_data, bluetooth_set_callback_classic_disconnected, bluetooth_set_callback_le_disconnected, bluetooth_set_callback_le_characteristic_value_changed, bluetooth_set_callback_le_server_connection_state_changed, bluetooth_set_callback_le_server_read_request, bluetooth_set_callback_le_server_write_request

@@ -110,6 +110,29 @@ namespace gmbluetooth
         Denied  = 2,
     };
 
+    struct LeAdvertiseServiceData
+    {
+        std::string uuid;
+        std::vector<std::uint8_t> data;
+    };
+
+    struct LeAdvertiseManufacturerData
+    {
+        std::uint16_t company_id = 0;
+        std::vector<std::uint8_t> data;
+    };
+
+    // What one advertising packet (or Apple's merged dictionary) carried besides
+    // the name. UUIDs may come in any form the platform spells them; the core
+    // stores them canonical and merges packets into the device's record.
+    struct LeAdvertisement
+    {
+        std::vector<std::string> service_uuids;
+        std::vector<LeAdvertiseServiceData> service_data;
+        std::vector<LeAdvertiseManufacturerData> manufacturer_data;
+        std::optional<std::int32_t> tx_power; // advertised TX Power Level, dBm
+    };
+
     struct DiscoveredDevice
     {
         Transport transport = Transport::Unknown;
@@ -123,6 +146,19 @@ namespace gmbluetooth
 
         std::int32_t rssi = 0;
         bool rssi_available = false;
+
+        // LE scan results only; empty for anything else.
+        std::optional<LeAdvertisement> advertisement;
+    };
+
+    // A BluetoothLeScanFilter as the core hands it on: checked, at least one
+    // field set, service_uuid canonical. The core matches every result against
+    // the filters itself; a backend uses them only to narrow its native scan.
+    struct LeScanFilter
+    {
+        std::optional<std::string> service_uuid;
+        std::optional<std::string> name;
+        std::optional<std::uint16_t> company_id;
     };
 
     // A service, characteristic or descriptor an LE discovery found.
@@ -152,18 +188,6 @@ namespace gmbluetooth
         std::optional<LeAdvertiseTxPower> tx_power; // empty: the platform default
     };
 
-    struct LeAdvertiseServiceData
-    {
-        std::string uuid;
-        std::vector<std::uint8_t> data;
-    };
-
-    struct LeAdvertiseManufacturerData
-    {
-        std::uint16_t company_id = 0;
-        std::vector<std::uint8_t> data;
-    };
-
     struct LeAdvertiseData
     {
         bool include_name = false;
@@ -174,12 +198,13 @@ namespace gmbluetooth
     };
 
     // What an LE call returns besides its error. Discovery fills attributes;
-    // a characteristic or descriptor read fills value; the rest leave both
-    // empty.
+    // a characteristic or descriptor read fills value; an RSSI read fills
+    // number with the dBm; the rest leave them empty.
     struct LeOpResult
     {
         std::vector<LeAttribute> attributes;
         std::vector<std::uint8_t> value;
+        std::int32_t number = 0;
     };
 
     enum class BackendEventType : std::uint8_t
@@ -198,6 +223,11 @@ namespace gmbluetooth
         DevicePaired,
         // The answer to permission_request: value is the PermissionStatus.
         PermissionResult,
+        // The answer to request_enable: error is Ok when the radio is on.
+        EnableResult,
+        // The answer to a device query: op_id is the query id the core passed,
+        // devices what it found (Ok with none is an empty list).
+        DevicesQueried,
     };
 
     struct BackendEvent
@@ -209,9 +239,12 @@ namespace gmbluetooth
         std::uint64_t device = 0;
 
         // LeOpCompleted only: the op id the core passed to the call, and what
-        // the call returned.
+        // the call returned. DevicesQueried: the query id.
         std::uint64_t op_id = 0;
         LeOpResult result;
+
+        // DevicesQueried only.
+        std::vector<DiscoveredDevice> devices;
 
         Error error = Error::Ok;
         std::int32_t value = 0;
@@ -287,7 +320,49 @@ namespace gmbluetooth
         // Any other error is a pre-flight failure and pushes nothing.
         virtual Error permission_request(std::string& message) = 0;
 
-        virtual Error le_scan_start(bool active, std::string& message) = 0;
+        // Called only while the radio is not on. Ok when the request started;
+        // the backend then pushes one EnableResult event. Any other error is a
+        // pre-flight failure and pushes nothing.
+        virtual Error request_enable(std::string& message)
+        {
+            message = "This platform cannot turn the Bluetooth radio on";
+            return Error::NotSupported;
+        }
+
+        // Builds the cache entry for an id from bluetooth_device_get_id: the
+        // transport, id and address, and whatever name the platform knows.
+        // InvalidArgument for an id this backend does not issue.
+        virtual Error device_from_id(const std::string& id, DiscoveredDevice& device, std::string& message)
+        {
+            (void)id;
+            (void)device;
+            message = "The id is not one this platform issues";
+            return Error::InvalidArgument;
+        }
+
+        // Each pushes one DevicesQueried event carrying query_id unless it
+        // fails synchronously. service_uuids are canonical.
+        virtual Error le_connected_devices_query(
+            std::uint64_t query_id,
+            const std::vector<std::string>& service_uuids,
+            std::string& message)
+        {
+            (void)query_id;
+            (void)service_uuids;
+            message = "Listing connected devices is not supported by this backend";
+            return Error::NotSupported;
+        }
+
+        virtual Error paired_devices_query(std::uint64_t query_id, std::string& message)
+        {
+            (void)query_id;
+            message = "Listing paired devices is not supported on this platform";
+            return Error::NotSupported;
+        }
+
+        // filters is empty for an unfiltered scan. The core applies them to
+        // every result; a backend may also hand them to its native scan.
+        virtual Error le_scan_start(bool active, const std::vector<LeScanFilter>& filters, std::string& message) = 0;
         virtual Error le_scan_stop(std::string& message) = 0;
         virtual bool le_scan_is_running() const = 0;
 
@@ -459,6 +534,40 @@ namespace gmbluetooth
         {
             (void)connection;
             return false;
+        }
+
+        // The ATT MTU of a connected client connection, which the platform
+        // negotiates itself; 23 when it cannot say.
+        virtual std::int32_t le_connection_mtu(
+            std::uint64_t connection) const
+        {
+            (void)connection;
+            return 23;
+        }
+
+        // Completes with one LeOpCompleted whose result.number is the RSSI.
+        virtual Error le_read_rssi(
+            std::uint64_t op_id,
+            std::uint64_t connection,
+            std::string& message)
+        {
+            (void)op_id;
+            (void)connection;
+            message = "Reading the RSSI of a connection is not supported on this platform";
+            return Error::NotSupported;
+        }
+
+        // priority: BluetoothLeConnectionPriority. Ok means the request was
+        // made; no result follows.
+        virtual Error le_request_connection_priority(
+            std::uint64_t connection,
+            std::int32_t priority,
+            std::string& message)
+        {
+            (void)connection;
+            (void)priority;
+            message = "Connection priority is not supported on this platform";
+            return Error::NotSupported;
         }
 
         // The LE operations below complete asynchronously. Each takes the op id

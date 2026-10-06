@@ -73,7 +73,7 @@ bluetooth_start_le_scan = function()
     device_instances = [];
     list_y = 100;
 
-    var _error = bluetooth_le_scan_start(true);
+    var _error = bluetooth_le_scan_start(true, []);
     show_debug_message($"[GML] bluetooth_le_scan_start() = {_error}");
 };
 

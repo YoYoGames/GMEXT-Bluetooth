@@ -18,9 +18,11 @@
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.Foundation.Metadata.h>
 #include <winrt/Windows.Devices.Bluetooth.h>
 #include <winrt/Windows.Devices.Bluetooth.Advertisement.h>
 #include <winrt/Windows.Devices.Bluetooth.GenericAttributeProfile.h>
+#include <winrt/Windows.Devices.Enumeration.h>
 #include <winrt/Windows.Devices.Radios.h>
 #include <winrt/Windows.Storage.Streams.h>
 
@@ -30,6 +32,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
+#include <cstring>
 #include <deque>
 #include <functional>
 #include <future>
@@ -51,7 +54,9 @@ namespace gmbluetooth
     namespace WDB = winrt::Windows::Devices::Bluetooth;
     namespace WDBA = winrt::Windows::Devices::Bluetooth::Advertisement;
     namespace WDBG = winrt::Windows::Devices::Bluetooth::GenericAttributeProfile;
+    namespace WDE = winrt::Windows::Devices::Enumeration;
     namespace WDR = winrt::Windows::Devices::Radios;
+    namespace WFM = winrt::Windows::Foundation::Metadata;
     namespace WSS = winrt::Windows::Storage::Streams;
 
     namespace
@@ -466,15 +471,10 @@ namespace gmbluetooth
             return out;
         }
 
-        // A remote device id ends in its address ("BluetoothLE#BluetoothLE
-        // <local>-<remote>"); empty when it does not.
-        std::string address_from_device_id(const std::string& device_id)
+        // "aa:bb:cc:dd:ee:ff" in the uppercase form every id carries; empty
+        // when it is not an address in that shape.
+        std::string normalized_address(std::string address)
         {
-            const auto dash = device_id.rfind('-');
-            if (dash == std::string::npos)
-                return std::string();
-
-            std::string address = device_id.substr(dash + 1);
             if (address.size() != 17)
                 return std::string();
             for (std::size_t i = 0; i < address.size(); ++i)
@@ -488,6 +488,16 @@ namespace gmbluetooth
                 return static_cast<char>(std::toupper(c));
             });
             return address;
+        }
+
+        // A remote device id ends in its address ("BluetoothLE#BluetoothLE
+        // <local>-<remote>"); empty when it does not.
+        std::string address_from_device_id(const std::string& device_id)
+        {
+            const auto dash = device_id.rfind('-');
+            if (dash == std::string::npos)
+                return std::string();
+            return normalized_address(device_id.substr(dash + 1));
         }
 
         // The central fields every GATT server event carries: the key the core
@@ -1338,6 +1348,114 @@ namespace gmbluetooth
             std::atomic_bool running{false};
         };
 
+        DiscoveredDevice classic_device(const BLUETOOTH_DEVICE_INFO& info)
+        {
+            DiscoveredDevice device;
+            device.transport = Transport::Classic;
+            device.address = format_bluetooth_address(info.Address.ullLong);
+            device.id = "win:classic:" + device.address;
+            device.address_available = true;
+            device.name = wide_to_utf8(info.szName);
+            device.connectable = true;
+            device.rssi_available = false;
+            return device;
+        }
+
+        // Every device Windows remembers, by address, with its stLastSeen as
+        // it stood before an inquiry; no inquiry runs. nullopt when Windows
+        // could not list them, and the scan then keeps every result.
+        std::optional<std::unordered_map<BTH_ADDR, SYSTEMTIME>> remembered_devices_last_seen()
+        {
+            BLUETOOTH_DEVICE_SEARCH_PARAMS search{};
+            search.dwSize = sizeof(search);
+            search.fReturnAuthenticated = TRUE;
+            search.fReturnRemembered = TRUE;
+            search.fReturnUnknown = FALSE;
+            search.fReturnConnected = TRUE;
+            search.fIssueInquiry = FALSE;
+            search.cTimeoutMultiplier = 0;
+            search.hRadio = nullptr;
+
+            BLUETOOTH_DEVICE_INFO info{};
+            info.dwSize = sizeof(info);
+
+            std::unordered_map<BTH_ADDR, SYSTEMTIME> out;
+            HBLUETOOTH_DEVICE_FIND finder = BluetoothFindFirstDevice(&search, &info);
+            if (!finder)
+            {
+                const DWORD find_error = GetLastError();
+                if (find_error == ERROR_NO_MORE_ITEMS)
+                    return out;
+                GMBT_LOG(
+                    "Classic scan reports remembered devices too: %s",
+                    system_error_message("BluetoothFindFirstDevice", find_error).c_str());
+                return std::nullopt;
+            }
+
+            do
+            {
+                out[info.Address.ullLong] = info.stLastSeen;
+                info = {};
+                info.dwSize = sizeof(info);
+            }
+            while (BluetoothFindNextDevice(finder, &info));
+
+            BluetoothFindDeviceClose(finder);
+            return out;
+        }
+
+        // A result answered the inquiry when Windows did not remember it
+        // before, or its stLastSeen moved since the snapshot.
+        bool answered_inquiry(
+            const std::optional<std::unordered_map<BTH_ADDR, SYSTEMTIME>>& before,
+            const BLUETOOTH_DEVICE_INFO& info)
+        {
+            if (!before)
+                return true;
+            const auto it = before->find(info.Address.ullLong);
+            return it == before->end() ||
+                std::memcmp(&it->second, &info.stLastSeen, sizeof(SYSTEMTIME)) != 0;
+        }
+
+        // The Classic devices Windows holds a bond with, in range or not;
+        // no inquiry runs, so it answers at once.
+        Error find_paired_classic_devices(std::vector<DiscoveredDevice>& out, std::string& message)
+        {
+            BLUETOOTH_DEVICE_SEARCH_PARAMS search{};
+            search.dwSize = sizeof(search);
+            search.fReturnAuthenticated = TRUE;
+            search.fReturnRemembered = FALSE;
+            search.fReturnUnknown = FALSE;
+            search.fReturnConnected = FALSE;
+            search.fIssueInquiry = FALSE;
+            search.cTimeoutMultiplier = 0;
+            search.hRadio = nullptr;
+
+            BLUETOOTH_DEVICE_INFO info{};
+            info.dwSize = sizeof(info);
+
+            HBLUETOOTH_DEVICE_FIND finder = BluetoothFindFirstDevice(&search, &info);
+            if (!finder)
+            {
+                const DWORD find_error = GetLastError();
+                if (find_error == ERROR_NO_MORE_ITEMS)
+                    return Error::Ok;
+                message = system_error_message("BluetoothFindFirstDevice", find_error);
+                return Error::OperationFailed;
+            }
+
+            do
+            {
+                out.push_back(classic_device(info));
+                info = {};
+                info.dwSize = sizeof(info);
+            }
+            while (BluetoothFindNextDevice(finder, &info));
+
+            BluetoothFindDeviceClose(finder);
+            return Error::Ok;
+        }
+
         void run_classic_inquiry(
             const std::shared_ptr<SharedClassicState>& shared,
             const std::shared_ptr<ClassicScanState>& scan,
@@ -1367,6 +1485,14 @@ namespace gmbluetooth
                 BLUETOOTH_DEVICE_INFO info{};
                 info.dwSize = sizeof(info);
 
+                // The flags above also return every remembered device, in
+                // range or not, but clearing them would hide a paired device
+                // that did answer (R1-145). What answered has a stLastSeen
+                // newer than before the inquiry; its time base is not
+                // documented, so it is compared only with itself, never with
+                // the clock.
+                const auto before = remembered_devices_last_seen();
+
                 HBLUETOOTH_DEVICE_FIND finder =
                     BluetoothFindFirstDevice(&search, &info);
 
@@ -1377,17 +1503,8 @@ namespace gmbluetooth
                         if (!current())
                             break;
 
-                        DiscoveredDevice device;
-                        device.transport = Transport::Classic;
-                        device.address = format_bluetooth_address(info.Address.ullLong);
-                        device.id = "win:classic:" + device.address;
-                        device.address_available = true;
-                        device.name = wide_to_utf8(info.szName);
-                        device.connectable = true;
-                        device.rssi_available = false;
-
-                        if (shared->hooks.upsert_device)
-                            shared->hooks.upsert_device(device);
+                        if (answered_inquiry(before, info) && shared->hooks.upsert_device)
+                            shared->hooks.upsert_device(classic_device(info));
 
                         info = {};
                         info.dwSize = sizeof(info);
@@ -1730,6 +1847,9 @@ namespace gmbluetooth
         WDB::BluetoothLEDevice device{nullptr};
         // Held with MaintainConnection for the link's life (R1-114).
         WDBG::GattSession session{nullptr};
+        // The newest connection priority request, held for the link's life:
+        // closing it withdraws the request (R1-142).
+        WDB::BluetoothLEPreferredConnectionParametersRequest connection_parameters{nullptr};
         winrt::event_token connection_status_token{};
         bool connection_status_registered = false;
         mutable std::mutex mutex;
@@ -1768,6 +1888,67 @@ namespace gmbluetooth
             static_cast<unsigned>(value.Data4[6]),
             static_cast<unsigned>(value.Data4[7]));
         return std::string(buffer);
+    }
+
+    // What one advertising packet carried besides the name (R1-138). Windows
+    // parses no service data, so it comes from the raw sections: types 0x16,
+    // 0x20 and 0x21 start with a 16-, 32- or 128-bit UUID, little-endian, and
+    // the rest is the data. Short UUIDs stay short; the core expands them.
+    LeAdvertisement read_advertisement(const WDBA::BluetoothLEAdvertisementReceivedEventArgs& args)
+    {
+        static const char hex[] = "0123456789abcdef";
+
+        LeAdvertisement out;
+        const auto advertisement = args.Advertisement();
+
+        for (const auto& uuid : advertisement.ServiceUuids())
+            out.service_uuids.push_back(guid_to_uuid_string(uuid));
+
+        for (const auto& entry : advertisement.ManufacturerData())
+            out.manufacturer_data.push_back({ entry.CompanyId(), buffer_to_bytes(entry.Data()) });
+
+        for (const auto& section : advertisement.DataSections())
+        {
+            std::size_t uuid_size = 0;
+            switch (section.DataType())
+            {
+                case 0x16: uuid_size = 2; break;
+                case 0x20: uuid_size = 4; break;
+                case 0x21: uuid_size = 16; break;
+                default: continue;
+            }
+
+            const std::vector<std::uint8_t> bytes = buffer_to_bytes(section.Data());
+            if (bytes.size() < uuid_size)
+                continue;
+
+            // Most significant byte first, with the 8-4-4-4-12 dashes for a
+            // full UUID.
+            std::string uuid;
+            for (std::size_t i = uuid_size; i-- > 0;)
+            {
+                uuid += hex[bytes[i] >> 4];
+                uuid += hex[bytes[i] & 0xF];
+                if (uuid_size == 16 && (i == 12 || i == 10 || i == 8 || i == 6))
+                    uuid += '-';
+            }
+
+            out.service_data.push_back({
+                std::move(uuid),
+                std::vector<std::uint8_t>(bytes.begin() + static_cast<std::ptrdiff_t>(uuid_size), bytes.end()) });
+        }
+
+        // Missing before Windows 10 2004; a packet then just has no TX power.
+        try
+        {
+            if (const auto tx_power = args.TransmitPowerLevelInDBm())
+                out.tx_power = static_cast<std::int32_t>(tx_power.Value());
+        }
+        catch (const winrt::hresult_error&)
+        {
+        }
+
+        return out;
     }
 
     // A GATT call's outcome as the core reports it: the BluetoothError and,
@@ -2083,6 +2264,7 @@ namespace gmbluetooth
         std::unordered_map<std::string, std::shared_ptr<RemoteGattServiceState>> services;
         WDB::BluetoothLEDevice device{nullptr};
         WDBG::GattSession session{nullptr};
+        WDB::BluetoothLEPreferredConnectionParametersRequest parameters{nullptr};
         winrt::event_token connection_token{};
         bool remove_connection_token = false;
 
@@ -2093,6 +2275,8 @@ namespace gmbluetooth
             state->device = nullptr;
             session = state->session;
             state->session = nullptr;
+            parameters = state->connection_parameters;
+            state->connection_parameters = nullptr;
             connection_token = state->connection_status_token;
             remove_connection_token = state->connection_status_registered;
             state->connection_status_registered = false;
@@ -2109,6 +2293,15 @@ namespace gmbluetooth
         {
             if (device && remove_connection_token && connection_token.value != 0)
                 device.ConnectionStatusChanged(connection_token);
+        }
+        catch (...)
+        {
+        }
+
+        try
+        {
+            if (parameters)
+                parameters.Close();
         }
         catch (...)
         {
@@ -2392,6 +2585,68 @@ namespace gmbluetooth
         }
     }
 
+    const char* connection_parameters_status_name(WDB::BluetoothLEPreferredConnectionParametersRequestStatus status)
+    {
+        switch (status)
+        {
+            case WDB::BluetoothLEPreferredConnectionParametersRequestStatus::Success: return "Success";
+            case WDB::BluetoothLEPreferredConnectionParametersRequestStatus::DeviceNotAvailable: return "DeviceNotAvailable";
+            case WDB::BluetoothLEPreferredConnectionParametersRequestStatus::AccessDenied: return "AccessDenied";
+            default: return "Unspecified";
+        }
+    }
+
+    // A connection priority request, on the connection's worker. priority is
+    // BluetoothLeConnectionPriority. Nothing reports back to the game, so a
+    // refusal is only logged; a granted request replaces the previous one,
+    // which is closed only after, so the link never falls back in between.
+    void request_connection_parameters(
+        const std::shared_ptr<RemoteGattConnectionState>& state,
+        std::int32_t priority)
+    {
+        WDB::BluetoothLEDevice remote{nullptr};
+        {
+            std::scoped_lock lock(state->mutex);
+            remote = state->device;
+        }
+        if (!remote || state->closing.load())
+            return;
+
+        try
+        {
+            const auto parameters =
+                priority == 1 ? WDB::BluetoothLEPreferredConnectionParameters::ThroughputOptimized() :
+                priority == 2 ? WDB::BluetoothLEPreferredConnectionParameters::PowerOptimized() :
+                                WDB::BluetoothLEPreferredConnectionParameters::Balanced();
+
+            auto request = remote.RequestPreferredConnectionParameters(parameters);
+            const auto status = request.Status();
+            GMBT_LOG(
+                "Connection priority %d for LE connection %llu: %s",
+                static_cast<int>(priority),
+                static_cast<unsigned long long>(state->handle),
+                connection_parameters_status_name(status));
+
+            // The close may have run meanwhile; it then took nothing of this.
+            WDB::BluetoothLEPreferredConnectionParametersRequest stale = request;
+            if (status == WDB::BluetoothLEPreferredConnectionParametersRequestStatus::Success)
+            {
+                std::scoped_lock lock(state->mutex);
+                if (!state->closing.load())
+                    std::swap(stale, state->connection_parameters);
+            }
+            if (stale)
+                stale.Close();
+        }
+        catch (const winrt::hresult_error& error)
+        {
+            GMBT_LOG(
+                "Connection priority request for LE connection %llu failed: %s",
+                static_cast<unsigned long long>(state->handle),
+                winrt::to_string(error.message()).c_str());
+        }
+    }
+
     // A local GATT service as le_server_add_service parsed it on the game
     // thread, for the worker to create.
     struct LocalDescriptorDefinition
@@ -2440,6 +2695,9 @@ namespace gmbluetooth
         std::atomic_bool ble_supported{false};
         std::atomic_bool le_peripheral_supported{false};
         std::atomic_bool classic_supported{false};
+        // BluetoothLEDevice.RequestPreferredConnectionParameters exists
+        // (Windows 11); asked once by initialize.
+        std::atomic_bool connection_parameters_api{false};
         std::mutex radio_mutex;
         WDR::Radio radio{nullptr};
         winrt::event_token radio_state_token{};
@@ -2611,6 +2869,110 @@ namespace gmbluetooth
         if (it == le.address_types.end())
             return std::nullopt;
         return it->second;
+    }
+
+    bool connection_parameters_api_present() noexcept
+    {
+        try
+        {
+            return WFM::ApiInformation::IsMethodPresent(
+                L"Windows.Devices.Bluetooth.BluetoothLEDevice",
+                L"RequestPreferredConnectionParameters");
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    // request_enable's job on the backend worker: pushes its one
+    // EnableResult whatever happens.
+    void request_radio_on(const std::shared_ptr<SharedLeState>& le, const WDR::Radio& radio) noexcept
+    {
+        BackendEvent event;
+        event.type = BackendEventType::EnableResult;
+
+        try
+        {
+            if (WDR::Radio::RequestAccessAsync().get() != WDR::RadioAccessStatus::Allowed)
+            {
+                event.error = Error::PermissionDenied;
+                event.message = "Windows denied access to the Bluetooth radio";
+            }
+            else
+            {
+                switch (radio.SetStateAsync(WDR::RadioState::On).get())
+                {
+                    case WDR::RadioAccessStatus::Allowed:
+                        if (radio.State() != WDR::RadioState::On)
+                        {
+                            event.error = Error::BluetoothDisabled;
+                            event.message = "The Bluetooth radio is still off";
+                        }
+                        break;
+                    case WDR::RadioAccessStatus::DeniedByUser:
+                    case WDR::RadioAccessStatus::DeniedBySystem:
+                        event.error = Error::PermissionDenied;
+                        event.message = "Windows denied turning the Bluetooth radio on";
+                        break;
+                    default:
+                        event.error = Error::BluetoothDisabled;
+                        event.message = "Windows could not turn the Bluetooth radio on";
+                        break;
+                }
+            }
+        }
+        catch (const winrt::hresult_error& error)
+        {
+            event.error = Error::OperationFailed;
+            event.message = winrt::to_string(error.message());
+            trim_trailing_space(event.message);
+        }
+        catch (...)
+        {
+            event.error = Error::OperationFailed;
+            event.message = "Turning the Bluetooth radio on failed with an unexpected exception";
+        }
+
+        push_le_event(le, std::move(event));
+    }
+
+    // Every LE device an AQS selector names, resolved to its address. One
+    // Windows can no longer open is left out rather than failing the list.
+    void find_le_devices(
+        const std::shared_ptr<SharedLeState>& le,
+        const winrt::hstring& selector,
+        std::vector<DiscoveredDevice>& out)
+    {
+        for (const auto& info : WDE::DeviceInformation::FindAllAsync(selector).get())
+        {
+            try
+            {
+                const auto remote = WDB::BluetoothLEDevice::FromIdAsync(info.Id()).get();
+                if (!remote)
+                    continue;
+
+                const std::uint64_t address = remote.BluetoothAddress();
+                DiscoveredDevice device;
+                device.transport = Transport::LowEnergy;
+                device.address = format_bluetooth_address(address);
+                device.id = "win:ble:" + device.address;
+                device.address_available = true;
+                device.connectable = true;
+                device.name = winrt::to_string(info.Name());
+                if (device.name.empty())
+                    device.name = winrt::to_string(remote.Name());
+
+                // le_connect opens it with this type, as for a scanned one (R1-182).
+                remember_address_type(*le, address, remote.BluetoothAddressType());
+                remote.Close();
+                out.push_back(std::move(device));
+            }
+            catch (const winrt::hresult_error& error)
+            {
+                GMBT_LOG("Skipping a Bluetooth LE device Windows could not open: %s", winrt::to_string(error.message()).c_str());
+            }
+        }
     }
 
     void push_server_connection_state(
@@ -3358,6 +3720,7 @@ namespace gmbluetooth
             const auto le = le_;
             le_worker_->post([le, waiting, answered]()
             {
+                le->connection_parameters_api.store(connection_parameters_api_present());
                 query_adapter(le);
                 answered->set_value();
                 if (!waiting->exchange(false))
@@ -3510,6 +3873,16 @@ namespace gmbluetooth
                 case 17:                        // ClassicPairing
                 case 18:                        // ClassicDiscoverable
                 case 19: return classic;        // ClassicDiscoverableStop
+                case 21:                        // LeMtuRequest: Windows negotiates it
+                case 22: return false;          // LeReadRssi: WinRT has no connected RSSI
+                case 23:                        // LeConnectionPriority
+                    return le && le_->connection_parameters_api.load();
+                case 24:                        // RequestEnable
+                {
+                    std::scoped_lock lock(le_->radio_mutex);
+                    return le_->radio != nullptr;
+                }
+                case 25: return le || classic;  // PairedDevicesQuery
                 default: return false;          // signed writes, live server
                                                 // connection events, LE pairing,
                                                 // a permission prompt
@@ -3542,13 +3915,176 @@ namespace gmbluetooth
             return Error::Ok;
         }
 
-        Error le_scan_start(bool active, std::string& message) override
+        // Asking for radio access and setting the state both wait on WinRT,
+        // so they run on the worker, which answers (R1-143).
+        Error request_enable(std::string& message) override
         {
             if (!initialized_)
             {
                 message = "Bluetooth backend is not initialized";
                 return Error::NotInitialized;
             }
+
+            WDR::Radio radio{nullptr};
+            {
+                std::scoped_lock lock(le_->radio_mutex);
+                radio = le_->radio;
+            }
+            if (!radio)
+            {
+                message = "Windows found no Bluetooth radio to turn on";
+                return Error::NotSupported;
+            }
+
+            const auto le = le_;
+            const bool posted = le_worker_ && le_worker_->post([le, radio]()
+            {
+                request_radio_on(le, radio);
+            });
+            if (!posted)
+            {
+                message = "The Bluetooth worker thread is not running";
+                return Error::OperationFailed;
+            }
+
+            message.clear();
+            return Error::Ok;
+        }
+
+        // Ids are built from the address alone and connects resolve the
+        // address, so an id makes a usable entry with no WinRT call (R1-144).
+        Error device_from_id(const std::string& id, DiscoveredDevice& device, std::string& message) override
+        {
+            static constexpr std::string_view ble_prefix = "win:ble:";
+            static constexpr std::string_view classic_prefix = "win:classic:";
+
+            Transport transport = Transport::Unknown;
+            std::string address;
+            if (id.compare(0, ble_prefix.size(), ble_prefix) == 0)
+            {
+                transport = Transport::LowEnergy;
+                address = normalized_address(id.substr(ble_prefix.size()));
+            }
+            else if (id.compare(0, classic_prefix.size(), classic_prefix) == 0)
+            {
+                transport = Transport::Classic;
+                address = normalized_address(id.substr(classic_prefix.size()));
+            }
+
+            BTH_ADDR parsed = 0;
+            if (address.empty() || !parse_bluetooth_address(address, parsed))
+            {
+                message = "Expected a Windows device id: win:ble: or win:classic: and an address like AA:BB:CC:DD:EE:FF";
+                return Error::InvalidArgument;
+            }
+
+            device = {};
+            device.transport = transport;
+            device.address = address;
+            device.id = std::string(transport == Transport::LowEnergy ? ble_prefix : classic_prefix) + address;
+            device.address_available = true;
+            message.clear();
+            return Error::Ok;
+        }
+
+        Error le_connected_devices_query(
+            std::uint64_t query_id,
+            const std::vector<std::string>& service_uuids,
+            std::string& message) override
+        {
+            // Windows cannot tell a device's services without connecting to
+            // it, so every connected LE device is listed.
+            (void)service_uuids;
+            return post_devices_query(query_id, message,
+                [](const std::shared_ptr<SharedLeState>& le, std::vector<DiscoveredDevice>& devices, std::string&)
+                {
+                    find_le_devices(
+                        le,
+                        WDB::BluetoothLEDevice::GetDeviceSelectorFromConnectionStatus(WDB::BluetoothConnectionStatus::Connected),
+                        devices);
+                    return Error::Ok;
+                });
+        }
+
+        // Classic bonds from the Win32 stack, then paired LE devices (R1-145).
+        Error paired_devices_query(std::uint64_t query_id, std::string& message) override
+        {
+            const bool classic = le_->classic_supported.load();
+            const bool ble = le_->ble_supported.load();
+            return post_devices_query(query_id, message,
+                [classic, ble](const std::shared_ptr<SharedLeState>& le, std::vector<DiscoveredDevice>& devices, std::string& failure)
+                {
+                    if (classic)
+                    {
+                        const Error error = find_paired_classic_devices(devices, failure);
+                        if (error != Error::Ok)
+                            return error;
+                    }
+                    if (ble)
+                        find_le_devices(le, WDB::BluetoothLEDevice::GetDeviceSelectorFromPairingState(true), devices);
+                    return Error::Ok;
+                });
+        }
+
+        // Runs find on the worker, which pushes query_id's one DevicesQueried
+        // with what it found or why it failed.
+        template <typename Find>
+        Error post_devices_query(std::uint64_t query_id, std::string& message, Find find)
+        {
+            if (!initialized_)
+            {
+                message = "Bluetooth backend is not initialized";
+                return Error::NotInitialized;
+            }
+
+            const auto le = le_;
+            const bool posted = le_worker_ && le_worker_->post([le, query_id, find]()
+            {
+                BackendEvent event;
+                event.type = BackendEventType::DevicesQueried;
+                event.op_id = query_id;
+                try
+                {
+                    event.error = find(le, event.devices, event.message);
+                }
+                catch (const winrt::hresult_error& error)
+                {
+                    event.error = Error::OperationFailed;
+                    event.message = winrt::to_string(error.message());
+                    trim_trailing_space(event.message);
+                }
+                catch (...)
+                {
+                    event.error = Error::OperationFailed;
+                    event.message = "Listing Bluetooth devices failed with an unexpected exception";
+                }
+                if (event.error != Error::Ok)
+                    event.devices.clear();
+                push_le_event(le, std::move(event));
+            });
+
+            if (!posted)
+            {
+                message = "The Bluetooth worker thread is not running";
+                return Error::OperationFailed;
+            }
+
+            message.clear();
+            return Error::Ok;
+        }
+
+        Error le_scan_start(bool active, const std::vector<LeScanFilter>& filters, std::string& message) override
+        {
+            if (!initialized_)
+            {
+                message = "Bluetooth backend is not initialized";
+                return Error::NotInitialized;
+            }
+
+            // The core matches every result against the filters. A WinRT
+            // AdvertisementFilter takes one pattern and ANDs its fields, so
+            // it cannot say "any of these" (R1-139).
+            (void)filters;
 
             if (le_->le_scanning.load())
             {
@@ -3593,6 +4129,16 @@ namespace gmbluetooth
                         const auto local_name = args.Advertisement().LocalName();
                         if (!local_name.empty())
                             device.name = winrt::to_string(local_name);
+
+                        // A payload that will not parse still reports the device.
+                        try
+                        {
+                            device.advertisement = read_advertisement(args);
+                        }
+                        catch (const winrt::hresult_error& error)
+                        {
+                            GMBT_LOG("Could not read an LE advertisement: %s", winrt::to_string(error.message()).c_str());
+                        }
 
                         // le_connect opens it with the type it advertised (R1-182).
                         remember_address_type(*le, raw_address, args.BluetoothAddressType());
@@ -3767,6 +4313,73 @@ namespace gmbluetooth
         {
             auto state = find_le_client_connection(le_client_, connection);
             return state && state->connected.load() && !state->closing.load();
+        }
+
+        // Windows negotiates the MTU when the link opens; the session the
+        // connection holds says what it came to (R1-140).
+        std::int32_t le_connection_mtu(
+            std::uint64_t connection) const override
+        {
+            const auto state = find_le_client_connection(le_client_, connection);
+            if (!state)
+                return 23;
+
+            WDBG::GattSession session{nullptr};
+            {
+                std::scoped_lock lock(state->mutex);
+                session = state->session;
+            }
+
+            try
+            {
+                if (session)
+                    return static_cast<std::int32_t>(session.MaxPduSize());
+            }
+            catch (const winrt::hresult_error&)
+            {
+            }
+            return 23;
+        }
+
+        // Windows 11 only; the request is made on the connection's worker
+        // and kept there for the link's life (R1-142).
+        Error le_request_connection_priority(
+            std::uint64_t connection,
+            std::int32_t priority,
+            std::string& message) override
+        {
+            if (!le_->connection_parameters_api.load())
+            {
+                message = "Connection priority needs Windows 11";
+                return Error::NotSupported;
+            }
+
+            auto state = find_le_client_connection(le_client_, connection);
+            if (!state)
+            {
+                message = "Invalid BLE connection handle";
+                return Error::InvalidHandle;
+            }
+
+            bool open = false;
+            {
+                std::scoped_lock lock(state->mutex);
+                open = static_cast<bool>(state->device);
+            }
+            if (!open)
+            {
+                message = "BLE connection is not open";
+                return Error::Disconnected;
+            }
+
+            if (!state->worker || !state->worker->post([state, priority]() { request_connection_parameters(state, priority); }))
+            {
+                message = "The BLE connection is closing";
+                return Error::Disconnected;
+            }
+
+            message.clear();
+            return Error::Ok;
         }
 
         // Queues body as op_id's job on the connection's worker. A WinRT or

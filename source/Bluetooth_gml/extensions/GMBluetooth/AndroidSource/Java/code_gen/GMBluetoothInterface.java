@@ -23,7 +23,8 @@ public interface GMBluetoothInterface {
     public boolean bluetooth_feature_is_supported(BluetoothFeature feature);
     public BluetoothPermissionStatus bluetooth_permission_get_status();
     public BluetoothError bluetooth_permission_request(GMFunction callback);
-    public BluetoothError bluetooth_le_scan_start(boolean active);
+    public BluetoothError bluetooth_request_enable(GMFunction callback);
+    public BluetoothError bluetooth_le_scan_start(boolean active, java.util.List<BluetoothLeScanFilter> filters);
     public BluetoothError bluetooth_le_scan_stop();
     public boolean bluetooth_le_scan_is_running();
     public BluetoothError bluetooth_classic_scan_start();
@@ -41,6 +42,10 @@ public interface GMBluetoothInterface {
     public boolean bluetooth_device_has_rssi(long device);
     public int bluetooth_device_get_rssi(long device);
     public boolean bluetooth_device_is_connectable(long device);
+    public BluetoothLeAdvertisement bluetooth_device_get_advertisement(long device);
+    public long bluetooth_device_from_id(String id);
+    public BluetoothError bluetooth_le_connected_devices_query(java.util.List<String> service_uuids, GMFunction callback);
+    public BluetoothError bluetooth_paired_devices_query(GMFunction callback);
     public long bluetooth_classic_connect(long device, String service_uuid, GMFunction callback);
     public BluetoothError bluetooth_classic_disconnect(long connection);
     public boolean bluetooth_classic_connection_is_valid(long connection);
@@ -63,6 +68,10 @@ public interface GMBluetoothInterface {
     public boolean bluetooth_le_connection_is_valid(long connection);
     public boolean bluetooth_le_connection_is_connected(long connection);
     public long bluetooth_le_connection_get_device(long connection);
+    public int bluetooth_le_connection_get_mtu(long connection);
+    public BluetoothError bluetooth_le_connection_request_mtu(long connection, int mtu, GMFunction callback);
+    public BluetoothError bluetooth_le_connection_read_rssi(long connection, GMFunction callback);
+    public BluetoothError bluetooth_le_connection_request_priority(long connection, BluetoothLeConnectionPriority priority);
     public BluetoothError bluetooth_le_services_discover(long connection, GMFunction callback);
     public int bluetooth_le_service_get_count(long connection);
     public long bluetooth_le_service_get_at(long connection, int index);

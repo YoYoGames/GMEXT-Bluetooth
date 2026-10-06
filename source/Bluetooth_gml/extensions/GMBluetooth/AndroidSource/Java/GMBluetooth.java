@@ -5,6 +5,7 @@ import ${YYAndroidPackageName}.enums.BluetoothAttError;
 import ${YYAndroidPackageName}.enums.BluetoothError;
 import ${YYAndroidPackageName}.enums.BluetoothFeature;
 import ${YYAndroidPackageName}.enums.BluetoothLeAdvertiseTxPower;
+import ${YYAndroidPackageName}.enums.BluetoothLeConnectionPriority;
 import ${YYAndroidPackageName}.enums.BluetoothLeSubscribeMode;
 import ${YYAndroidPackageName}.enums.BluetoothLeWriteType;
 import ${YYAndroidPackageName}.enums.BluetoothPermissionStatus;
@@ -13,6 +14,8 @@ import ${YYAndroidPackageName}.records.BluetoothLeAdvertiseData;
 import ${YYAndroidPackageName}.records.BluetoothLeAdvertiseManufacturerData;
 import ${YYAndroidPackageName}.records.BluetoothLeAdvertiseServiceData;
 import ${YYAndroidPackageName}.records.BluetoothLeAdvertiseSettings;
+import ${YYAndroidPackageName}.records.BluetoothLeAdvertisement;
+import ${YYAndroidPackageName}.records.BluetoothLeScanFilter;
 import ${YYAndroidPackageName}.records.BluetoothLeServiceDefinition;
 
 import android.Manifest;
@@ -37,6 +40,8 @@ import android.bluetooth.le.AdvertiseSettings;
 import android.bluetooth.le.BluetoothLeAdvertiser;
 import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
+import android.bluetooth.le.ScanFilter;
+import android.bluetooth.le.ScanRecord;
 import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
 import android.content.BroadcastReceiver;
@@ -51,6 +56,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelUuid;
 import android.provider.Settings;
+import android.util.SparseArray;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -65,7 +71,9 @@ import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -131,6 +139,7 @@ public class GMBluetooth extends GMBluetoothInternal
     private static final long HANDLE_TYPE_LE_DESCRIPTOR = 0x06L;
 
     private static final int REQUEST_CODE_BLUETOOTH = 0xB710;
+    private static final int REQUEST_CODE_ENABLE = 0xB711;
 
     // BluetoothLeSubscribeMode (spec.gmidl), as the subscriber bookkeeping
     // stores it.
@@ -219,7 +228,20 @@ public class GMBluetooth extends GMBluetoothInternal
         boolean rssiAvailable = false;
         boolean connectable = false;
         BluetoothDevice androidDevice = null;
+
+        // What the device has advertised, merged across packets as the native
+        // core merges it (R1-138). UUIDs canonical lowercase; guarded by
+        // deviceLock like the rest of the entry.
+        final ArrayList<String> advServiceUuids = new ArrayList<>();
+        final LinkedHashMap<String, byte[]> advServiceData = new LinkedHashMap<>();
+        final LinkedHashMap<Integer, byte[]> advManufacturerData = new LinkedHashMap<>();
+        Integer advTxPower = null;
     }
+
+    // A device's advertisement keeps at most this many service UUIDs, and as
+    // many service data and manufacturer entries, so a peripheral cycling
+    // through keys cannot grow it further.
+    private static final int MAX_ADVERTISEMENT_ENTRIES = 32;
 
     private final Object deviceLock = new Object();
     private final HashMap<String, Long> deviceById = new HashMap<>();
@@ -549,6 +571,8 @@ public class GMBluetooth extends GMBluetoothInternal
         static final int KIND_READ_DESCRIPTOR = 4;
         static final int KIND_WRITE_DESCRIPTOR = 5;
         static final int KIND_SUBSCRIBE = 6;
+        static final int KIND_REQUEST_MTU = 7;
+        static final int KIND_READ_RSSI = 8;
 
         int kind;
         GMFunction callback;
@@ -584,6 +608,9 @@ public class GMBluetooth extends GMBluetoothInternal
         volatile BluetoothDevice remoteDevice = null;
         volatile boolean connected = false;
         volatile boolean manualClosing = false;
+
+        // The ATT MTU: the default until onMtuChanged reports another.
+        volatile int mtu = 23;
 
         // A client connect in progress, reported once by whoever clears
         // connectPending first: the stack, the connect window, a cancelling
@@ -880,6 +907,34 @@ public class GMBluetooth extends GMBluetoothInternal
     }
 
 
+    // The spellings the native core's is_valid_uuid takes: 4 or 8 hex digits,
+    // or the 36-character 8-4-4-4-12 form. UUID.fromString alone is looser
+    // ("1-2-3-4-5" parses), so the new calls check here first and refuse the
+    // same strings on every platform.
+    private static boolean isValidUuid(String text)
+    {
+        if (text == null)
+            return false;
+
+        int length = text.length();
+
+        if (length != 4 && length != 8 && length != 36)
+            return false;
+
+        for (int i = 0; i < length; i++)
+        {
+            char c = text.charAt(i);
+            boolean dash = length == 36 && (i == 8 || i == 13 || i == 18 || i == 23);
+            boolean hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+
+            if (dash ? c != '-' : !hex)
+                return false;
+        }
+
+        return true;
+    }
+
+
     // Called from exports only: an event a worker thread fires carries its
     // own error and leaves the last error of the game's calls alone.
     private void setLastError(BluetoothError code, String message)
@@ -1060,6 +1115,26 @@ public class GMBluetooth extends GMBluetoothInternal
         BluetoothDevice androidDevice,
         boolean announce)
     {
+        return upsertDevice(
+            transport, id, name, address, rssi, hasRssi, connectable, androidDevice, announce, null);
+    }
+
+
+    // A scan result also folds its advertisement in, under the same lock and
+    // before device_found, so the game never reads a found device's record
+    // without its first packet.
+    private long upsertDevice(
+        int transport,
+        String id,
+        String name,
+        String address,
+        int rssi,
+        boolean hasRssi,
+        boolean connectable,
+        BluetoothDevice androidDevice,
+        boolean announce,
+        ScanRecord record)
+    {
         String safeId = id != null ? id : "";
         String safeName = name != null ? name : "";
         String safeAddress = address != null ? address : "";
@@ -1113,6 +1188,9 @@ public class GMBluetooth extends GMBluetoothInternal
 
             if (androidDevice != null)
                 entry.androidDevice = androidDevice;
+
+            if (record != null)
+                mergeAdvertisement(entry, record);
         }
 
         if (created && announce)
@@ -1121,6 +1199,86 @@ public class GMBluetooth extends GMBluetoothInternal
         }
 
         return handle;
+    }
+
+
+    // Folds one packet into the entry as the core's merge_advertisement does:
+    // service UUIDs collect, a service data or manufacturer entry is replaced
+    // by the newer one for its key, and so is the TX power. Under deviceLock.
+    // The arrays are copied, so the entry never aliases a ScanRecord.
+    private static void mergeAdvertisement(DeviceEntry entry, ScanRecord record)
+    {
+        List<ParcelUuid> uuids = record.getServiceUuids();
+
+        if (uuids != null)
+        {
+            for (ParcelUuid uuid : uuids)
+            {
+                if (uuid == null)
+                    continue;
+
+                // UUID.toString() is already the canonical lowercase form.
+                String canonical = uuid.getUuid().toString();
+
+                if (!entry.advServiceUuids.contains(canonical) &&
+                    entry.advServiceUuids.size() < MAX_ADVERTISEMENT_ENTRIES)
+                    entry.advServiceUuids.add(canonical);
+            }
+        }
+
+        Map<ParcelUuid, byte[]> serviceData = record.getServiceData();
+
+        if (serviceData != null)
+        {
+            for (Map.Entry<ParcelUuid, byte[]> item : serviceData.entrySet())
+            {
+                if (item.getKey() == null)
+                    continue;
+
+                String canonical = item.getKey().getUuid().toString();
+                byte[] data = item.getValue() != null ? item.getValue().clone() : new byte[0];
+
+                if (entry.advServiceData.containsKey(canonical) ||
+                    entry.advServiceData.size() < MAX_ADVERTISEMENT_ENTRIES)
+                    entry.advServiceData.put(canonical, data);
+            }
+        }
+
+        SparseArray<byte[]> manufacturerData = record.getManufacturerSpecificData();
+
+        if (manufacturerData != null)
+        {
+            for (int i = 0; i < manufacturerData.size(); i++)
+            {
+                Integer companyId = manufacturerData.keyAt(i);
+                byte[] value = manufacturerData.valueAt(i);
+                byte[] data = value != null ? value.clone() : new byte[0];
+
+                if (entry.advManufacturerData.containsKey(companyId) ||
+                    entry.advManufacturerData.size() < MAX_ADVERTISEMENT_ENTRIES)
+                    entry.advManufacturerData.put(companyId, data);
+            }
+        }
+
+        // Integer.MIN_VALUE is the record's "no TX Power Level field".
+        int txPower = record.getTxPowerLevel();
+
+        if (txPower != Integer.MIN_VALUE)
+            entry.advTxPower = txPower;
+    }
+
+
+    private static List<Byte> toByteList(byte[] bytes)
+    {
+        ArrayList<Byte> values = new ArrayList<>(bytes != null ? bytes.length : 0);
+
+        if (bytes != null)
+        {
+            for (byte value : bytes)
+                values.add(value);
+        }
+
+        return values;
     }
 
 
@@ -1860,10 +2018,21 @@ public class GMBluetooth extends GMBluetoothInternal
     }
 
 
+    // An MTU request or RSSI read carries its number after the connection, 0
+    // when it failed.
+    private static boolean isNumberOp(LePendingOp op)
+    {
+        return op.kind == LePendingOp.KIND_REQUEST_MTU ||
+            op.kind == LePendingOp.KIND_READ_RSSI;
+    }
+
+
     private void failOp(LePendingOp op, BluetoothError error, String message)
     {
         if (isReadOp(op))
             invoke(op.callback, error, message, (double) op.targetHandle, 0.0, 0);
+        else if (isNumberOp(op))
+            invoke(op.callback, error, message, (double) op.targetHandle, 0.0);
         else
             invoke(op.callback, error, message, (double) op.targetHandle);
     }
@@ -1966,6 +2135,30 @@ public class GMBluetooth extends GMBluetoothInternal
         }
 
         if (op != null && op.timeout != null)
+            timeoutHandler.removeCallbacks(op.timeout);
+
+        return op;
+    }
+
+
+    // For a callback the stack also fires on its own - onMtuChanged when the
+    // peer or the stack renegotiates - takes the current op only when it is
+    // the one that asked, so an unsolicited event leaves a read in flight alone.
+    private LePendingOp takeCurrentOp(LeConnectionEntry connection, int kind)
+    {
+        LePendingOp op;
+
+        synchronized (connection.opLock)
+        {
+            op = connection.currentOp;
+
+            if (op == null || op.kind != kind)
+                return null;
+
+            connection.currentOp = null;
+        }
+
+        if (op.timeout != null)
             timeoutHandler.removeCallbacks(op.timeout);
 
         return op;
@@ -2398,6 +2591,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
         // A dialog still up answers nobody: its result arrives after shutdown.
         firePermissionCallbacks(NOT_INITIALIZED, SHUTDOWN_MESSAGE, PERMISSION_UNKNOWN);
+        fireEnableCallbacks(NOT_INITIALIZED, SHUTDOWN_MESSAGE);
 
         stopServerInternal();
         stopLeAdvertiseInternal(NOT_INITIALIZED, SHUTDOWN_MESSAGE);
@@ -2669,6 +2863,18 @@ public class GMBluetooth extends GMBluetoothInternal
             case PermissionRequest:
                 return Build.VERSION.SDK_INT >= Build.VERSION_CODES.M;
 
+            // requestMtu, readRemoteRssi and requestConnectionPriority come
+            // with every LE client.
+            case LeMtuRequest:
+            case LeReadRssi:
+            case LeConnectionPriority:
+                return bluetooth_le_is_supported();
+
+            // ACTION_REQUEST_ENABLE and getBondedDevices need only an adapter.
+            case RequestEnable:
+            case PairedDevicesQuery:
+                return initialized && adapter != null;
+
             default:
                 return false;
         }
@@ -2858,6 +3064,112 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     // =========================================================================
+    // Request enable
+    // =========================================================================
+
+    // Every request_enable callback waiting for the dialog's answer; one
+    // answer fires them all, as for the permission dialog.
+    private final Object enableLock = new Object();
+    private final ArrayList<GMFunction> pendingEnableCallbacks = new ArrayList<>();
+
+
+    private void fireEnableCallbacks(BluetoothError error, String message)
+    {
+        ArrayList<GMFunction> callbacks;
+
+        synchronized (enableLock)
+        {
+            callbacks = new ArrayList<>(pendingEnableCallbacks);
+            pendingEnableCallbacks.clear();
+        }
+
+        for (GMFunction callback : callbacks)
+            invoke(callback, error, message);
+    }
+
+
+    // The runner forwards every activity result to each extension; only the
+    // enable dialog's is ours.
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, Intent data)
+    {
+        if (requestCode != REQUEST_CODE_ENABLE || !initialized)
+            return;
+
+        if (resultCode == Activity.RESULT_OK)
+            fireEnableCallbacks(OK, "");
+        else
+            fireEnableCallbacks(BLUETOOTH_DISABLED, "the user declined");
+    }
+
+
+    @Override
+    public BluetoothError bluetooth_request_enable(GMFunction callback)
+    {
+        if (!initialized)
+            return result(NOT_INITIALIZED, NOT_INITIALIZED_MESSAGE);
+
+        if (!bluetooth_feature_is_supported(BluetoothFeature.RequestEnable))
+            return result(NOT_SUPPORTED, NO_ADAPTER_MESSAGE);
+
+        // Already on: the answer is known, so it fires at once. On but not
+        // usable (Android 12+ without the permissions) falls through to the
+        // permission check, as the native core orders it.
+        if (currentBluetoothState() == STATE_POWERED_ON)
+        {
+            invoke(callback, OK, "");
+            return OK;
+        }
+
+        // ACTION_REQUEST_ENABLE needs BLUETOOTH_CONNECT from Android 12.
+        if (!hasConnectPermission())
+            return result(
+                PERMISSION_DENIED,
+                "Bluetooth connect permission is not granted");
+
+        Activity current = activity();
+
+        if (current == null)
+            return result(
+                OPERATION_FAILED,
+                "No foreground activity available to request enabling Bluetooth");
+
+        boolean launch;
+
+        synchronized (enableLock)
+        {
+            launch = pendingEnableCallbacks.isEmpty();
+            pendingEnableCallbacks.add(callback);
+        }
+
+        // A dialog is already up: this request waits for its answer.
+        if (!launch)
+            return OK;
+
+        try
+        {
+            current.startActivityForResult(
+                new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE),
+                REQUEST_CODE_ENABLE);
+            return OK;
+        }
+        catch (Throwable throwable)
+        {
+            // A pre-flight failure fires nothing.
+            synchronized (enableLock)
+            {
+                pendingEnableCallbacks.remove(callback);
+            }
+
+            if (throwable instanceof SecurityException)
+                return result(PERMISSION_DENIED, throwableMessage(throwable));
+
+            return result(OPERATION_FAILED, throwableMessage(throwable));
+        }
+    }
+
+
+    // =========================================================================
     // BLE scanning
     // =========================================================================
 
@@ -2890,7 +3202,8 @@ public class GMBluetooth extends GMBluetoothInternal
                 rssi != 127,
                 connectable,
                 device,
-                true);
+                true,
+                scanResult.getScanRecord());
         }
 
 
@@ -2908,11 +3221,91 @@ public class GMBluetooth extends GMBluetoothInternal
     };
 
 
+    private static boolean present(Optional<?> value)
+    {
+        return value != null && value.isPresent();
+    }
+
+
+    // One ScanFilter per GML filter; the stack ORs them and matches each on
+    // the combined advertisement and scan response, which is the spec's rule,
+    // and keeps a filtered scan running with the screen off. Assumes the
+    // filters passed checkScanFilters.
+    private static List<ScanFilter> buildScanFilters(List<BluetoothLeScanFilter> filters)
+    {
+        ArrayList<ScanFilter> out = new ArrayList<>();
+
+        if (filters == null)
+            return out;
+
+        for (BluetoothLeScanFilter filter : filters)
+        {
+            ScanFilter.Builder builder = new ScanFilter.Builder();
+
+            if (present(filter.service_uuid()))
+                builder.setServiceUuid(new ParcelUuid(parseUuid(filter.service_uuid().get())));
+
+            if (present(filter.name()))
+                builder.setDeviceName(filter.name().get());
+
+            // An empty data prefix matches any payload for the company.
+            if (present(filter.company_id()))
+                builder.setManufacturerData(filter.company_id().get(), new byte[0]);
+
+            out.add(builder.build());
+        }
+
+        return out;
+    }
+
+
+    // The core's filter pre-flight, in its order and with its messages: a
+    // filter must set a field, a UUID must be well formed, a company id must
+    // fit 16 bits. Sets the last error when it fails.
+    private BluetoothError checkScanFilters(List<BluetoothLeScanFilter> filters)
+    {
+        if (filters == null)
+            return OK;
+
+        for (BluetoothLeScanFilter filter : filters)
+        {
+            if (filter == null ||
+                (!present(filter.service_uuid()) && !present(filter.name()) && !present(filter.company_id())))
+                return result(
+                    INVALID_ARGUMENT,
+                    "A scan filter must set service_uuid, name or company_id");
+
+            if (present(filter.service_uuid()) && !isValidUuid(filter.service_uuid().get()))
+                return result(INVALID_ARGUMENT, "Invalid UUID: " + filter.service_uuid().get());
+
+            if (present(filter.company_id()))
+            {
+                int companyId = filter.company_id().get();
+
+                if (companyId < 0 || companyId > 0xFFFF)
+                    return result(
+                        INVALID_ARGUMENT,
+                        "A scan filter's company_id must be 0-65535");
+            }
+        }
+
+        return OK;
+    }
+
+
     @Override
-    public BluetoothError bluetooth_le_scan_start(boolean active)
+    public BluetoothError bluetooth_le_scan_start(boolean active, List<BluetoothLeScanFilter> filters)
     {
         // Android's scanner does not expose a direct active/passive flag in the
         // same sense as Windows. Keep the API argument for cross-platform parity.
+        if (!initialized)
+            return result(NOT_INITIALIZED, NOT_INITIALIZED_MESSAGE);
+
+        // Bad filters fail before the radio is looked at, as in the core.
+        BluetoothError checked = checkScanFilters(filters);
+        if (checked != OK)
+            return checked;
+
         BluetoothError ready = requireAdapter();
         if (ready != OK)
             return ready;
@@ -2930,6 +3323,8 @@ public class GMBluetooth extends GMBluetoothInternal
                 BLUETOOTH_DISABLED,
                 "Bluetooth is disabled");
 
+        // A start while scanning starts nothing new and keeps that scan's
+        // filters: stop first to change them.
         if (leScanning.get())
             return OK;
 
@@ -2948,7 +3343,13 @@ public class GMBluetooth extends GMBluetoothInternal
                 .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
                 .build();
 
-            leScanner.startScan(null, settings, leScanCallback);
+            // No filters is null: every device is reported.
+            List<ScanFilter> scanFilters = buildScanFilters(filters);
+
+            leScanner.startScan(
+                scanFilters.isEmpty() ? null : scanFilters,
+                settings,
+                leScanCallback);
             leScanning.set(true);
 
             return OK;
@@ -3344,6 +3745,59 @@ public class GMBluetooth extends GMBluetoothInternal
             }
 
 
+            // Also fires unasked when the peer or the stack negotiates the MTU
+            // itself: that only updates the stored value.
+            @Override
+            public void onMtuChanged(BluetoothGatt gatt, int mtu, int status)
+            {
+                if (generation.get() != workerGeneration)
+                    return;
+
+                LeConnectionEntry entry = getLeConnection(connection);
+                if (entry == null)
+                    return;
+
+                if (status == BluetoothGatt.GATT_SUCCESS)
+                    entry.mtu = mtu;
+
+                LePendingOp op = takeCurrentOp(entry, LePendingOp.KIND_REQUEST_MTU);
+
+                if (op == null)
+                    return;
+
+                if (status == BluetoothGatt.GATT_SUCCESS)
+                    invoke(op.callback, OK, "", (double) connection, (double) mtu);
+                else
+                    failOp(op, mapAttError(status), attErrorMessage(status));
+
+                completeGattOp(entry);
+            }
+
+
+            @Override
+            public void onReadRemoteRssi(BluetoothGatt gatt, int rssi, int status)
+            {
+                if (generation.get() != workerGeneration)
+                    return;
+
+                LeConnectionEntry entry = getLeConnection(connection);
+                if (entry == null)
+                    return;
+
+                LePendingOp op = takeCurrentOp(entry, LePendingOp.KIND_READ_RSSI);
+
+                if (op == null)
+                    return;
+
+                if (status == BluetoothGatt.GATT_SUCCESS)
+                    invoke(op.callback, OK, "", (double) connection, (double) rssi);
+                else
+                    failOp(op, mapAttError(status), attErrorMessage(status));
+
+                completeGattOp(entry);
+            }
+
+
             @Override
             public void onCharacteristicChanged(
                 BluetoothGatt gatt,
@@ -3611,6 +4065,169 @@ public class GMBluetooth extends GMBluetoothInternal
     {
         LeConnectionEntry entry = getLeConnection(connection);
         return entry != null ? entry.device : 0;
+    }
+
+
+    // =========================================================================
+    // BLE GATT client - link parameters (MTU, RSSI, priority)
+    // =========================================================================
+
+    private static final String INVALID_LE_CLIENT_MESSAGE = "Invalid LE connection handle";
+    private static final String LE_NOT_CONNECTED_MESSAGE = "The LE connection is not connected";
+
+    // The core's check_le_client_connection: a server connection is not a
+    // client handle, so it is InvalidHandle too. null when it is not one.
+    private LeConnectionEntry leClientConnection(long connection)
+    {
+        LeConnectionEntry entry = getLeConnection(connection);
+        return entry != null && !entry.serverRole ? entry : null;
+    }
+
+
+    private static boolean leConnected(LeConnectionEntry entry)
+    {
+        return entry.connected && entry.gatt != null;
+    }
+
+
+    @Override
+    public int bluetooth_le_connection_get_mtu(long connection)
+    {
+        if (!initialized)
+            return 0;
+
+        LeConnectionEntry entry = leClientConnection(connection);
+        return entry != null && leConnected(entry) ? entry.mtu : 0;
+    }
+
+
+    @Override
+    public BluetoothError bluetooth_le_connection_request_mtu(long connection, int mtu, GMFunction callback)
+    {
+        if (!initialized)
+            return result(NOT_INITIALIZED, NOT_INITIALIZED_MESSAGE);
+
+        LeConnectionEntry connEntry = leClientConnection(connection);
+
+        if (connEntry == null)
+            return result(INVALID_HANDLE, INVALID_LE_CLIENT_MESSAGE);
+
+        if (mtu < 23 || mtu > 517)
+            return result(INVALID_ARGUMENT, "mtu must be 23-517");
+
+        if (!leConnected(connEntry))
+            return result(DISCONNECTED, LE_NOT_CONNECTED_MESSAGE);
+
+        final BluetoothGatt gatt = connEntry.gatt;
+
+        // Queued like any GATT op: the stack takes no request while another is
+        // in flight, and onMtuChanged completes it.
+        LePendingOp op = new LePendingOp();
+        op.kind = LePendingOp.KIND_REQUEST_MTU;
+        op.callback = callback;
+        op.targetHandle = connection;
+        op.startFailureMessage = "requestMtu() failed to start";
+        op.start = () -> gatt.requestMtu(mtu);
+
+        enqueueGattOp(connEntry, op);
+
+        return OK;
+    }
+
+
+    @Override
+    public BluetoothError bluetooth_le_connection_read_rssi(long connection, GMFunction callback)
+    {
+        if (!initialized)
+            return result(NOT_INITIALIZED, NOT_INITIALIZED_MESSAGE);
+
+        LeConnectionEntry connEntry = leClientConnection(connection);
+
+        if (connEntry == null)
+            return result(INVALID_HANDLE, INVALID_LE_CLIENT_MESSAGE);
+
+        if (!bluetooth_feature_is_supported(BluetoothFeature.LeReadRssi))
+            return result(
+                NOT_SUPPORTED,
+                "Reading the RSSI of a connection is not supported on this platform");
+
+        if (!leConnected(connEntry))
+            return result(DISCONNECTED, LE_NOT_CONNECTED_MESSAGE);
+
+        final BluetoothGatt gatt = connEntry.gatt;
+
+        LePendingOp op = new LePendingOp();
+        op.kind = LePendingOp.KIND_READ_RSSI;
+        op.callback = callback;
+        op.targetHandle = connection;
+        op.startFailureMessage = "readRemoteRssi() failed to start";
+        op.start = () -> gatt.readRemoteRssi();
+
+        enqueueGattOp(connEntry, op);
+
+        return OK;
+    }
+
+
+    // Synchronous: Android reports no result for the request, so Ok means
+    // only that the stack took it.
+    @Override
+    public BluetoothError bluetooth_le_connection_request_priority(
+        long connection,
+        BluetoothLeConnectionPriority priority)
+    {
+        if (!initialized)
+            return result(NOT_INITIALIZED, NOT_INITIALIZED_MESSAGE);
+
+        LeConnectionEntry connEntry = leClientConnection(connection);
+
+        if (connEntry == null)
+            return result(INVALID_HANDLE, INVALID_LE_CLIENT_MESSAGE);
+
+        // null is a value the generated decoder did not know.
+        if (priority == null)
+            return result(
+                INVALID_ARGUMENT,
+                "priority must be a BluetoothLeConnectionPriority");
+
+        if (!bluetooth_feature_is_supported(BluetoothFeature.LeConnectionPriority))
+            return result(
+                NOT_SUPPORTED,
+                "Connection priority is not supported on this platform");
+
+        if (!leConnected(connEntry))
+            return result(DISCONNECTED, LE_NOT_CONNECTED_MESSAGE);
+
+        int value;
+
+        switch (priority)
+        {
+            case High:
+                value = BluetoothGatt.CONNECTION_PRIORITY_HIGH;
+                break;
+            case LowPower:
+                value = BluetoothGatt.CONNECTION_PRIORITY_LOW_POWER;
+                break;
+            default:
+                value = BluetoothGatt.CONNECTION_PRIORITY_BALANCED;
+                break;
+        }
+
+        try
+        {
+            if (!connEntry.gatt.requestConnectionPriority(value))
+                return result(OPERATION_FAILED, "requestConnectionPriority() was refused");
+        }
+        catch (SecurityException exception)
+        {
+            return result(PERMISSION_DENIED, throwableMessage(exception));
+        }
+        catch (Throwable throwable)
+        {
+            return result(OPERATION_FAILED, throwableMessage(throwable));
+        }
+
+        return OK;
     }
 
 
@@ -6701,27 +7318,6 @@ public class GMBluetooth extends GMBluetoothInternal
 
         try
         {
-            // Paired devices enter the cache for bluetooth_device_get_at;
-            // device_found is for what the scan finds.
-            Set<BluetoothDevice> bonded = adapter.getBondedDevices();
-
-            if (bonded != null)
-            {
-                for (BluetoothDevice device : bonded)
-                {
-                    upsertDevice(
-                        TRANSPORT_CLASSIC,
-                        deviceId(TRANSPORT_CLASSIC, device),
-                        safeName(device),
-                        safeAddress(device),
-                        0,
-                        false,
-                        true,
-                        device,
-                        false);
-                }
-            }
-
             if (adapter.isDiscovering())
                 adapter.cancelDiscovery();
 
@@ -6904,6 +7500,320 @@ public class GMBluetooth extends GMBluetoothInternal
     {
         DeviceEntry entry = copyDevice(device);
         return entry != null && entry.connectable;
+    }
+
+
+    // Built under deviceLock rather than through copyDevice, which would copy
+    // the record for every getter. Empty for an unknown handle, a Classic
+    // device or one never seen advertising, as nothing was merged into it.
+    @Override
+    public BluetoothLeAdvertisement bluetooth_device_get_advertisement(long device)
+    {
+        ArrayList<String> serviceUuids = new ArrayList<>();
+        ArrayList<BluetoothLeAdvertiseServiceData> serviceData = new ArrayList<>();
+        ArrayList<BluetoothLeAdvertiseManufacturerData> manufacturerData = new ArrayList<>();
+        Integer txPower = null;
+
+        if (isHandleType(device, HANDLE_TYPE_DEVICE))
+        {
+            synchronized (deviceLock)
+            {
+                DeviceEntry entry = devices.get(device);
+
+                if (entry != null)
+                {
+                    serviceUuids.addAll(entry.advServiceUuids);
+
+                    for (Map.Entry<String, byte[]> item : entry.advServiceData.entrySet())
+                        serviceData.add(new BluetoothLeAdvertiseServiceData(
+                            item.getKey(),
+                            toByteList(item.getValue())));
+
+                    for (Map.Entry<Integer, byte[]> item : entry.advManufacturerData.entrySet())
+                        manufacturerData.add(new BluetoothLeAdvertiseManufacturerData(
+                            item.getKey(),
+                            toByteList(item.getValue())));
+
+                    txPower = entry.advTxPower;
+                }
+            }
+        }
+
+        return new BluetoothLeAdvertisement(
+            serviceUuids,
+            serviceData,
+            manufacturerData,
+            Optional.ofNullable(txPower));
+    }
+
+
+    private static final String ID_PREFIX_LE = "android:ble:";
+    private static final String ID_PREFIX_CLASSIC = "android:classic:";
+
+    @Override
+    public long bluetooth_device_from_id(String id)
+    {
+        if (!initialized)
+        {
+            setLastError(NOT_INITIALIZED, NOT_INITIALIZED_MESSAGE);
+            return 0;
+        }
+
+        String key = id != null ? id : "";
+
+        synchronized (deviceLock)
+        {
+            Long existing = deviceById.get(key);
+            if (existing != null)
+                return existing;
+        }
+
+        int transport;
+        String address;
+
+        if (key.startsWith(ID_PREFIX_LE))
+        {
+            transport = TRANSPORT_LE;
+            address = key.substring(ID_PREFIX_LE.length());
+        }
+        else if (key.startsWith(ID_PREFIX_CLASSIC))
+        {
+            transport = TRANSPORT_CLASSIC;
+            address = key.substring(ID_PREFIX_CLASSIC.length());
+        }
+        else
+        {
+            setLastError(INVALID_ARGUMENT, "Not an Android device id: " + key);
+            return 0;
+        }
+
+        // checkBluetoothAddress takes only upper case; the ids this file issues
+        // are, but a game may have stored one lowered.
+        address = address.toUpperCase(java.util.Locale.ROOT);
+
+        if (!BluetoothAdapter.checkBluetoothAddress(address))
+        {
+            setLastError(INVALID_ARGUMENT, "Malformed Bluetooth address in device id: " + key);
+            return 0;
+        }
+
+        BluetoothAdapter current = adapter;
+
+        if (current == null)
+        {
+            setLastError(NOT_SUPPORTED, NO_ADAPTER_MESSAGE);
+            return 0;
+        }
+
+        BluetoothDevice device;
+
+        try
+        {
+            device = current.getRemoteDevice(address);
+        }
+        catch (Throwable throwable)
+        {
+            setLastError(INVALID_ARGUMENT, throwableMessage(throwable));
+            return 0;
+        }
+
+        // The id is rebuilt from the device, so a lowered id lands on the
+        // entry cached under the canonical one. Not discovered: no device_found.
+        long handle = upsertDevice(
+            transport,
+            deviceId(transport, device),
+            safeName(device),
+            safeAddress(device),
+            0,
+            false,
+            true,
+            device,
+            false);
+
+        if (handle == 0)
+            setLastError(OPERATION_FAILED, "The device could not be added to the cache");
+
+        return handle;
+    }
+
+
+    // The core's check_radio for the device queries: no adapter, the connect
+    // permission (the queries read bonds and connections) and the radio.
+    private BluetoothError checkQueryRadio()
+    {
+        if (adapter == null)
+            return result(NOT_SUPPORTED, NO_ADAPTER_MESSAGE);
+
+        if (!hasConnectPermission())
+            return result(
+                PERMISSION_DENIED,
+                "Bluetooth connect permission is not granted");
+
+        if (!adapterEnabled())
+            return result(BLUETOOTH_DISABLED, "Bluetooth is disabled");
+
+        return OK;
+    }
+
+
+    // A device a query found enters the cache without device_found; the
+    // handles keep the stack's order, each once.
+    private void addQueriedDevice(int transport, BluetoothDevice device, ArrayList<Double> handles)
+    {
+        long handle = upsertDevice(
+            transport,
+            deviceId(transport, device),
+            safeName(device),
+            safeAddress(device),
+            0,
+            false,
+            true,
+            device,
+            false);
+
+        if (handle != 0 && !handles.contains((double) handle))
+            handles.add((double) handle);
+    }
+
+
+    // Answered at once: getConnectedDevices is synchronous. The handles reach
+    // GML as an array of numbers, as the core's vector<double> does.
+    @Override
+    public BluetoothError bluetooth_le_connected_devices_query(List<String> service_uuids, GMFunction callback)
+    {
+        if (!initialized)
+            return result(NOT_INITIALIZED, NOT_INITIALIZED_MESSAGE);
+
+        // Checked as everywhere, though Android lists every connected device.
+        if (service_uuids != null)
+        {
+            for (String uuid : service_uuids)
+            {
+                if (!isValidUuid(uuid))
+                    return result(INVALID_ARGUMENT, "Invalid UUID: " + uuid);
+            }
+        }
+
+        BluetoothError ready = checkQueryRadio();
+        if (ready != OK)
+            return ready;
+
+        Context current = context();
+
+        if (current == null)
+            return result(
+                OPERATION_FAILED,
+                "Android application context is unavailable");
+
+        List<BluetoothDevice> connected;
+
+        try
+        {
+            BluetoothManager manager =
+                (BluetoothManager) current.getSystemService(Context.BLUETOOTH_SERVICE);
+
+            if (manager == null)
+                return result(NOT_SUPPORTED, "Bluetooth manager is unavailable");
+
+            connected = manager.getConnectedDevices(BluetoothProfile.GATT);
+        }
+        catch (SecurityException exception)
+        {
+            return result(PERMISSION_DENIED, throwableMessage(exception));
+        }
+        catch (Throwable throwable)
+        {
+            return result(OPERATION_FAILED, throwableMessage(throwable));
+        }
+
+        ArrayList<Double> handles = new ArrayList<>();
+
+        if (connected != null)
+        {
+            for (BluetoothDevice device : connected)
+            {
+                if (device != null)
+                    addQueriedDevice(TRANSPORT_LE, device, handles);
+            }
+        }
+
+        invoke(callback, OK, "", handles);
+        return OK;
+    }
+
+
+    // getBondedDevices is synchronous too. A bond is typed by getType(): a
+    // dual-mode device gets an entry of each transport, an unknown one is
+    // taken as Classic.
+    @Override
+    public BluetoothError bluetooth_paired_devices_query(GMFunction callback)
+    {
+        if (!initialized)
+            return result(NOT_INITIALIZED, NOT_INITIALIZED_MESSAGE);
+
+        if (!bluetooth_feature_is_supported(BluetoothFeature.PairedDevicesQuery))
+            return result(
+                NOT_SUPPORTED,
+                "Listing paired devices is not supported on this platform");
+
+        BluetoothError ready = checkQueryRadio();
+        if (ready != OK)
+            return ready;
+
+        // Read whole before any entry is added, so a refusal half way leaves
+        // the cache as it was.
+        ArrayList<BluetoothDevice> bondedDevices = new ArrayList<>();
+        ArrayList<Integer> bondedTypes = new ArrayList<>();
+
+        try
+        {
+            Set<BluetoothDevice> bonded = adapter.getBondedDevices();
+
+            if (bonded != null)
+            {
+                for (BluetoothDevice device : bonded)
+                {
+                    if (device == null)
+                        continue;
+
+                    bondedDevices.add(device);
+                    bondedTypes.add(device.getType());
+                }
+            }
+        }
+        catch (SecurityException exception)
+        {
+            return result(PERMISSION_DENIED, throwableMessage(exception));
+        }
+        catch (Throwable throwable)
+        {
+            return result(OPERATION_FAILED, throwableMessage(throwable));
+        }
+
+        ArrayList<Double> handles = new ArrayList<>();
+
+        for (int i = 0; i < bondedDevices.size(); i++)
+        {
+            BluetoothDevice device = bondedDevices.get(i);
+            int type = bondedTypes.get(i);
+
+            if (type == BluetoothDevice.DEVICE_TYPE_LE)
+            {
+                addQueriedDevice(TRANSPORT_LE, device, handles);
+            }
+            else if (type == BluetoothDevice.DEVICE_TYPE_DUAL)
+            {
+                addQueriedDevice(TRANSPORT_CLASSIC, device, handles);
+                addQueriedDevice(TRANSPORT_LE, device, handles);
+            }
+            else
+            {
+                addQueriedDevice(TRANSPORT_CLASSIC, device, handles);
+            }
+        }
+
+        invoke(callback, OK, "", handles);
+        return OK;
     }
 
 

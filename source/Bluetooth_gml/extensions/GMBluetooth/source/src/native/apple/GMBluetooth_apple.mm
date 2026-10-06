@@ -132,6 +132,9 @@
 // Writes without response waiting for canSendWriteWithoutResponse. They
 // get no delegate call: each completes as it is handed to CoreBluetooth.
 @property (nonatomic, strong) NSMutableArray<GMBTQueuedCharacteristicWithData *> *writeWithoutResponse;
+// RSSI reads, answered by peripheral:didReadRSSI:error:, which names only
+// the peripheral.
+@property (nonatomic, strong) NSMutableArray<GMBTQueuedPeripheral *> *readRssi;
 @end
 
 // One didReceiveWriteRequests array. CoreBluetooth wants it treated as a unit
@@ -183,6 +186,10 @@
 @property(nonatomic, strong) NSMutableDictionary <NSString *, CBPeripheral *> *openedPeripherals;
 @property(nonatomic, strong) NSMutableDictionary <NSString *, CBPeripheral *> *connectedPeripherals;
 
+// The services the scan asked CoreBluetooth to narrow to, nil for every
+// device. Kept so a scan deferred until PoweredOn starts with them.
+@property(nonatomic, strong) NSArray<CBUUID *> *scanServices;
+
 // SERVER
 
 @property(nonatomic, strong) CBPeripheralManager *peripheralManager;
@@ -216,7 +223,7 @@
 - (void) bt_init;
 - (void) bt_end;
 
-- (gmbluetooth::Error) bt_le_scan_start:(std::string &)message;
+- (gmbluetooth::Error) bt_le_scan_start:(NSArray<NSString *> *)serviceUuidStrings message:(std::string &)message;
 - (gmbluetooth::Error) bt_le_scan_stop:(std::string &)message;
 - (BOOL) bt_le_scan_is_active;
 
@@ -235,6 +242,11 @@
 - (gmbluetooth::Error) bt_le_peripheral_open:(NSString *)peripheralUuid message:(std::string &)message;
 - (gmbluetooth::Error) bt_le_peripheral_close:(NSString *)peripheralUuid message:(std::string &)message;
 - (BOOL) bt_le_peripheral_is_connected:(NSString *)peripheralUuid;
+- (NSInteger) bt_le_peripheral_mtu:(NSString *)peripheralUuid;
+- (gmbluetooth::Error) bt_le_peripheral_read_rssi:(NSString *)peripheralUuid opId:(NSNumber *)opId message:(std::string &)message;
+
+- (CBPeripheral *) bt_le_retrieve_peripheral:(NSUUID *)identifier error:(gmbluetooth::Error &)error message:(std::string &)message;
+- (NSArray<CBPeripheral *> *) bt_le_connected_peripherals:(NSArray<NSString *> *)serviceUuidStrings error:(gmbluetooth::Error &)error message:(std::string &)message;
 
 - (gmbluetooth::Error) bt_le_peripheral_get_services:(NSString *)peripheralUuid opId:(NSNumber *)opId message:(std::string &)message;
 - (gmbluetooth::Error) bt_le_service_get_characteristics:(NSString *)peripheralUuid service:(NSString *)serviceUuid opId:(NSNumber *)opId message:(std::string &)message;
@@ -368,6 +380,7 @@
         _readDescriptor = [NSMutableArray new];
         _writeDescriptor = [NSMutableArray new];
         _writeWithoutResponse = [NSMutableArray new];
+        _readRssi = [NSMutableArray new];
     }
     return self;
 }
@@ -735,6 +748,7 @@ static bool _scanPendingPowerOn = false;
     // otherwise leave the next bt_init believing a scan is already under way.
     _isScanning = false;
     _scanPendingPowerOn = false;
+    _scanServices = nil;
     _isAdvertising = false;
     _isServerOpen = false;
 
@@ -771,12 +785,24 @@ static bool _scanPendingPowerOn = false;
 // ####################################################################################
 
 // Ok while a scan is already running or waiting for PoweredOn: there is one
-// scan, and asking for it again changes nothing.
-- (gmbluetooth::Error) bt_le_scan_start:(std::string &)message {
+// scan, and asking for it again changes nothing, its services included.
+// serviceUuidStrings is nil for every device; the core validated them, so
+// UUIDWithString cannot throw.
+- (gmbluetooth::Error) bt_le_scan_start:(NSArray<NSString *> *)serviceUuidStrings message:(std::string &)message {
     const gmbluetooth::Error error = gmbt_require_powered_on(_centralManager.state, message);
     if (error != gmbluetooth::Error::Ok) return error;
 
     if (_isScanning || _scanPendingPowerOn) return gmbt_ok(message);
+
+    NSMutableArray<CBUUID *> *services = nil;
+    if (serviceUuidStrings.count > 0) {
+        services = [NSMutableArray arrayWithCapacity:serviceUuidStrings.count];
+        for (NSString *uuidString in serviceUuidStrings) {
+            CBUUID *uuid = [CBUUID UUIDWithString:uuidString];
+            if (![services containsObject:uuid]) [services addObject:uuid];
+        }
+    }
+    _scanServices = services;
 
     if (_centralManager.state != CBManagerStatePoweredOn) {
         _scanPendingPowerOn = true;
@@ -791,15 +817,18 @@ static bool _scanPendingPowerOn = false;
 
 // Issues the actual CoreBluetooth scan. Only ever called with the central
 // already PoweredOn, so _isScanning tracks a scan that really started.
+// Narrowed to _scanServices when every filter names a service, which is
+// what lets iOS keep scanning in the background; the core still matches
+// each result against the filters.
 - (void) beginScan {
 
     _isScanning = true;
 
-    [_centralManager scanForPeripheralsWithServices:nil
+    [_centralManager scanForPeripheralsWithServices:_scanServices
                                              options:@{ CBCentralManagerScanOptionAllowDuplicatesKey: @YES }];
 
-    NSLog(@"[GMBluetooth] beginScan: CBCentralManager.isScanning=%d",
-          (int)[_centralManager isScanning]);
+    NSLog(@"[GMBluetooth] beginScan: CBCentralManager.isScanning=%d services=%lu",
+          (int)[_centralManager isScanning], (unsigned long)_scanServices.count);
 }
 
 // A deferred scan counts as running: the game was told it started.
@@ -818,6 +847,7 @@ static bool _scanPendingPowerOn = false;
     const bool wasScanning = _isScanning;
     _scanPendingPowerOn = false;
     _isScanning = false;
+    _scanServices = nil;
 
     if (wasScanning) [_centralManager stopScan];
 
@@ -885,6 +915,46 @@ static bool _scanPendingPowerOn = false;
 
     // 4. Signal strength. CoreBluetooth reports 127 when it has none.
     if (RSSI && RSSI.integerValue != 127) params[@"raw_signal"] = RSSI;
+
+    // 5. The rest of the advertisement, as the bus carries it: UUID strings
+    // and base64 bytes. CoreBluetooth hands over the advertisement and the
+    // scan response merged; a key of the wrong type is skipped.
+    NSMutableArray<NSString *> *serviceUuids = [NSMutableArray array];
+    for (NSString *key in @[ CBAdvertisementDataServiceUUIDsKey, CBAdvertisementDataOverflowServiceUUIDsKey ]) {
+        id list = advertisementData[key];
+        if (![list isKindOfClass:[NSArray class]]) continue;
+        for (id uuid in (NSArray *)list) {
+            if ([uuid isKindOfClass:[CBUUID class]]) [serviceUuids addObject:((CBUUID *)uuid).UUIDString];
+        }
+    }
+    if (serviceUuids.count > 0) params[@"service_uuids"] = serviceUuids;
+
+    id serviceData = advertisementData[CBAdvertisementDataServiceDataKey];
+    if ([serviceData isKindOfClass:[NSDictionary class]]) {
+        NSMutableArray<NSDictionary *> *entries = [NSMutableArray array];
+        for (id uuid in (NSDictionary *)serviceData) {
+            id data = ((NSDictionary *)serviceData)[uuid];
+            if (![uuid isKindOfClass:[CBUUID class]] || ![data isKindOfClass:[NSData class]]) continue;
+            [entries addObject:@{ @"uuid": ((CBUUID *)uuid).UUIDString,
+                                  @"data": [(NSData *)data base64EncodedStringWithOptions:0] }];
+        }
+        if (entries.count > 0) params[@"service_data"] = entries;
+    }
+
+    // The first two bytes are the company id, little-endian; anything
+    // shorter names no company and is dropped.
+    id manufacturerData = advertisementData[CBAdvertisementDataManufacturerDataKey];
+    if ([manufacturerData isKindOfClass:[NSData class]] && ((NSData *)manufacturerData).length >= 2) {
+        NSData *bytes = (NSData *)manufacturerData;
+        const auto *raw = static_cast<const std::uint8_t *>(bytes.bytes);
+        const int companyId = raw[0] | (raw[1] << 8);
+        NSData *rest = [bytes subdataWithRange:NSMakeRange(2, bytes.length - 2)];
+        params[@"manufacturer_data"] = @[ @{ @"company_id": @(companyId),
+                                             @"data": [rest base64EncodedStringWithOptions:0] } ];
+    }
+
+    id txPower = advertisementData[CBAdvertisementDataTxPowerLevelKey];
+    if ([txPower isKindOfClass:[NSNumber class]]) params[@"tx_power"] = txPower;
 
     [self notifyOperation:@"bt_le_scan_result" extraParams:params];
 }
@@ -1703,6 +1773,12 @@ static gmbluetooth::Error gmbt_bad_base64(std::string &message) {
     }];
 }
 
+- (void) handleReadRssiQueue:(NSMutableArray *)queue {
+    [self handleQueue:queue withBlock:^(GMBTQueuedPeripheral *queuedPeripheral) {
+        [queuedPeripheral.peripheral readRSSI];
+    }];
+}
+
 // Hands queued writes without response to CoreBluetooth while it can take
 // them, completing each as it goes; peripheralIsReadyToSendWriteWithoutResponse:
 // resumes. Before iOS 11 / macOS 10.13 there is no flow control to wait for.
@@ -1758,6 +1834,71 @@ static gmbluetooth::Error gmbt_bad_base64(std::string &message) {
 
 - (BOOL) bt_le_peripheral_is_connected:(NSString*) peripheralUuid {
     return [_connectedPeripherals objectForKey:[peripheralUuid uppercaseString]] != nil;
+}
+
+// The ATT MTU CoreBluetooth negotiated: the longest write without response
+// plus the 3-byte ATT header. 23, the minimum, when the link is not up.
+- (NSInteger) bt_le_peripheral_mtu:(NSString *)peripheralUuid {
+    CBPeripheral *peripheral = [_connectedPeripherals objectForKey:[peripheralUuid uppercaseString]];
+    if (!peripheral || peripheral.state != CBPeripheralStateConnected) return 23;
+    if (@available(iOS 9.0, macOS 10.12, *)) {
+        return (NSInteger)[peripheral maximumWriteValueLengthForType:CBCharacteristicWriteWithoutResponse] + 3;
+    }
+    return 23;
+}
+
+- (gmbluetooth::Error) bt_le_peripheral_read_rssi:(NSString *)peripheralUuid opId:(NSNumber *)opId message:(std::string &)message {
+    CBPeripheral *peripheral = [self peripheralForUuid:peripheralUuid];
+    if (!peripheral) return gmbt_not_open(message);
+
+    GMBTQueuedPeripheral *queuedPeripheral = [[GMBTQueuedPeripheral alloc] initWithOpId:opId peripheral:peripheral];
+
+    NSMutableArray *queue = [self queuesForPeripheral:peripheral create:YES].readRssi;
+    [self queueEnqueue:queue value:queuedPeripheral withHandler:^{ [self handleReadRssiQueue:queue]; }];
+
+    return gmbt_ok(message);
+}
+
+// The device queries ask the central for what it already knows, so it has
+// to be on: no request waits for it here.
+- (gmbluetooth::Error) requireCentralPoweredOn:(std::string &)message {
+    const gmbluetooth::Error error = gmbt_require_powered_on(_centralManager.state, message);
+    if (error != gmbluetooth::Error::Ok) return error;
+    if (_centralManager.state != CBManagerStatePoweredOn)
+        return gmbt_fail(message, gmbluetooth::Error::BluetoothDisabled, "Bluetooth is not powered on yet");
+    return gmbt_ok(message);
+}
+
+// A peripheral CoreBluetooth knows by its identifier, kept for
+// bt_le_peripheral_open; nil with error set when it knows none.
+- (CBPeripheral *) bt_le_retrieve_peripheral:(NSUUID *)identifier error:(gmbluetooth::Error &)error message:(std::string &)message {
+    error = [self requireCentralPoweredOn:message];
+    if (error != gmbluetooth::Error::Ok) return nil;
+
+    CBPeripheral *peripheral = [_centralManager retrievePeripheralsWithIdentifiers:@[ identifier ]].firstObject;
+    if (!peripheral) {
+        error = gmbt_fail(message, gmbluetooth::Error::NotFound, "The system does not know this peripheral");
+        return nil;
+    }
+    [self rememberPeripheral:peripheral];
+    error = gmbt_ok(message);
+    return peripheral;
+}
+
+// The peripherals connected to the system (by any app) that host one of the
+// services, each kept for bt_le_peripheral_open. The core validated the
+// UUIDs, so UUIDWithString cannot throw.
+- (NSArray<CBPeripheral *> *) bt_le_connected_peripherals:(NSArray<NSString *> *)serviceUuidStrings error:(gmbluetooth::Error &)error message:(std::string &)message {
+    error = [self requireCentralPoweredOn:message];
+    if (error != gmbluetooth::Error::Ok) return nil;
+
+    NSMutableArray<CBUUID *> *services = [NSMutableArray arrayWithCapacity:serviceUuidStrings.count];
+    for (NSString *uuidString in serviceUuidStrings) [services addObject:[CBUUID UUIDWithString:uuidString]];
+
+    NSArray<CBPeripheral *> *peripherals = [_centralManager retrieveConnectedPeripheralsWithServices:services];
+    for (CBPeripheral *peripheral in peripherals) [self rememberPeripheral:peripheral];
+    error = gmbt_ok(message);
+    return peripherals ? peripherals : @[];
 }
 
 // Synchronous and silent: the core retires the connection itself. A
@@ -2241,6 +2382,7 @@ static gmbluetooth::Error gmbt_bad_base64(std::string &message) {
         if (_isScanning || _scanPendingPowerOn) {
             _isScanning = false;
             _scanPendingPowerOn = false;
+            _scanServices = nil;
             NSLog(@"[GMBluetooth] central reached %@ - the scan has ended", stateString);
             [self notifyScanStopped:error message:message];
         }
@@ -2275,8 +2417,20 @@ static gmbluetooth::Error gmbt_bad_base64(std::string &message) {
     if (self.managerStateSink) self.managerStateSink();
 }
 
+// Completes the head of the peripheral's RSSI reads with the dBm value.
 - (void) peripheral:(CBPeripheral *)peripheral didReadRSSI:(NSNumber *)RSSI error:(NSError *)error {
-	// We don't handle this
+
+    NSMutableArray *queue = [self queuesForPeripheral:peripheral create:NO].readRssi;
+    GMBTQueuedPeripheral *queuedPeripheral = [self takeHeadOf:queue answering:@"didReadRSSI" matching:^BOOL(id head) {
+        return ((GMBTQueuedPeripheral *)head).peripheral == peripheral;
+    }];
+    if (!queuedPeripheral) return;
+
+    gmbluetooth::LeOpResult result;
+    if (!error) result.number = RSSI.intValue;
+    [self completeOp:queuedPeripheral.opId error:error result:std::move(result)];
+
+    [self handleReadRssiQueue:queue];
 }
 
 - (void) peripheralDidUpdateName:(CBPeripheral *)peripheral {
@@ -2637,7 +2791,9 @@ namespace
         // TX power), never scans passively, hands the app no descriptor
         // requests, signed writes or connection events, and pairs on its own
         // when an attribute asks for it; macOS pairs Classic devices through
-        // IOBluetooth and cannot be made discoverable.
+        // IOBluetooth and cannot be made discoverable. CoreBluetooth
+        // negotiates the MTU itself, takes no connection priority and cannot
+        // turn the radio on; only macOS lists paired (Classic) devices.
         bool feature_supported(std::int32_t feature) const override
         {
             switch (feature)
@@ -2646,9 +2802,16 @@ namespace
                 case kFeatureLeAdvertiseServiceUuids:
                     return supports_le_advertise();
                 case kFeatureClassicPairing:
+                case kFeaturePairedDevicesQuery:
                     return supports_classic();
                 case kFeaturePermissionRequest:
                     return true;
+                case kFeatureLeReadRssi:
+                    return supports_ble();
+                case kFeatureLeMtuRequest:
+                case kFeatureLeConnectionPriority:
+                case kFeatureRequestEnable:
+                    return false;
                 default:
                     return false;
             }
@@ -2712,12 +2875,96 @@ namespace
             return Error::Ok;
         }
 
+        // Ids this backend issues: "apple:ble:" + the peripheral's identifier,
+        // and on macOS "apple:classic:" + the "XX:XX:XX:XX:XX:XX" address.
+        Error device_from_id(const std::string& id, DiscoveredDevice& device, std::string& message) override
+        {
+            constexpr const char* ble_prefix = "apple:ble:";
+            constexpr const char* classic_prefix = "apple:classic:";
+
+            if (id.rfind(ble_prefix, 0) == 0)
+            {
+                NSUUID* identifier = [[NSUUID alloc] initWithUUIDString:gmbt_ns(id.substr(std::char_traits<char>::length(ble_prefix)))];
+                if (!identifier) { message = "The id does not hold a valid CoreBluetooth identifier"; return Error::InvalidArgument; }
+                if (const Error e = require_managers(message); e != Error::Ok) return e;
+
+                Error error = Error::Ok;
+                CBPeripheral* peripheral = [transport_ bt_le_retrieve_peripheral:identifier error:error message:message];
+                if (!peripheral) return error;
+                device = le_device_from_peripheral(peripheral);
+                message.clear();
+                return Error::Ok;
+            }
+
+            if (id.rfind(classic_prefix, 0) == 0)
+            {
+#if TARGET_OS_OSX
+                std::string address = id.substr(std::char_traits<char>::length(classic_prefix));
+                if (!classic_address_is_well_formed(address)) { message = "The id does not hold a valid Bluetooth address"; return Error::InvalidArgument; }
+                if (const Error e = require_managers(message); e != Error::Ok) return e;
+
+                // IOBluetooth spells addresses with dashes.
+                for (auto& c : address) if (c == ':') c = '-';
+                IOBluetoothDevice* btDevice = [IOBluetoothDevice deviceWithAddressString:gmbt_ns(address)];
+                if (!btDevice) { message = "The id does not hold a valid Bluetooth address"; return Error::InvalidArgument; }
+                device = classic_device_entry(btDevice);
+                message.clear();
+                return Error::Ok;
+#else
+                message = "Bluetooth Classic ids are not issued on this platform";
+                return Error::InvalidArgument;
+#endif
+            }
+
+            message = "The id is not one this platform issues";
+            return Error::InvalidArgument;
+        }
+
+        // CoreBluetooth lists connected peripherals only by the services they
+        // host, so an empty list cannot mean every device here.
+        Error le_connected_devices_query(std::uint64_t query_id, const std::vector<std::string>& service_uuids, std::string& message) override
+        {
+            if (service_uuids.empty())
+            {
+                message = "Apple lists connected devices by service: pass at least one service UUID";
+                return Error::InvalidArgument;
+            }
+            if (const Error e = require_managers(message); e != Error::Ok) return e;
+
+            NSMutableArray<NSString*>* uuids = [NSMutableArray arrayWithCapacity:service_uuids.size()];
+            for (const auto& uuid : service_uuids) [uuids addObject:gmbt_ns(uuid)];
+
+            Error error = Error::Ok;
+            NSArray<CBPeripheral*>* peripherals = [transport_ bt_le_connected_peripherals:uuids error:error message:message];
+            if (error != Error::Ok) return error;
+
+            // The answer is known now; the core registered the callback
+            // before asking, so it can go out at once.
+            BackendEvent ev;
+            ev.type = BackendEventType::DevicesQueried;
+            ev.transport = Transport::LowEnergy;
+            ev.op_id = query_id;
+            for (CBPeripheral* peripheral in peripherals) ev.devices.push_back(le_device_from_peripheral(peripheral));
+            hooks_.push_event(std::move(ev));
+            message.clear();
+            return Error::Ok;
+        }
+
         // active is a hint CoreBluetooth has no switch for: every scan is
-        // active (LePassiveScan).
-        Error le_scan_start(bool, std::string& message) override
+        // active (LePassiveScan). When every filter names a service, the
+        // scan is narrowed to those services natively too.
+        Error le_scan_start(bool, const std::vector<LeScanFilter>& filters, std::string& message) override
         {
             if (const Error e = require_managers(message); e != Error::Ok) return e;
-            return [transport_ bt_le_scan_start:message];
+            NSMutableArray<NSString*>* services = nil;
+            const bool all_name_a_service = std::all_of(filters.begin(), filters.end(),
+                [](const LeScanFilter& filter) { return filter.service_uuid.has_value(); });
+            if (!filters.empty() && all_name_a_service)
+            {
+                services = [NSMutableArray arrayWithCapacity:filters.size()];
+                for (const auto& filter : filters) [services addObject:gmbt_ns(*filter.service_uuid)];
+            }
+            return [transport_ bt_le_scan_start:services message:message];
         }
         Error le_scan_stop(std::string& message) override
         {
@@ -2753,6 +3000,17 @@ namespace
         bool le_connection_is_connected(std::uint64_t connection) const override
         {
             const std::string id=id_for_connection(connection); return !id.empty() && [transport_ bt_le_peripheral_is_connected:gmbt_ns(id)];
+        }
+        std::int32_t le_connection_mtu(std::uint64_t connection) const override
+        {
+            const std::string id=id_for_connection(connection);
+            if (id.empty() || !transport_) return 23;
+            return static_cast<std::int32_t>([transport_ bt_le_peripheral_mtu:gmbt_ns(id)]);
+        }
+        Error le_read_rssi(std::uint64_t op, std::uint64_t c, std::string& m) override
+        {
+            auto id=id_for_connection(c); if(id.empty())return invalid_connection(m);
+            return [transport_ bt_le_peripheral_read_rssi:gmbt_ns(id) opId:@(op) message:m];
         }
         // The GATT calls, advertise start and add_service hand the core's op
         // id to the transport, which reports it on the completion.
@@ -3252,6 +3510,26 @@ namespace
             return btDevice != nil && [btDevice isPaired];
         }
 
+        // The Classic devices macOS holds a bond with, in range or not. The
+        // list is local, so the answer goes out at once.
+        Error paired_devices_query(std::uint64_t query_id, std::string& message) override
+        {
+            if (const Error e = require_managers(message); e != Error::Ok) return e;
+
+            BackendEvent ev;
+            ev.type = BackendEventType::DevicesQueried;
+            ev.transport = Transport::Classic;
+            ev.op_id = query_id;
+            for (id entry in [IOBluetoothDevice pairedDevices])
+            {
+                if (![entry isKindOfClass:[IOBluetoothDevice class]]) continue;
+                ev.devices.push_back(classic_device_entry((IOBluetoothDevice*)entry));
+            }
+            hooks_.push_event(std::move(ev));
+            message.clear();
+            return Error::Ok;
+        }
+
 #else
 
         Error classic_scan_start(std::string&m) override {m="Bluetooth Classic is not supported on this platform";return Error::NotSupported;}
@@ -3292,6 +3570,11 @@ namespace
         static constexpr std::int32_t kFeatureLeAdvertiseServiceUuids = 4;
         static constexpr std::int32_t kFeatureClassicPairing = 17;
         static constexpr std::int32_t kFeaturePermissionRequest = 20;
+        static constexpr std::int32_t kFeatureLeMtuRequest = 21;
+        static constexpr std::int32_t kFeatureLeReadRssi = 22;
+        static constexpr std::int32_t kFeatureLeConnectionPriority = 23;
+        static constexpr std::int32_t kFeatureRequestEnable = 24;
+        static constexpr std::int32_t kFeaturePairedDevicesQuery = 25;
 
         static Error invalid_connection(std::string&message){message="Invalid connection handle";return Error::InvalidHandle;}
 
@@ -3367,6 +3650,19 @@ namespace
             if(d.id.rfind(prefix,0)==0) return d.id.substr(std::char_traits<char>::length(prefix));
             if(d.address_available&&!d.address.empty()) return d.address;
             return {};
+        }
+
+        // A peripheral CoreBluetooth handed back by identifier or service, as
+        // a scan would report it minus the advertisement and the RSSI.
+        static DiscoveredDevice le_device_from_peripheral(CBPeripheral* peripheral)
+        {
+            DiscoveredDevice d;
+            d.transport = Transport::LowEnergy;
+            d.id = "apple:ble:" + gmbt_string([peripheral.identifier.UUIDString uppercaseString]);
+            d.name = gmbt_string(peripheral.name);
+            d.address_available = false;
+            d.connectable = true;
+            return d;
         }
 
 #if TARGET_OS_OSX
@@ -3470,9 +3766,24 @@ namespace
             return [IOBluetoothSDPUUID uuidWithBytes:cb.data.bytes length:(int)cb.data.length];
         }
 
-        void handle_classic_device_found(IOBluetoothDevice* device)
+        // "XX:XX:XX:XX:XX:XX", as classic_format_address writes it; dashes
+        // and lowercase hex are taken too.
+        static bool classic_address_is_well_formed(const std::string& address)
         {
-            if (!device) return;
+            if (address.size() != 17) return false;
+            for (std::size_t i = 0; i < address.size(); ++i)
+            {
+                const char c = address[i];
+                if (i % 3 == 2) { if (c != ':' && c != '-') return false; }
+                else if (!std::isxdigit(static_cast<unsigned char>(c))) return false;
+            }
+            return true;
+        }
+
+        // The cache entry for a Classic device, which is also kept for
+        // classic_device_for_address. Used for inquiry results, ids and bonds.
+        DiscoveredDevice classic_device_entry(IOBluetoothDevice* device)
+        {
             const std::string address = classic_format_address([device addressString]);
             {
                 std::scoped_lock lock(classic_mutex_);
@@ -3485,7 +3796,13 @@ namespace
             d.address = address;
             d.address_available = true;
             d.connectable = true;
-            hooks_.upsert_device(d);
+            return d;
+        }
+
+        void handle_classic_device_found(IOBluetoothDevice* device)
+        {
+            if (!device) return;
+            hooks_.upsert_device(classic_device_entry(device));
         }
 
         void handle_classic_inquiry_complete(IOReturn error)
@@ -4074,7 +4391,67 @@ namespace
             d.rssi_available=rssi!=nil;
             d.rssi=rssi ? rssi.intValue : 0;
             d.connectable=connectable ? connectable.boolValue : true;
+            d.advertisement=advertisement_from_params(params);
             hooks_.upsert_device(d);
+        }
+
+        // Bytes the transport sent as base64; empty when they do not decode.
+        static std::vector<std::uint8_t> bytes_from_base64(id value)
+        {
+            if (![value isKindOfClass:[NSString class]]) return {};
+            NSData* data = [[NSData alloc] initWithBase64EncodedString:(NSString*)value options:0];
+            const auto* bytes = static_cast<const std::uint8_t*>(data.bytes);
+            if (!bytes) return {};
+            return std::vector<std::uint8_t>(bytes, bytes + data.length);
+        }
+
+        // didDiscoverPeripheral's advertisement keys. The core canonicalizes
+        // the UUIDs; an entry of the wrong shape is skipped.
+        static LeAdvertisement advertisement_from_params(NSDictionary* params)
+        {
+            LeAdvertisement advertisement;
+
+            id uuids = params[@"service_uuids"];
+            if ([uuids isKindOfClass:[NSArray class]])
+            {
+                for (id uuid in (NSArray*)uuids)
+                    if ([uuid isKindOfClass:[NSString class]] && [(NSString*)uuid length] > 0)
+                        advertisement.service_uuids.push_back(gmbt_string((NSString*)uuid));
+            }
+
+            id serviceData = params[@"service_data"];
+            if ([serviceData isKindOfClass:[NSArray class]])
+            {
+                for (id entry in (NSArray*)serviceData)
+                {
+                    if (![entry isKindOfClass:[NSDictionary class]]) continue;
+                    id uuid = ((NSDictionary*)entry)[@"uuid"];
+                    if (![uuid isKindOfClass:[NSString class]] || [(NSString*)uuid length] == 0) continue;
+                    advertisement.service_data.push_back(LeAdvertiseServiceData{
+                        gmbt_string((NSString*)uuid), bytes_from_base64(((NSDictionary*)entry)[@"data"]) });
+                }
+            }
+
+            id manufacturerData = params[@"manufacturer_data"];
+            if ([manufacturerData isKindOfClass:[NSArray class]])
+            {
+                for (id entry in (NSArray*)manufacturerData)
+                {
+                    if (![entry isKindOfClass:[NSDictionary class]]) continue;
+                    id company = ((NSDictionary*)entry)[@"company_id"];
+                    if (![company isKindOfClass:[NSNumber class]]) continue;
+                    const int companyId = [(NSNumber*)company intValue];
+                    if (companyId < 0 || companyId > 0xFFFF) continue;
+                    advertisement.manufacturer_data.push_back(LeAdvertiseManufacturerData{
+                        static_cast<std::uint16_t>(companyId), bytes_from_base64(((NSDictionary*)entry)[@"data"]) });
+                }
+            }
+
+            id txPower = params[@"tx_power"];
+            if ([txPower isKindOfClass:[NSNumber class]])
+                advertisement.tx_power = [(NSNumber*)txPower intValue];
+
+            return advertisement;
         }
 
         void on_event(NSString* type, NSDictionary* params)

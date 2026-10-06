@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 #include "core/GMExtWire.h"
 
 // The core's exports as code_gen/native/GMBluetoothInternal_native.h declares
@@ -20,6 +21,7 @@ namespace gm_enums
     enum class BluetoothLeWriteType : std::int32_t;
     enum class BluetoothAttError : std::int32_t;
     enum class BluetoothFeature : std::int32_t;
+    enum class BluetoothLeConnectionPriority : std::int32_t;
 }
 
 namespace gm_structs
@@ -27,6 +29,8 @@ namespace gm_structs
     struct BluetoothLeServiceDefinition;
     struct BluetoothLeAdvertiseSettings;
     struct BluetoothLeAdvertiseData;
+    struct BluetoothLeScanFilter;
+    struct BluetoothLeAdvertisement;
 }
 
 bool bluetooth_initialize();
@@ -42,7 +46,8 @@ bool bluetooth_classic_server_is_supported();
 bool bluetooth_feature_is_supported(gm_enums::BluetoothFeature feature);
 gm_enums::BluetoothPermissionStatus bluetooth_permission_get_status();
 gm_enums::BluetoothError bluetooth_permission_request(const gm::wire::GMFunction& callback);
-gm_enums::BluetoothError bluetooth_le_scan_start(bool active);
+gm_enums::BluetoothError bluetooth_request_enable(const gm::wire::GMFunction& callback);
+gm_enums::BluetoothError bluetooth_le_scan_start(bool active, const std::vector<gm_structs::BluetoothLeScanFilter>& filters);
 gm_enums::BluetoothError bluetooth_le_scan_stop();
 bool bluetooth_le_scan_is_running();
 gm_enums::BluetoothError bluetooth_classic_scan_start();
@@ -60,6 +65,10 @@ std::string bluetooth_device_get_address(std::uint64_t device);
 bool bluetooth_device_has_rssi(std::uint64_t device);
 std::int32_t bluetooth_device_get_rssi(std::uint64_t device);
 bool bluetooth_device_is_connectable(std::uint64_t device);
+gm_structs::BluetoothLeAdvertisement bluetooth_device_get_advertisement(std::uint64_t device);
+std::uint64_t bluetooth_device_from_id(std::string_view id);
+gm_enums::BluetoothError bluetooth_le_connected_devices_query(const std::vector<std::string_view>& service_uuids, const gm::wire::GMFunction& callback);
+gm_enums::BluetoothError bluetooth_paired_devices_query(const gm::wire::GMFunction& callback);
 std::uint64_t bluetooth_classic_connect(std::uint64_t device, std::string_view service_uuid, const gm::wire::GMFunction& callback);
 gm_enums::BluetoothError bluetooth_classic_disconnect(std::uint64_t connection);
 bool bluetooth_classic_connection_is_valid(std::uint64_t connection);
@@ -82,6 +91,10 @@ gm_enums::BluetoothError bluetooth_le_disconnect(std::uint64_t connection);
 bool bluetooth_le_connection_is_valid(std::uint64_t connection);
 bool bluetooth_le_connection_is_connected(std::uint64_t connection);
 std::uint64_t bluetooth_le_connection_get_device(std::uint64_t connection);
+std::int32_t bluetooth_le_connection_get_mtu(std::uint64_t connection);
+gm_enums::BluetoothError bluetooth_le_connection_request_mtu(std::uint64_t connection, std::int32_t mtu, const gm::wire::GMFunction& callback);
+gm_enums::BluetoothError bluetooth_le_connection_read_rssi(std::uint64_t connection, const gm::wire::GMFunction& callback);
+gm_enums::BluetoothError bluetooth_le_connection_request_priority(std::uint64_t connection, gm_enums::BluetoothLeConnectionPriority priority);
 gm_enums::BluetoothError bluetooth_le_services_discover(std::uint64_t connection, const gm::wire::GMFunction& callback);
 std::int32_t bluetooth_le_service_get_count(std::uint64_t connection);
 std::uint64_t bluetooth_le_service_get_at(std::uint64_t connection, std::int32_t index);

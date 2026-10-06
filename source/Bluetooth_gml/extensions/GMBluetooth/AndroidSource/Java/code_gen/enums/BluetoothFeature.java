@@ -24,7 +24,12 @@ public enum BluetoothFeature
     ClassicPairing((int)17),
     ClassicDiscoverable((int)18),
     ClassicDiscoverableStop((int)19),
-    PermissionRequest((int)20);
+    PermissionRequest((int)20),
+    LeMtuRequest((int)21),
+    LeReadRssi((int)22),
+    LeConnectionPriority((int)23),
+    RequestEnable((int)24),
+    PairedDevicesQuery((int)25);
 
     private final int value;
     private BluetoothFeature(int v)
@@ -81,6 +86,16 @@ public enum BluetoothFeature
                 return BluetoothFeature.ClassicDiscoverableStop;
             case 20:
                 return BluetoothFeature.PermissionRequest;
+            case 21:
+                return BluetoothFeature.LeMtuRequest;
+            case 22:
+                return BluetoothFeature.LeReadRssi;
+            case 23:
+                return BluetoothFeature.LeConnectionPriority;
+            case 24:
+                return BluetoothFeature.RequestEnable;
+            case 25:
+                return BluetoothFeature.PairedDevicesQuery;
             default:
                 return null;
         }

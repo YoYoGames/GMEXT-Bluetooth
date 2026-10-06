@@ -120,6 +120,13 @@ namespace gm_enums
         High = 3
     };
 
+    enum class BluetoothLeConnectionPriority : std::int32_t
+    {
+        Balanced = 0,
+        High = 1,
+        LowPower = 2
+    };
+
     enum class BluetoothState : std::int32_t
     {
         Unknown = 0,
@@ -152,7 +159,12 @@ namespace gm_enums
         ClassicPairing = 17,
         ClassicDiscoverable = 18,
         ClassicDiscoverableStop = 19,
-        PermissionRequest = 20
+        PermissionRequest = 20,
+        LeMtuRequest = 21,
+        LeReadRssi = 22,
+        LeConnectionPriority = 23,
+        RequestEnable = 24,
+        PairedDevicesQuery = 25
     };
 
 }
@@ -164,8 +176,10 @@ namespace gm_structs
     struct BluetoothLeAdvertiseSettings;
     struct BluetoothLeAdvertiseServiceData;
     struct BluetoothLeAdvertiseManufacturerData;
+    struct BluetoothLeScanFilter;
     struct BluetoothLeCharacteristicDefinition;
     struct BluetoothLeAdvertiseData;
+    struct BluetoothLeAdvertisement;
     struct BluetoothLeServiceDefinition;
 
     struct BluetoothLeDescriptorDefinition
@@ -191,6 +205,13 @@ namespace gm_structs
         std::vector<std::uint8_t> data;
     };
 
+    struct BluetoothLeScanFilter
+    {
+        std::optional<std::string> service_uuid;
+        std::optional<std::string> name;
+        std::optional<std::int32_t> company_id;
+    };
+
     struct BluetoothLeCharacteristicDefinition
     {
         std::string uuid;
@@ -207,6 +228,14 @@ namespace gm_structs
         std::vector<std::string> service_uuids;
         std::vector<gm_structs::BluetoothLeAdvertiseServiceData> service_data;
         std::vector<gm_structs::BluetoothLeAdvertiseManufacturerData> manufacturer_data;
+    };
+
+    struct BluetoothLeAdvertisement
+    {
+        std::vector<std::string> service_uuids;
+        std::vector<gm_structs::BluetoothLeAdvertiseServiceData> service_data;
+        std::vector<gm_structs::BluetoothLeAdvertiseManufacturerData> manufacturer_data;
+        std::optional<std::int32_t> tx_power;
     };
 
     struct BluetoothLeServiceDefinition
@@ -282,6 +311,24 @@ namespace gm::wire::codec
     }
 
     template<>
+    inline void writeValue<gm_structs::BluetoothLeScanFilter>(gm::byteio::IByteWriter& _buf, const gm_structs::BluetoothLeScanFilter& obj)
+    {
+        gm::wire::codec::writeValue(_buf, obj.service_uuid);
+        gm::wire::codec::writeValue(_buf, obj.name);
+        gm::wire::codec::writeValue(_buf, obj.company_id);
+    }
+
+    template<>
+    inline gm_structs::BluetoothLeScanFilter readValue<gm_structs::BluetoothLeScanFilter>(gm::byteio::BufferReader& _buf)
+    {
+        gm_structs::BluetoothLeScanFilter obj;
+        obj.service_uuid = gm::wire::codec::readOptional<std::string>(_buf);
+        obj.name = gm::wire::codec::readOptional<std::string>(_buf);
+        obj.company_id = gm::wire::codec::readOptional<std::int32_t>(_buf);
+        return obj;
+    }
+
+    template<>
     inline void writeValue<gm_structs::BluetoothLeCharacteristicDefinition>(gm::byteio::IByteWriter& _buf, const gm_structs::BluetoothLeCharacteristicDefinition& obj)
     {
         gm::wire::codec::writeValue(_buf, obj.uuid);
@@ -322,6 +369,26 @@ namespace gm::wire::codec
         obj.service_uuids = gm::wire::codec::readVector<std::string>(_buf);
         obj.service_data = gm::wire::codec::readVector<gm_structs::BluetoothLeAdvertiseServiceData>(_buf);
         obj.manufacturer_data = gm::wire::codec::readVector<gm_structs::BluetoothLeAdvertiseManufacturerData>(_buf);
+        return obj;
+    }
+
+    template<>
+    inline void writeValue<gm_structs::BluetoothLeAdvertisement>(gm::byteio::IByteWriter& _buf, const gm_structs::BluetoothLeAdvertisement& obj)
+    {
+        gm::wire::codec::writeValue(_buf, obj.service_uuids);
+        gm::wire::codec::writeValue(_buf, obj.service_data);
+        gm::wire::codec::writeValue(_buf, obj.manufacturer_data);
+        gm::wire::codec::writeValue(_buf, obj.tx_power);
+    }
+
+    template<>
+    inline gm_structs::BluetoothLeAdvertisement readValue<gm_structs::BluetoothLeAdvertisement>(gm::byteio::BufferReader& _buf)
+    {
+        gm_structs::BluetoothLeAdvertisement obj;
+        obj.service_uuids = gm::wire::codec::readVector<std::string>(_buf);
+        obj.service_data = gm::wire::codec::readVector<gm_structs::BluetoothLeAdvertiseServiceData>(_buf);
+        obj.manufacturer_data = gm::wire::codec::readVector<gm_structs::BluetoothLeAdvertiseManufacturerData>(_buf);
+        obj.tx_power = gm::wire::codec::readOptional<std::int32_t>(_buf);
         return obj;
     }
 
@@ -374,24 +441,38 @@ namespace gm::wire::details
     };
 
     template<>
-    struct gm_struct_traits<gm_structs::BluetoothLeCharacteristicDefinition>
+    struct gm_struct_traits<gm_structs::BluetoothLeScanFilter>
     {
         static constexpr bool is_gm_struct = true;
         static constexpr std::uint32_t codec_id = 4;
     };
 
     template<>
-    struct gm_struct_traits<gm_structs::BluetoothLeAdvertiseData>
+    struct gm_struct_traits<gm_structs::BluetoothLeCharacteristicDefinition>
     {
         static constexpr bool is_gm_struct = true;
         static constexpr std::uint32_t codec_id = 5;
     };
 
     template<>
-    struct gm_struct_traits<gm_structs::BluetoothLeServiceDefinition>
+    struct gm_struct_traits<gm_structs::BluetoothLeAdvertiseData>
     {
         static constexpr bool is_gm_struct = true;
         static constexpr std::uint32_t codec_id = 6;
+    };
+
+    template<>
+    struct gm_struct_traits<gm_structs::BluetoothLeAdvertisement>
+    {
+        static constexpr bool is_gm_struct = true;
+        static constexpr std::uint32_t codec_id = 7;
+    };
+
+    template<>
+    struct gm_struct_traits<gm_structs::BluetoothLeServiceDefinition>
+    {
+        static constexpr bool is_gm_struct = true;
+        static constexpr std::uint32_t codec_id = 8;
     };
 
 }
@@ -410,7 +491,8 @@ namespace gm::wire::details
 - (bool)bluetooth_feature_is_supported:(gm_enums::BluetoothFeature)feature;
 - (gm_enums::BluetoothPermissionStatus)bluetooth_permission_get_status;
 - (gm_enums::BluetoothError)bluetooth_permission_request:(gm::wire::GMFunction)callback;
-- (gm_enums::BluetoothError)bluetooth_le_scan_start:(bool)active;
+- (gm_enums::BluetoothError)bluetooth_request_enable:(gm::wire::GMFunction)callback;
+- (gm_enums::BluetoothError)bluetooth_le_scan_start:(bool)active filters:(const std::vector<gm_structs::BluetoothLeScanFilter>&)filters;
 - (gm_enums::BluetoothError)bluetooth_le_scan_stop;
 - (bool)bluetooth_le_scan_is_running;
 - (gm_enums::BluetoothError)bluetooth_classic_scan_start;
@@ -428,6 +510,10 @@ namespace gm::wire::details
 - (bool)bluetooth_device_has_rssi:(std::uint64_t)device;
 - (std::int32_t)bluetooth_device_get_rssi:(std::uint64_t)device;
 - (bool)bluetooth_device_is_connectable:(std::uint64_t)device;
+- (gm_structs::BluetoothLeAdvertisement)bluetooth_device_get_advertisement:(std::uint64_t)device;
+- (std::uint64_t)bluetooth_device_from_id:(std::string_view)id;
+- (gm_enums::BluetoothError)bluetooth_le_connected_devices_query:(const std::vector<std::string_view>&)service_uuids callback:(gm::wire::GMFunction)callback;
+- (gm_enums::BluetoothError)bluetooth_paired_devices_query:(gm::wire::GMFunction)callback;
 - (std::uint64_t)bluetooth_classic_connect:(std::uint64_t)device service_uuid:(std::string_view)service_uuid callback:(gm::wire::GMFunction)callback;
 - (gm_enums::BluetoothError)bluetooth_classic_disconnect:(std::uint64_t)connection;
 - (bool)bluetooth_classic_connection_is_valid:(std::uint64_t)connection;
@@ -450,6 +536,10 @@ namespace gm::wire::details
 - (bool)bluetooth_le_connection_is_valid:(std::uint64_t)connection;
 - (bool)bluetooth_le_connection_is_connected:(std::uint64_t)connection;
 - (std::uint64_t)bluetooth_le_connection_get_device:(std::uint64_t)connection;
+- (std::int32_t)bluetooth_le_connection_get_mtu:(std::uint64_t)connection;
+- (gm_enums::BluetoothError)bluetooth_le_connection_request_mtu:(std::uint64_t)connection mtu:(std::int32_t)mtu callback:(gm::wire::GMFunction)callback;
+- (gm_enums::BluetoothError)bluetooth_le_connection_read_rssi:(std::uint64_t)connection callback:(gm::wire::GMFunction)callback;
+- (gm_enums::BluetoothError)bluetooth_le_connection_request_priority:(std::uint64_t)connection priority:(gm_enums::BluetoothLeConnectionPriority)priority;
 - (gm_enums::BluetoothError)bluetooth_le_services_discover:(std::uint64_t)connection callback:(gm::wire::GMFunction)callback;
 - (std::int32_t)bluetooth_le_service_get_count:(std::uint64_t)connection;
 - (std::uint64_t)bluetooth_le_service_get_at:(std::uint64_t)connection index:(std::int32_t)index;
@@ -521,7 +611,8 @@ namespace gm::wire::details
 - (double)__EXT_NATIVE__bluetooth_feature_is_supported:(char*)__arg_buffer arg1:(double)__arg_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_permission_get_status:(char*)__ret_buffer arg1:(double)__ret_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_permission_request:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
-- (double)__EXT_NATIVE__bluetooth_le_scan_start:(double)active arg1:(char*)__ret_buffer arg2:(double)__ret_buffer_length;
+- (double)__EXT_NATIVE__bluetooth_request_enable:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
+- (double)__EXT_NATIVE__bluetooth_le_scan_start:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_le_scan_stop:(char*)__ret_buffer arg1:(double)__ret_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_le_scan_is_running;
 - (double)__EXT_NATIVE__bluetooth_classic_scan_start:(char*)__ret_buffer arg1:(double)__ret_buffer_length;
@@ -539,6 +630,10 @@ namespace gm::wire::details
 - (double)__EXT_NATIVE__bluetooth_device_has_rssi:(char*)__arg_buffer arg1:(double)__arg_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_device_get_rssi:(char*)__arg_buffer arg1:(double)__arg_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_device_is_connectable:(char*)__arg_buffer arg1:(double)__arg_buffer_length;
+- (double)__EXT_NATIVE__bluetooth_device_get_advertisement:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
+- (double)__EXT_NATIVE__bluetooth_device_from_id:(char*)id arg1:(char*)__ret_buffer arg2:(double)__ret_buffer_length;
+- (double)__EXT_NATIVE__bluetooth_le_connected_devices_query:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
+- (double)__EXT_NATIVE__bluetooth_paired_devices_query:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_classic_connect:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_classic_disconnect:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_classic_connection_is_valid:(char*)__arg_buffer arg1:(double)__arg_buffer_length;
@@ -561,6 +656,10 @@ namespace gm::wire::details
 - (double)__EXT_NATIVE__bluetooth_le_connection_is_valid:(char*)__arg_buffer arg1:(double)__arg_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_le_connection_is_connected:(char*)__arg_buffer arg1:(double)__arg_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_le_connection_get_device:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
+- (double)__EXT_NATIVE__bluetooth_le_connection_get_mtu:(char*)__arg_buffer arg1:(double)__arg_buffer_length;
+- (double)__EXT_NATIVE__bluetooth_le_connection_request_mtu:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
+- (double)__EXT_NATIVE__bluetooth_le_connection_read_rssi:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
+- (double)__EXT_NATIVE__bluetooth_le_connection_request_priority:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_le_services_discover:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_le_service_get_count:(char*)__arg_buffer arg1:(double)__arg_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_le_service_get_at:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;

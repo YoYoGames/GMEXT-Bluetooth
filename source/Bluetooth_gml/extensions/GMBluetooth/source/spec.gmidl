@@ -150,6 +150,16 @@ enum BluetoothLeAdvertiseTxPower : int32 {
     High     = 3
 }
 
+/// How fast a client LE connection runs, traded against power. The members are
+/// Android's BluetoothGatt.CONNECTION_PRIORITY_* values; Windows 11 maps them to
+/// ThroughputOptimized, Balanced and PowerOptimized.
+[global, bind = typed_gml]
+enum BluetoothLeConnectionPriority : int32 {
+    Balanced = 0,
+    High     = 1,
+    LowPower = 2
+}
+
 /// Normalized local Bluetooth adapter/manager state.
 [global, bind = typed_gml]
 enum BluetoothState : int32 {
@@ -174,6 +184,11 @@ enum BluetoothState : int32 {
 /// ClassicPairing: bluetooth_pair works for that transport. ClassicDiscoverableStop:
 /// bluetooth_classic_discoverable_stop can end discoverability early.
 /// PermissionRequest: bluetooth_permission_request shows a system prompt.
+/// LeMtuRequest: bluetooth_le_connection_request_mtu negotiates the MTU asked for;
+/// elsewhere the platform negotiates it itself and the request reports that value.
+/// LeReadRssi: bluetooth_le_connection_read_rssi. LeConnectionPriority:
+/// bluetooth_le_connection_request_priority. RequestEnable: bluetooth_request_enable
+/// can turn the radio on. PairedDevicesQuery: bluetooth_paired_devices_query.
 [global, bind = typed_gml]
 enum BluetoothFeature : int32 {
     LeCentral                   = 0,
@@ -196,7 +211,12 @@ enum BluetoothFeature : int32 {
     ClassicPairing              = 17,
     ClassicDiscoverable         = 18,
     ClassicDiscoverableStop     = 19,
-    PermissionRequest           = 20
+    PermissionRequest           = 20,
+    LeMtuRequest                = 21,
+    LeReadRssi                  = 22,
+    LeConnectionPriority        = 23,
+    RequestEnable               = 24,
+    PairedDevicesQuery          = 25
 }
 
 // =============================================================================
@@ -299,6 +319,46 @@ class `[[BluetoothLeAdvertiseData]]` prototype Object {
 }
 
 // =============================================================================
+// BLE scanning definitions
+// =============================================================================
+
+/// What a device has advertised, merged over every advertisement and scan response
+/// since it entered the cache: service_uuids collects every UUID seen, a service
+/// data or manufacturer data entry is the latest for its uuid or company_id, and
+/// tx_power is the latest advertised TX Power Level in dBm, undefined when none
+/// was advertised. UUIDs are lowercase 128-bit.
+[global]
+class `[[BluetoothLeAdvertisement]]` prototype Object {
+    [field, type_hint=`string[]`]
+    property service_uuids : gmval { get; set; }
+
+    [field, type_hint=`BluetoothLeAdvertiseServiceData[]`]
+    property service_data : gmval { get; set; }
+
+    [field, type_hint=`BluetoothLeAdvertiseManufacturerData[]`]
+    property manufacturer_data : gmval { get; set; }
+
+    [field, type_hint=`int32?`]
+    property tx_power : gmval { get; set; }
+}
+
+/// One scan filter. A device matches when every field that is set matches its
+/// merged advertisement: service_uuid is among its advertised service UUIDs, name
+/// equals its advertised local name exactly, company_id (0-65535) has manufacturer
+/// data. A filter must set at least one field.
+[global]
+class `[[BluetoothLeScanFilter]]` prototype Object {
+    [field, type_hint=`string?`]
+    property service_uuid : gmval { get; set; }
+
+    [field, type_hint=`string?`]
+    property name : gmval { get; set; }
+
+    [field, type_hint=`int32?`]
+    property company_id : gmval { get; set; }
+}
+
+// =============================================================================
 // Lifecycle / event pump
 // =============================================================================
 
@@ -367,18 +427,37 @@ function bluetooth_permission_get_status(): gmval;
 [global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_permission_request(callback: func): gmval;
 
+/// Asks the user to turn the Bluetooth radio on (RequestEnable). callback(error_code,
+/// message) fires once: Ok when the radio is on, at once when it already was;
+/// BluetoothDisabled when the user declined or the radio stayed off; PermissionDenied
+/// when the system refused the request. Android shows the system dialog and needs the
+/// Bluetooth permission on Android 12+ (PermissionDenied before it starts). Windows
+/// asks for radio access and switches the radio on. Apple has no API to do this:
+/// NotSupported.
+[global, bind = typed_gml, type_hint=`BluetoothError`]
+function bluetooth_request_enable(callback: func): gmval;
+
 // =============================================================================
 // BLE discovery
 // =============================================================================
 
 /// active=true requests scan-response packets; active=false scans passively only
-/// where LePassiveScan is supported (Windows) and is ignored elsewhere. Fails before
-/// it starts with BluetoothDisabled, PermissionDenied or NotSupported; while the
-/// state is still Unknown the scan starts once the radio is ready. Android scans in
-/// low-latency mode and allows 5 scan starts per 30 seconds - a sixth starts but
-/// finds nothing - and pauses unfiltered scans while the screen is off.
+/// where LePassiveScan is supported (Windows) and is ignored elsewhere. filters is an
+/// array of BluetoothLeScanFilter: empty reports every device, otherwise a device
+/// enters the cache, firing device_found, once its advertisement matches any one of
+/// them. A bad filter (no field set, a malformed UUID, a company_id outside 0-65535)
+/// is InvalidArgument. Fails before it starts with BluetoothDisabled,
+/// PermissionDenied or NotSupported; while the state is still Unknown the scan starts
+/// once the radio is ready. A start while a scan runs is Ok and keeps the running
+/// scan's filters: stop it first to change them. Android filters in the Bluetooth
+/// stack, scans in low-latency mode and allows 5 scan starts per 30 seconds - a sixth
+/// starts but finds nothing - and pauses unfiltered scans while the screen is off.
+/// iOS needs every filter to set service_uuid to scan in the background.
 [global, bind = typed_gml, type_hint=`BluetoothError`]
-function bluetooth_le_scan_start(active: bool): gmval;
+function bluetooth_le_scan_start(
+    active: bool,
+    [type_hint=`BluetoothLeScanFilter[]`] filters: gmval
+): gmval;
 
 [global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_le_scan_stop(): gmval;
@@ -442,6 +521,43 @@ function bluetooth_device_get_rssi([type_hint=`uint64`] device: gmval): int32;
 
 [global, bind = typed_gml]
 function bluetooth_device_is_connectable([type_hint=`uint64`] device: gmval): bool;
+
+/// What the device has advertised (see BluetoothLeAdvertisement). Every field is
+/// empty for a Classic device, one never seen advertising, or an invalid handle.
+[global, bind = typed_gml, type_hint=`BluetoothLeAdvertisement`]
+function bluetooth_device_get_advertisement([type_hint=`uint64`] device: gmval): gmval;
+
+/// Returns the handle of the device an id from bluetooth_device_get_id names, so a
+/// remembered device can be connected without scanning. A device already in the cache
+/// keeps its handle; otherwise it enters the cache without firing device_found, and
+/// its name is empty until the platform knows it. 0 when it cannot, the reason in
+/// bluetooth_last_error_code(): InvalidArgument for an id from another platform or a
+/// malformed one; on Apple, BluetoothDisabled while the radio is off and NotFound
+/// for an LE id the system does not know.
+[global, bind = typed_gml, type_hint=`uint64`]
+function bluetooth_device_from_id(id: string): gmval;
+
+/// Lists the LE devices connected to this system, by this or another app.
+/// callback(error_code, message, devices), devices an array of device handles; a
+/// device not yet in the cache enters it without firing device_found. Android and
+/// Windows list every connected LE device and ignore service_uuids. Apple lists
+/// only those exposing one of service_uuids, and an empty array is InvalidArgument
+/// there.
+[global, bind = typed_gml, type_hint=`BluetoothError`]
+function bluetooth_le_connected_devices_query(
+    [type_hint=`string[]`] service_uuids: gmval,
+    callback: func
+): gmval;
+
+/// Lists the devices paired (bonded) with this system, without a scan
+/// (PairedDevicesQuery). callback(error_code, message, devices), devices an array of
+/// device handles; a device not yet in the cache enters it without firing
+/// device_found. Android lists Classic and LE bonds (a dual-mode device as one entry
+/// of each transport); Windows lists paired Classic and LE devices; macOS lists
+/// paired Classic devices; iOS is NotSupported. Classic scans report only devices
+/// that answered the inquiry, never the paired list.
+[global, bind = typed_gml, type_hint=`BluetoothError`]
+function bluetooth_paired_devices_query(callback: func): gmval;
 
 // =============================================================================
 // Bluetooth Classic RFCOMM client
@@ -628,6 +744,46 @@ function bluetooth_le_connection_is_connected(
 [global, bind = typed_gml, type_hint=`uint64`]
 function bluetooth_le_connection_get_device(
     [type_hint=`uint64`] connection: gmval
+): gmval;
+
+/// The ATT MTU of a connected client connection: a notification or a write without
+/// response carries at most mtu - 3 bytes. 23 until a larger one is negotiated; 0
+/// for a handle that is not a connected client connection.
+[global, bind = typed_gml]
+function bluetooth_le_connection_get_mtu(
+    [type_hint=`uint64`] connection: gmval
+): int32;
+
+/// Asks for an ATT MTU of mtu bytes (23-517, else InvalidArgument).
+/// callback(error_code, message, connection, mtu), mtu the MTU now in effect, which
+/// the peer may have lowered. Android negotiates it (LeMtuRequest). Windows and Apple
+/// negotiate the MTU themselves when the link opens: the callback fires at once with
+/// Ok and that MTU.
+[global, bind = typed_gml, type_hint=`BluetoothError`]
+function bluetooth_le_connection_request_mtu(
+    [type_hint=`uint64`] connection: gmval,
+    mtu: int32,
+    callback: func
+): gmval;
+
+/// Reads the signal strength of a connected client connection (LeReadRssi).
+/// callback(error_code, message, connection, rssi), rssi in dBm. Windows has no API
+/// for it: NotSupported.
+[global, bind = typed_gml, type_hint=`BluetoothError`]
+function bluetooth_le_connection_read_rssi(
+    [type_hint=`uint64`] connection: gmval,
+    callback: func
+): gmval;
+
+/// Asks the platform to run a client connection at priority, a
+/// BluetoothLeConnectionPriority (LeConnectionPriority). Ok means the request was
+/// made; neither platform reports what the link settled on. Android:
+/// requestConnectionPriority. Windows 11: preferred connection parameters, held for
+/// the life of the link; NotSupported on Windows 10. Apple: NotSupported.
+[global, bind = typed_gml, type_hint=`BluetoothError`]
+function bluetooth_le_connection_request_priority(
+    [type_hint=`uint64`] connection: gmval,
+    [type_hint=`BluetoothLeConnectionPriority`] priority: gmval
 ): gmval;
 
 // =============================================================================

@@ -127,9 +127,32 @@ GMEXPORT double __EXT_NATIVE__bluetooth_permission_request(char* __arg_buffer, d
     return 0;
 }
 
-GMEXPORT double __EXT_NATIVE__bluetooth_le_scan_start(double active, char* __ret_buffer, double __ret_buffer_length)
+GMEXPORT double __EXT_NATIVE__bluetooth_request_enable(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length)
 {
-    auto&& __result = bluetooth_le_scan_start(static_cast<bool>(active));
+    gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};
+
+    // field: callback, type: Function
+    gm::wire::GMFunction callback = gm::wire::codec::readFunction(__br, &__dispatch_queue);
+
+    auto&& __result = bluetooth_request_enable(callback);
+    gm::byteio::BufferWriter __bw{__ret_buffer, static_cast<size_t>(__ret_buffer_length)};
+
+    // return: __result, type: enum BluetoothError
+    gm::wire::codec::writeValue(__bw, __result);
+    return 0;
+}
+
+GMEXPORT double __EXT_NATIVE__bluetooth_le_scan_start(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length)
+{
+    gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};
+
+    // field: active, type: Bool
+    bool active = gm::wire::codec::readValue<bool>(__br);
+
+    // field: filters, type: struct BluetoothLeScanFilter[]
+    std::vector<gm_structs::BluetoothLeScanFilter> filters = gm::wire::codec::readVector<gm_structs::BluetoothLeScanFilter>(__br);
+
+    auto&& __result = bluetooth_le_scan_start(active, filters);
     gm::byteio::BufferWriter __bw{__ret_buffer, static_cast<size_t>(__ret_buffer_length)};
 
     // return: __result, type: enum BluetoothError
@@ -305,6 +328,64 @@ GMEXPORT double __EXT_NATIVE__bluetooth_device_is_connectable(char* __arg_buffer
 
     auto&& __result = bluetooth_device_is_connectable(device);
     return static_cast<double>(__result);
+}
+
+GMEXPORT double __EXT_NATIVE__bluetooth_device_get_advertisement(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length)
+{
+    gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};
+
+    // field: device, type: UInt64
+    std::uint64_t device = gm::wire::codec::readValue<std::uint64_t>(__br);
+
+    auto&& __result = bluetooth_device_get_advertisement(device);
+    gm::byteio::BufferWriter __bw{__ret_buffer, static_cast<size_t>(__ret_buffer_length)};
+
+    // return: __result, type: struct BluetoothLeAdvertisement
+    gm::wire::codec::writeValue(__bw, __result);
+    return 0;
+}
+
+GMEXPORT double __EXT_NATIVE__bluetooth_device_from_id(char* id, char* __ret_buffer, double __ret_buffer_length)
+{
+    auto&& __result = bluetooth_device_from_id(id);
+    gm::byteio::BufferWriter __bw{__ret_buffer, static_cast<size_t>(__ret_buffer_length)};
+
+    // return: __result, type: UInt64
+    gm::wire::codec::writeValue(__bw, __result);
+    return 0;
+}
+
+GMEXPORT double __EXT_NATIVE__bluetooth_le_connected_devices_query(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length)
+{
+    gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};
+
+    // field: service_uuids, type: String[]
+    std::vector<std::string_view> service_uuids = gm::wire::codec::readVector<std::string_view>(__br);
+
+    // field: callback, type: Function
+    gm::wire::GMFunction callback = gm::wire::codec::readFunction(__br, &__dispatch_queue);
+
+    auto&& __result = bluetooth_le_connected_devices_query(service_uuids, callback);
+    gm::byteio::BufferWriter __bw{__ret_buffer, static_cast<size_t>(__ret_buffer_length)};
+
+    // return: __result, type: enum BluetoothError
+    gm::wire::codec::writeValue(__bw, __result);
+    return 0;
+}
+
+GMEXPORT double __EXT_NATIVE__bluetooth_paired_devices_query(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length)
+{
+    gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};
+
+    // field: callback, type: Function
+    gm::wire::GMFunction callback = gm::wire::codec::readFunction(__br, &__dispatch_queue);
+
+    auto&& __result = bluetooth_paired_devices_query(callback);
+    gm::byteio::BufferWriter __bw{__ret_buffer, static_cast<size_t>(__ret_buffer_length)};
+
+    // return: __result, type: enum BluetoothError
+    gm::wire::codec::writeValue(__bw, __result);
+    return 0;
 }
 
 GMEXPORT double __EXT_NATIVE__bluetooth_classic_connect(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length)
@@ -595,6 +676,74 @@ GMEXPORT double __EXT_NATIVE__bluetooth_le_connection_get_device(char* __arg_buf
     gm::byteio::BufferWriter __bw{__ret_buffer, static_cast<size_t>(__ret_buffer_length)};
 
     // return: __result, type: UInt64
+    gm::wire::codec::writeValue(__bw, __result);
+    return 0;
+}
+
+GMEXPORT double __EXT_NATIVE__bluetooth_le_connection_get_mtu(char* __arg_buffer, double __arg_buffer_length)
+{
+    gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};
+
+    // field: connection, type: UInt64
+    std::uint64_t connection = gm::wire::codec::readValue<std::uint64_t>(__br);
+
+    auto&& __result = bluetooth_le_connection_get_mtu(connection);
+    return static_cast<double>(__result);
+}
+
+GMEXPORT double __EXT_NATIVE__bluetooth_le_connection_request_mtu(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length)
+{
+    gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};
+
+    // field: connection, type: UInt64
+    std::uint64_t connection = gm::wire::codec::readValue<std::uint64_t>(__br);
+
+    // field: mtu, type: Int32
+    std::int32_t mtu = gm::wire::codec::readValue<std::int32_t>(__br);
+
+    // field: callback, type: Function
+    gm::wire::GMFunction callback = gm::wire::codec::readFunction(__br, &__dispatch_queue);
+
+    auto&& __result = bluetooth_le_connection_request_mtu(connection, mtu, callback);
+    gm::byteio::BufferWriter __bw{__ret_buffer, static_cast<size_t>(__ret_buffer_length)};
+
+    // return: __result, type: enum BluetoothError
+    gm::wire::codec::writeValue(__bw, __result);
+    return 0;
+}
+
+GMEXPORT double __EXT_NATIVE__bluetooth_le_connection_read_rssi(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length)
+{
+    gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};
+
+    // field: connection, type: UInt64
+    std::uint64_t connection = gm::wire::codec::readValue<std::uint64_t>(__br);
+
+    // field: callback, type: Function
+    gm::wire::GMFunction callback = gm::wire::codec::readFunction(__br, &__dispatch_queue);
+
+    auto&& __result = bluetooth_le_connection_read_rssi(connection, callback);
+    gm::byteio::BufferWriter __bw{__ret_buffer, static_cast<size_t>(__ret_buffer_length)};
+
+    // return: __result, type: enum BluetoothError
+    gm::wire::codec::writeValue(__bw, __result);
+    return 0;
+}
+
+GMEXPORT double __EXT_NATIVE__bluetooth_le_connection_request_priority(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length)
+{
+    gm::byteio::BufferReader __br{__arg_buffer, static_cast<size_t>(__arg_buffer_length)};
+
+    // field: connection, type: UInt64
+    std::uint64_t connection = gm::wire::codec::readValue<std::uint64_t>(__br);
+
+    // field: priority, type: enum BluetoothLeConnectionPriority
+    gm_enums::BluetoothLeConnectionPriority priority = gm::wire::codec::readValue<gm_enums::BluetoothLeConnectionPriority>(__br);
+
+    auto&& __result = bluetooth_le_connection_request_priority(connection, priority);
+    gm::byteio::BufferWriter __bw{__ret_buffer, static_cast<size_t>(__ret_buffer_length)};
+
+    // return: __result, type: enum BluetoothError
     gm::wire::codec::writeValue(__bw, __result);
     return 0;
 }

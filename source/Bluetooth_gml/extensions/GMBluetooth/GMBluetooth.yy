@@ -1,5 +1,5 @@
 {
-  "$GMExtension": "",
+  "$GMExtension": "v1",
   "%Name": "GMBluetooth",
   "androidactivityinject": null,
   "androidclassname": "GMBluetooth",
@@ -235,14 +235,35 @@
         },
         {
           "$GMExtensionFunction": "",
-          "%Name": "__bluetooth_le_scan_start",
-          "argCount": 3,
+          "%Name": "__bluetooth_request_enable",
+          "argCount": 4,
           "args": [
+            1,
             2,
             1,
             2
           ],
-          "documentation": "@param {Real} active\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
+          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
+          "externalName": "__EXT_NATIVE__bluetooth_request_enable",
+          "help": "",
+          "hidden": true,
+          "kind": 4,
+          "name": "__bluetooth_request_enable",
+          "resourceType": "GMExtensionFunction",
+          "resourceVersion": "2.0",
+          "returnType": 2
+        },
+        {
+          "$GMExtensionFunction": "",
+          "%Name": "__bluetooth_le_scan_start",
+          "argCount": 4,
+          "args": [
+            1,
+            2,
+            1,
+            2
+          ],
+          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
           "externalName": "__EXT_NATIVE__bluetooth_le_scan_start",
           "help": "",
           "hidden": true,
@@ -545,6 +566,85 @@
           "hidden": true,
           "kind": 4,
           "name": "__bluetooth_device_is_connectable",
+          "resourceType": "GMExtensionFunction",
+          "resourceVersion": "2.0",
+          "returnType": 2
+        },
+        {
+          "$GMExtensionFunction": "",
+          "%Name": "__bluetooth_device_get_advertisement",
+          "argCount": 4,
+          "args": [
+            1,
+            2,
+            1,
+            2
+          ],
+          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
+          "externalName": "__EXT_NATIVE__bluetooth_device_get_advertisement",
+          "help": "",
+          "hidden": true,
+          "kind": 4,
+          "name": "__bluetooth_device_get_advertisement",
+          "resourceType": "GMExtensionFunction",
+          "resourceVersion": "2.0",
+          "returnType": 2
+        },
+        {
+          "$GMExtensionFunction": "",
+          "%Name": "__bluetooth_device_from_id",
+          "argCount": 3,
+          "args": [
+            1,
+            1,
+            2
+          ],
+          "documentation": "@param {String} id\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
+          "externalName": "__EXT_NATIVE__bluetooth_device_from_id",
+          "help": "",
+          "hidden": true,
+          "kind": 4,
+          "name": "__bluetooth_device_from_id",
+          "resourceType": "GMExtensionFunction",
+          "resourceVersion": "2.0",
+          "returnType": 2
+        },
+        {
+          "$GMExtensionFunction": "",
+          "%Name": "__bluetooth_le_connected_devices_query",
+          "argCount": 4,
+          "args": [
+            1,
+            2,
+            1,
+            2
+          ],
+          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
+          "externalName": "__EXT_NATIVE__bluetooth_le_connected_devices_query",
+          "help": "",
+          "hidden": true,
+          "kind": 4,
+          "name": "__bluetooth_le_connected_devices_query",
+          "resourceType": "GMExtensionFunction",
+          "resourceVersion": "2.0",
+          "returnType": 2
+        },
+        {
+          "$GMExtensionFunction": "",
+          "%Name": "__bluetooth_paired_devices_query",
+          "argCount": 4,
+          "args": [
+            1,
+            2,
+            1,
+            2
+          ],
+          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
+          "externalName": "__EXT_NATIVE__bluetooth_paired_devices_query",
+          "help": "",
+          "hidden": true,
+          "kind": 4,
+          "name": "__bluetooth_paired_devices_query",
           "resourceType": "GMExtensionFunction",
           "resourceVersion": "2.0",
           "returnType": 2
@@ -954,6 +1054,84 @@
           "hidden": true,
           "kind": 4,
           "name": "__bluetooth_le_connection_get_device",
+          "resourceType": "GMExtensionFunction",
+          "resourceVersion": "2.0",
+          "returnType": 2
+        },
+        {
+          "$GMExtensionFunction": "",
+          "%Name": "__bluetooth_le_connection_get_mtu",
+          "argCount": 2,
+          "args": [
+            1,
+            2
+          ],
+          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@returns {Real}",
+          "externalName": "__EXT_NATIVE__bluetooth_le_connection_get_mtu",
+          "help": "",
+          "hidden": true,
+          "kind": 4,
+          "name": "__bluetooth_le_connection_get_mtu",
+          "resourceType": "GMExtensionFunction",
+          "resourceVersion": "2.0",
+          "returnType": 2
+        },
+        {
+          "$GMExtensionFunction": "",
+          "%Name": "__bluetooth_le_connection_request_mtu",
+          "argCount": 4,
+          "args": [
+            1,
+            2,
+            1,
+            2
+          ],
+          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
+          "externalName": "__EXT_NATIVE__bluetooth_le_connection_request_mtu",
+          "help": "",
+          "hidden": true,
+          "kind": 4,
+          "name": "__bluetooth_le_connection_request_mtu",
+          "resourceType": "GMExtensionFunction",
+          "resourceVersion": "2.0",
+          "returnType": 2
+        },
+        {
+          "$GMExtensionFunction": "",
+          "%Name": "__bluetooth_le_connection_read_rssi",
+          "argCount": 4,
+          "args": [
+            1,
+            2,
+            1,
+            2
+          ],
+          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
+          "externalName": "__EXT_NATIVE__bluetooth_le_connection_read_rssi",
+          "help": "",
+          "hidden": true,
+          "kind": 4,
+          "name": "__bluetooth_le_connection_read_rssi",
+          "resourceType": "GMExtensionFunction",
+          "resourceVersion": "2.0",
+          "returnType": 2
+        },
+        {
+          "$GMExtensionFunction": "",
+          "%Name": "__bluetooth_le_connection_request_priority",
+          "argCount": 4,
+          "args": [
+            1,
+            2,
+            1,
+            2
+          ],
+          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
+          "externalName": "__EXT_NATIVE__bluetooth_le_connection_request_priority",
+          "help": "",
+          "hidden": true,
+          "kind": 4,
+          "name": "__bluetooth_le_connection_request_priority",
           "resourceType": "GMExtensionFunction",
           "resourceVersion": "2.0",
           "returnType": 2
@@ -2028,8 +2206,10 @@
     }
   ],
   "license": "",
+  "maccodeinjection": "",
   "maccompilerflags": "",
   "maclinkerflags": "-ObjC",
+  "macProps": false,
   "macsourcedir": "",
   "name": "GMBluetooth",
   "options": [

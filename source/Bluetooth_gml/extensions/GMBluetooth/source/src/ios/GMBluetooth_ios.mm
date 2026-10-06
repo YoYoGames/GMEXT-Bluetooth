@@ -23,7 +23,9 @@
 - (gm_enums::BluetoothPermissionStatus)bluetooth_permission_get_status { return ::bluetooth_permission_get_status(); }
 - (gm_enums::BluetoothError)bluetooth_permission_request:(gm::wire::GMFunction)callback { return ::bluetooth_permission_request(callback); }
 
-- (gm_enums::BluetoothError)bluetooth_le_scan_start:(bool)active { return ::bluetooth_le_scan_start(active); }
+- (gm_enums::BluetoothError)bluetooth_request_enable:(gm::wire::GMFunction)callback { return ::bluetooth_request_enable(callback); }
+
+- (gm_enums::BluetoothError)bluetooth_le_scan_start:(bool)active filters:(const std::vector<gm_structs::BluetoothLeScanFilter>&)filters { return ::bluetooth_le_scan_start(active, filters); }
 - (gm_enums::BluetoothError)bluetooth_le_scan_stop { return ::bluetooth_le_scan_stop(); }
 - (bool)bluetooth_le_scan_is_running { return ::bluetooth_le_scan_is_running(); }
 
@@ -43,6 +45,10 @@
 - (bool)bluetooth_device_has_rssi:(std::uint64_t)device { return ::bluetooth_device_has_rssi(device); }
 - (std::int32_t)bluetooth_device_get_rssi:(std::uint64_t)device { return ::bluetooth_device_get_rssi(device); }
 - (bool)bluetooth_device_is_connectable:(std::uint64_t)device { return ::bluetooth_device_is_connectable(device); }
+- (gm_structs::BluetoothLeAdvertisement)bluetooth_device_get_advertisement:(std::uint64_t)device { return ::bluetooth_device_get_advertisement(device); }
+- (std::uint64_t)bluetooth_device_from_id:(std::string_view)id { return ::bluetooth_device_from_id(id); }
+- (gm_enums::BluetoothError)bluetooth_le_connected_devices_query:(const std::vector<std::string_view>&)service_uuids callback:(gm::wire::GMFunction)callback { return ::bluetooth_le_connected_devices_query(service_uuids, callback); }
+- (gm_enums::BluetoothError)bluetooth_paired_devices_query:(gm::wire::GMFunction)callback { return ::bluetooth_paired_devices_query(callback); }
 
 - (std::uint64_t)bluetooth_classic_connect:(std::uint64_t)device service_uuid:(std::string_view)service_uuid callback:(gm::wire::GMFunction)callback { return ::bluetooth_classic_connect(device, service_uuid, callback); }
 - (gm_enums::BluetoothError)bluetooth_classic_disconnect:(std::uint64_t)connection { return ::bluetooth_classic_disconnect(connection); }
@@ -70,6 +76,10 @@
 - (bool)bluetooth_le_connection_is_valid:(std::uint64_t)connection { return ::bluetooth_le_connection_is_valid(connection); }
 - (bool)bluetooth_le_connection_is_connected:(std::uint64_t)connection { return ::bluetooth_le_connection_is_connected(connection); }
 - (std::uint64_t)bluetooth_le_connection_get_device:(std::uint64_t)connection { return ::bluetooth_le_connection_get_device(connection); }
+- (std::int32_t)bluetooth_le_connection_get_mtu:(std::uint64_t)connection { return ::bluetooth_le_connection_get_mtu(connection); }
+- (gm_enums::BluetoothError)bluetooth_le_connection_request_mtu:(std::uint64_t)connection mtu:(std::int32_t)mtu callback:(gm::wire::GMFunction)callback { return ::bluetooth_le_connection_request_mtu(connection, mtu, callback); }
+- (gm_enums::BluetoothError)bluetooth_le_connection_read_rssi:(std::uint64_t)connection callback:(gm::wire::GMFunction)callback { return ::bluetooth_le_connection_read_rssi(connection, callback); }
+- (gm_enums::BluetoothError)bluetooth_le_connection_request_priority:(std::uint64_t)connection priority:(gm_enums::BluetoothLeConnectionPriority)priority { return ::bluetooth_le_connection_request_priority(connection, priority); }
 - (gm_enums::BluetoothError)bluetooth_le_services_discover:(std::uint64_t)connection callback:(gm::wire::GMFunction)callback { return ::bluetooth_le_services_discover(connection, callback); }
 - (std::int32_t)bluetooth_le_service_get_count:(std::uint64_t)connection { return ::bluetooth_le_service_get_count(connection); }
 - (std::uint64_t)bluetooth_le_service_get_at:(std::uint64_t)connection index:(std::int32_t)index { return ::bluetooth_le_service_get_at(connection, index); }

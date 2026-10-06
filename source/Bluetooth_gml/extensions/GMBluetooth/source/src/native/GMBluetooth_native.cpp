@@ -113,6 +113,134 @@ namespace
         }
     }
 
+    // Every request_enable callback waiting for the radio; one answer fires
+    // them all, so a second request while the dialog is up just waits.
+    std::mutex g_pending_enable_mutex;
+    std::vector<GMFunction> g_pending_enable_callbacks;
+
+    void fire_enable_callbacks(Error error, const std::string& message)
+    {
+        std::vector<GMFunction> callbacks;
+        { std::scoped_lock lock(g_pending_enable_mutex); callbacks.swap(g_pending_enable_callbacks); }
+        for (const auto& callback : callbacks)
+        {
+            try
+            {
+                // callback(error_code, message)
+                callback.call(static_cast<double>(error), message);
+            }
+            catch (const std::exception& e)
+            {
+                GMBT_LOG("Error dispatching request_enable callback: %s", e.what());
+            }
+        }
+    }
+
+    // The connected and paired device queries waiting for their answer, by the
+    // query id the backend echoes on its DevicesQueried event.
+    std::mutex g_pending_query_mutex;
+    std::uint64_t g_next_query = 1;
+    std::map<std::uint64_t, GMFunction> g_pending_query_callbacks;
+
+    void fire_query_callback(const GMFunction& callback, Error error, const std::string& message,
+        const std::vector<double>& devices)
+    {
+        if (!callback)
+            return;
+        try
+        {
+            // callback(error_code, message, devices)
+            callback.call(static_cast<double>(error), message, devices);
+        }
+        catch (const std::exception& e)
+        {
+            GMBT_LOG("Error dispatching device query callback: %s", e.what());
+        }
+    }
+
+    std::string canonical_uuid(std::string_view uuid);
+
+    // A device's advertisement record keeps at most this many service UUIDs,
+    // and as many service data and manufacturer entries; a peripheral cycling
+    // through keys cannot grow it further.
+    constexpr std::size_t kMaxAdvertisementEntries = 32;
+
+    // Folds one packet into a device's advertisement record (R1-138): service
+    // UUIDs collect, a service data or manufacturer entry is replaced by the
+    // newer one for its key, and so is the TX power.
+    void merge_advertisement(std::optional<LeAdvertisement>& stored, const LeAdvertisement& update)
+    {
+        if (!stored)
+            stored.emplace();
+
+        for (const auto& uuid : update.service_uuids)
+        {
+            std::string canonical = canonical_uuid(uuid);
+            auto& uuids = stored->service_uuids;
+            if (std::find(uuids.begin(), uuids.end(), canonical) == uuids.end() && uuids.size() < kMaxAdvertisementEntries)
+                uuids.push_back(std::move(canonical));
+        }
+
+        for (const auto& entry : update.service_data)
+        {
+            const std::string uuid = canonical_uuid(entry.uuid);
+            auto& entries = stored->service_data;
+            const auto it = std::find_if(entries.begin(), entries.end(),
+                [&](const LeAdvertiseServiceData& e) { return e.uuid == uuid; });
+            if (it != entries.end())
+                it->data = entry.data;
+            else if (entries.size() < kMaxAdvertisementEntries)
+                entries.push_back(LeAdvertiseServiceData{ uuid, entry.data });
+        }
+
+        for (const auto& entry : update.manufacturer_data)
+        {
+            auto& entries = stored->manufacturer_data;
+            const auto it = std::find_if(entries.begin(), entries.end(),
+                [&](const LeAdvertiseManufacturerData& e) { return e.company_id == entry.company_id; });
+            if (it != entries.end())
+                it->data = entry.data;
+            else if (entries.size() < kMaxAdvertisementEntries)
+                entries.push_back(entry);
+        }
+
+        if (update.tx_power)
+            stored->tx_power = update.tx_power;
+    }
+
+    // A device as it enters a cache: its advertisement in canonical form.
+    DiscoveredDevice normalized_device(const DiscoveredDevice& device)
+    {
+        DiscoveredDevice out = device;
+        out.advertisement.reset();
+        if (device.advertisement)
+            merge_advertisement(out.advertisement, *device.advertisement);
+        return out;
+    }
+
+    // An advertisement or a scan response carries only some fields (no
+    // LocalName, connectable false), so an update overwrites only what it
+    // actually carries.
+    void merge_device(DiscoveredDevice& stored, const DiscoveredDevice& update)
+    {
+        stored.transport = update.transport;
+        if (!update.name.empty())
+            stored.name = update.name;
+        if (update.address_available)
+        {
+            stored.address = update.address;
+            stored.address_available = true;
+        }
+        if (update.rssi_available)
+        {
+            stored.rssi = update.rssi;
+            stored.rssi_available = true;
+        }
+        stored.connectable = stored.connectable || update.connectable;
+        if (update.advertisement)
+            merge_advertisement(stored.advertisement, *update.advertisement);
+    }
+
     // Device handles count up and are never reused: clear() forgets every
     // device, and one found again afterwards gets a new handle, so a handle a
     // connection or a pending pair still holds can never name another device.
@@ -126,14 +254,14 @@ namespace
             std::scoped_lock lock(mutex_);
             if (const auto it = by_id_.find(device.id); it != by_id_.end())
             {
-                merge(devices_.at(it->second), device);
+                merge_device(devices_.at(it->second), device);
                 if (created)
                     *created = false;
                 return it->second;
             }
 
             const std::uint64_t handle = next_handle_++;
-            devices_.emplace(handle, device);
+            devices_.emplace(handle, normalized_device(device));
             by_id_.emplace(device.id, handle);
             order_.push_back(handle);
             if (created)
@@ -180,28 +308,15 @@ namespace
             return it->second;
         }
 
-    private:
-        // An advertisement or a scan response carries only some fields (no
-        // LocalName, connectable false), so an update overwrites only what it
-        // actually carries.
-        static void merge(DiscoveredDevice& stored, const DiscoveredDevice& update)
+        // 0 when no cached device has this id.
+        std::uint64_t find_id(const std::string& id) const
         {
-            stored.transport = update.transport;
-            if (!update.name.empty())
-                stored.name = update.name;
-            if (update.address_available)
-            {
-                stored.address = update.address;
-                stored.address_available = true;
-            }
-            if (update.rssi_available)
-            {
-                stored.rssi = update.rssi;
-                stored.rssi_available = true;
-            }
-            stored.connectable = stored.connectable || update.connectable;
+            std::scoped_lock lock(mutex_);
+            const auto it = by_id_.find(id);
+            return it != by_id_.end() ? it->second : 0;
         }
 
+    private:
         mutable std::mutex mutex_;
         std::unordered_map<std::uint64_t, DiscoveredDevice> devices_;
         std::unordered_map<std::string, std::uint64_t> by_id_;
@@ -210,6 +325,103 @@ namespace
     };
 
     DeviceManager g_device_manager;
+
+    // The filters of the LE scan that is running, and the devices it has heard
+    // that match none of them yet (R1-139). A device enters the cache, firing
+    // device_found, when its merged advertisement first matches: Windows reports
+    // an advertisement and its scan response separately, so a filter on a name
+    // in one and a service in the other matches only the merged record. The
+    // held devices are bounded, the oldest dropped, and emptied by every scan
+    // start and by bluetooth_device_clear.
+    class ScanFilterState
+    {
+    public:
+        void start(std::vector<LeScanFilter> filters)
+        {
+            std::scoped_lock lock(mutex_);
+            filters_ = std::move(filters);
+            pending_.clear();
+            order_.clear();
+        }
+
+        void clear_pending()
+        {
+            std::scoped_lock lock(mutex_);
+            pending_.clear();
+            order_.clear();
+        }
+
+        // The device to put in the cache now, merged with what was held for
+        // it, or nothing while it still matches no filter.
+        std::optional<DiscoveredDevice> admit(const DiscoveredDevice& device)
+        {
+            std::scoped_lock lock(mutex_);
+            if (filters_.empty())
+                return device;
+
+            auto it = pending_.find(device.id);
+            if (it == pending_.end())
+            {
+                if (pending_.size() >= kMaxPending && !order_.empty())
+                {
+                    pending_.erase(order_.front());
+                    order_.erase(order_.begin());
+                }
+                it = pending_.emplace(device.id, normalized_device(device)).first;
+                order_.push_back(device.id);
+            }
+            else
+            {
+                merge_device(it->second, device);
+            }
+
+            if (!matches_any(it->second))
+                return std::nullopt;
+
+            DiscoveredDevice admitted = std::move(it->second);
+            pending_.erase(it);
+            order_.erase(std::find(order_.begin(), order_.end(), admitted.id));
+            return admitted;
+        }
+
+    private:
+        static constexpr std::size_t kMaxPending = 256;
+
+        static bool matches(const LeScanFilter& filter, const DiscoveredDevice& device)
+        {
+            const LeAdvertisement empty;
+            const LeAdvertisement& advertisement = device.advertisement ? *device.advertisement : empty;
+            if (filter.service_uuid)
+            {
+                const auto& uuids = advertisement.service_uuids;
+                if (std::find(uuids.begin(), uuids.end(), *filter.service_uuid) == uuids.end())
+                    return false;
+            }
+            if (filter.name && device.name != *filter.name)
+                return false;
+            if (filter.company_id)
+            {
+                const auto& entries = advertisement.manufacturer_data;
+                if (std::none_of(entries.begin(), entries.end(),
+                    [&](const LeAdvertiseManufacturerData& e) { return e.company_id == *filter.company_id; }))
+                    return false;
+            }
+            return true;
+        }
+
+        bool matches_any(const DiscoveredDevice& device) const
+        {
+            return std::any_of(filters_.begin(), filters_.end(),
+                [&](const LeScanFilter& filter) { return matches(filter, device); });
+        }
+
+        std::mutex mutex_;
+        std::vector<LeScanFilter> filters_;
+        std::unordered_map<std::string, DiscoveredDevice> pending_;
+        std::vector<std::string> order_;
+    };
+
+    ScanFilterState g_scan_filters;
 
     // A Classic handle outlives a remote hang-up while the backend still holds
     // bytes the game has not read (R1-25), so the disconnect event only marks
@@ -753,6 +965,7 @@ namespace
         DescriptorWrite,
         AdvertiseStart,
         ServerAddService,
+        RssiRead,
     };
 
     const char* le_op_name(LeOpKind kind)
@@ -769,6 +982,7 @@ namespace
             case LeOpKind::DescriptorWrite:         return "le_descriptor_write";
             case LeOpKind::AdvertiseStart:          return "le_advertise_start";
             case LeOpKind::ServerAddService:        return "le_server_add_service";
+            case LeOpKind::RssiRead:                return "le_connection_read_rssi";
         }
         return "le_op";
     }
@@ -867,9 +1081,10 @@ namespace
 
     // Fires a taken op's callback with its usual arguments. Called with no lock
     // held, after the op has left the registry. value and size are the read's
-    // value id and byte count; 0 for every other op and every failure.
+    // value id and byte count, number an RSSI read's dBm; 0 for every other op
+    // and every failure.
     void fire_le_op(const PendingLeOp& op, Error error, const std::string& message = std::string(),
-        std::uint64_t value = 0, std::size_t size = 0)
+        std::uint64_t value = 0, std::size_t size = 0, std::int32_t number = 0)
     {
         if (!op.callback)
             return;
@@ -888,6 +1103,11 @@ namespace
                     // callback(error_code, message, handle, value, size)
                     op.callback.call(static_cast<double>(error), message, static_cast<double>(op.context),
                         static_cast<double>(value), static_cast<double>(size));
+                    break;
+                case LeOpKind::RssiRead:
+                    // callback(error_code, message, connection, rssi)
+                    op.callback.call(static_cast<double>(error), message, static_cast<double>(op.context),
+                        static_cast<double>(number));
                     break;
                 default:
                     // callback(error_code, message, handle)
@@ -947,6 +1167,7 @@ namespace
 
         std::uint64_t value = 0;
         std::size_t size = 0;
+        std::int32_t number = 0;
         if (event.error == Error::Ok)
         {
             const LeOpResult& result = event.result;
@@ -975,12 +1196,15 @@ namespace
                         value = g_values.add(result.value);
                     }
                     break;
+                case LeOpKind::RssiRead:
+                    number = result.number;
+                    break;
                 default:
                     break;
             }
         }
 
-        fire_le_op(*op, event.error, event.message, value, size);
+        fire_le_op(*op, event.error, event.message, value, size, number);
     }
 
     void fail_le_ops(std::vector<PendingLeOp> ops, Error error, const std::string& message)
@@ -1744,8 +1968,19 @@ namespace
     {
         CoreHooks hooks;
         hooks.upsert_device = [](const DiscoveredDevice& device) {
+            // Only LE scans report LE devices through this hook, so the scan's
+            // filters decide whether a new one enters the cache; one already in
+            // it keeps updating. 0 tells the scan path the device was held.
+            std::optional<DiscoveredDevice> admitted;
+            if (device.transport == Transport::LowEnergy && g_device_manager.find_id(device.id) == 0)
+            {
+                admitted = g_scan_filters.admit(device);
+                if (!admitted)
+                    return std::uint64_t{ 0 };
+            }
+
             bool created = false;
-            const std::uint64_t handle = g_device_manager.upsert_device(device, &created);
+            const std::uint64_t handle = g_device_manager.upsert_device(admitted ? *admitted : device, &created);
             if (!created)
                 return handle;
 
@@ -1886,6 +2121,45 @@ namespace
             if (event.type == BackendEventType::PermissionResult)
             {
                 fire_permission_callbacks(Error::Ok, std::string(), static_cast<PermissionStatus>(event.value));
+                return;
+            }
+
+            if (event.type == BackendEventType::EnableResult)
+            {
+                fire_enable_callbacks(event.error, event.message);
+                return;
+            }
+
+            // The devices a query found enter the cache without device_found,
+            // like a server central, and the callback gets their handles.
+            if (event.type == BackendEventType::DevicesQueried)
+            {
+                GMFunction callback;
+                {
+                    std::scoped_lock lock(g_pending_query_mutex);
+                    const auto it = g_pending_query_callbacks.find(event.op_id);
+                    if (it == g_pending_query_callbacks.end())
+                    {
+                        GMBT_LOG("device query %llu answered after shutdown, dropping",
+                            static_cast<unsigned long long>(event.op_id));
+                        g_dropped_events++;
+                        return;
+                    }
+                    callback = it->second;
+                    g_pending_query_callbacks.erase(it);
+                }
+
+                std::vector<double> devices;
+                if (event.error == Error::Ok)
+                {
+                    for (const auto& device : event.devices)
+                    {
+                        const double handle = static_cast<double>(g_device_manager.upsert_device(device));
+                        if (std::find(devices.begin(), devices.end(), handle) == devices.end())
+                            devices.push_back(handle);
+                    }
+                }
+                fire_query_callback(callback, event.error, event.message, devices);
                 return;
             }
 
@@ -2086,6 +2360,14 @@ void bluetooth_shutdown()
     }
 
     fire_permission_callbacks(Error::NotInitialized, message, PermissionStatus::Unknown);
+    fire_enable_callbacks(Error::NotInitialized, message);
+
+    std::map<std::uint64_t, GMFunction> query_callbacks;
+    { std::scoped_lock lock(g_pending_query_mutex); query_callbacks.swap(g_pending_query_callbacks); }
+    for (const auto& [query, callback] : query_callbacks)
+        fire_query_callback(callback, Error::NotInitialized, message, {});
+
+    g_scan_filters.start({});
 
     {
         std::scoped_lock lock(g_pending_le_server_requests_mutex);
@@ -2214,9 +2496,61 @@ BluetoothError bluetooth_permission_request(const gm::wire::GMFunction& callback
     return to_gm(error);
 }
 
-BluetoothError bluetooth_le_scan_start(bool active)
+BluetoothError bluetooth_request_enable(const gm::wire::GMFunction& callback)
 {
-    GMBT_LOG("BLE scan start requested (active=%d)", active ? 1 : 0);
+    if (!g_backend)
+    {
+        g_last_error = Error::NotInitialized;
+        g_last_error_message = "Bluetooth backend is not initialized";
+        return to_gm(Error::NotInitialized);
+    }
+
+    if (!g_backend->feature_supported(static_cast<std::int32_t>(BluetoothFeature::RequestEnable)))
+    {
+        g_last_error = Error::NotSupported;
+        g_last_error_message = "This platform cannot turn the Bluetooth radio on";
+        return to_gm(Error::NotSupported);
+    }
+
+    // Already on: the answer is known, so it fires at once (R1-143).
+    if (g_backend->current_bluetooth_state() == 5) // PoweredOn
+    {
+        try
+        {
+            if (callback)
+                callback.call(static_cast<double>(Error::Ok), std::string());
+        }
+        catch (const std::exception& e)
+        {
+            GMBT_LOG("Error dispatching request_enable callback: %s", e.what());
+        }
+        return to_gm(Error::Ok);
+    }
+
+    // One request at a time: a second one waits for the same answer.
+    bool first = false;
+    {
+        std::scoped_lock lock(g_pending_enable_mutex);
+        first = g_pending_enable_callbacks.empty();
+        g_pending_enable_callbacks.push_back(callback);
+    }
+    if (!first)
+        return to_gm(Error::Ok);
+
+    std::string message;
+    const Error error = g_backend->request_enable(message);
+    set_last_error(error, message);
+    if (error != Error::Ok)
+    {
+        std::scoped_lock lock(g_pending_enable_mutex);
+        g_pending_enable_callbacks.clear();
+    }
+    return to_gm(error);
+}
+
+BluetoothError bluetooth_le_scan_start(bool active, const std::vector<BluetoothLeScanFilter>& filters)
+{
+    GMBT_LOG("BLE scan start requested (active=%d, filters=%zu)", active ? 1 : 0, filters.size());
 
     if (!g_backend)
     {
@@ -2226,12 +2560,56 @@ BluetoothError bluetooth_le_scan_start(bool active)
         return to_gm(Error::NotInitialized);
     }
 
+    std::vector<LeScanFilter> checked;
+    checked.reserve(filters.size());
+    for (const auto& filter : filters)
+    {
+        if (!filter.service_uuid && !filter.name && !filter.company_id)
+        {
+            g_last_error = Error::InvalidArgument;
+            g_last_error_message = "A scan filter must set service_uuid, name or company_id";
+            return to_gm(Error::InvalidArgument);
+        }
+
+        LeScanFilter out;
+        if (filter.service_uuid)
+        {
+            if (!check_uuid(*filter.service_uuid))
+                return to_gm(g_last_error);
+            out.service_uuid = canonical_uuid(*filter.service_uuid);
+        }
+        out.name = filter.name;
+        if (filter.company_id)
+        {
+            if (*filter.company_id < 0 || *filter.company_id > 0xFFFF)
+            {
+                g_last_error = Error::InvalidArgument;
+                g_last_error_message = "A scan filter's company_id must be 0-65535";
+                return to_gm(Error::InvalidArgument);
+            }
+            out.company_id = static_cast<std::uint16_t>(*filter.company_id);
+        }
+        checked.push_back(std::move(out));
+    }
+
     if (!check_radio())
         return to_gm(g_last_error);
 
+    // A start while scanning starts nothing new and keeps that scan's filters.
+    if (g_backend->le_scan_is_running())
+    {
+        GMBT_LOG("BLE scan start: already running, filters unchanged");
+        return to_gm(Error::Ok);
+    }
+
+    // In place before the backend starts: results can arrive before it returns.
+    g_scan_filters.start(checked);
+
     std::string message;
-    const Error error = g_backend->le_scan_start(active, message);
+    const Error error = g_backend->le_scan_start(active, checked, message);
     set_last_error(error, message);
+    if (error != Error::Ok)
+        g_scan_filters.start({});
     GMBT_LOG("BLE scan start -> error=%d message='%s' | backend reports running=%d",
         static_cast<int>(error),
         message.c_str(),
@@ -2318,6 +2696,7 @@ void bluetooth_device_clear()
 {
     GMBT_LOG("clearing device cache (%d cached)", g_device_manager.get_count());
     g_device_manager.clear();
+    g_scan_filters.clear_pending();
 }
 
 int bluetooth_device_get_count()
@@ -2381,6 +2760,127 @@ bool bluetooth_device_is_connectable(std::uint64_t device)
 {
     const auto dev = g_device_manager.get_device(device);
     return dev ? dev->connectable : false;
+}
+
+BluetoothLeAdvertisement bluetooth_device_get_advertisement(std::uint64_t device)
+{
+    BluetoothLeAdvertisement out;
+    const auto dev = g_device_manager.get_device(device);
+    if (!dev || !dev->advertisement)
+        return out;
+
+    // Stored canonical and merged (R1-138).
+    const LeAdvertisement& advertisement = *dev->advertisement;
+    out.service_uuids = advertisement.service_uuids;
+    for (const auto& entry : advertisement.service_data)
+        out.service_data.push_back(BluetoothLeAdvertiseServiceData{ entry.uuid, entry.data });
+    for (const auto& entry : advertisement.manufacturer_data)
+        out.manufacturer_data.push_back(BluetoothLeAdvertiseManufacturerData{ static_cast<std::int32_t>(entry.company_id), entry.data });
+    out.tx_power = advertisement.tx_power;
+    return out;
+}
+
+std::uint64_t bluetooth_device_from_id(std::string_view id)
+{
+    if (!g_backend)
+    {
+        g_last_error = Error::NotInitialized;
+        g_last_error_message = "Bluetooth backend is not initialized";
+        return 0;
+    }
+
+    const std::string key(id);
+    if (const std::uint64_t handle = g_device_manager.find_id(key))
+        return handle;
+
+    // The backend spells the id the way it issues it, so the entry it builds
+    // may name a device already cached under that spelling: upsert keeps it.
+    DiscoveredDevice device;
+    std::string message;
+    const Error error = g_backend->device_from_id(key, device, message);
+    set_last_error(error, message);
+    if (error != Error::Ok)
+        return 0;
+
+    const std::uint64_t handle = g_device_manager.upsert_device(device);
+    GMBT_LOG("device from id '%s' -> handle=%llu", key.c_str(), static_cast<unsigned long long>(handle));
+    return handle;
+}
+
+namespace
+{
+    // Registers a device query's callback under a fresh id, asks the backend,
+    // and takes the callback back out if the backend refused before starting.
+    template <typename Start>
+    BluetoothError start_devices_query(const GMFunction& callback, Start start)
+    {
+        std::uint64_t query = 0;
+        {
+            std::scoped_lock lock(g_pending_query_mutex);
+            query = g_next_query++;
+            g_pending_query_callbacks.emplace(query, callback);
+        }
+
+        std::string message;
+        const Error error = start(query, message);
+        set_last_error(error, message);
+        if (error != Error::Ok)
+        {
+            std::scoped_lock lock(g_pending_query_mutex);
+            g_pending_query_callbacks.erase(query);
+        }
+        return to_gm(error);
+    }
+}
+
+BluetoothError bluetooth_le_connected_devices_query(const std::vector<std::string_view>& service_uuids, const gm::wire::GMFunction& callback)
+{
+    if (!g_backend)
+    {
+        g_last_error = Error::NotInitialized;
+        g_last_error_message = "Bluetooth backend is not initialized";
+        return to_gm(Error::NotInitialized);
+    }
+
+    std::vector<std::string> uuids;
+    uuids.reserve(service_uuids.size());
+    for (const auto uuid : service_uuids)
+    {
+        if (!check_uuid(uuid))
+            return to_gm(g_last_error);
+        uuids.push_back(canonical_uuid(uuid));
+    }
+
+    if (!check_radio())
+        return to_gm(g_last_error);
+
+    return start_devices_query(callback, [&](std::uint64_t query, std::string& message) {
+        return g_backend->le_connected_devices_query(query, uuids, message);
+    });
+}
+
+BluetoothError bluetooth_paired_devices_query(const gm::wire::GMFunction& callback)
+{
+    if (!g_backend)
+    {
+        g_last_error = Error::NotInitialized;
+        g_last_error_message = "Bluetooth backend is not initialized";
+        return to_gm(Error::NotInitialized);
+    }
+
+    if (!g_backend->feature_supported(static_cast<std::int32_t>(BluetoothFeature::PairedDevicesQuery)))
+    {
+        g_last_error = Error::NotSupported;
+        g_last_error_message = "Listing paired devices is not supported on this platform";
+        return to_gm(Error::NotSupported);
+    }
+
+    if (!check_radio())
+        return to_gm(g_last_error);
+
+    return start_devices_query(callback, [&](std::uint64_t query, std::string& message) {
+        return g_backend->paired_devices_query(query, message);
+    });
 }
 
 std::uint64_t bluetooth_classic_connect(std::uint64_t device, std::string_view service_uuid, const gm::wire::GMFunction& callback)
@@ -2941,6 +3441,132 @@ bool bluetooth_le_connection_is_connected(std::uint64_t connection)
 std::uint64_t bluetooth_le_connection_get_device(std::uint64_t connection)
 {
     return g_le_connection_manager.get_device(connection);
+}
+
+namespace
+{
+    // The shared pre-flight of the calls on a client connection: initialized,
+    // a client handle (a server connection is InvalidHandle), and the link up.
+    bool check_le_client_connection(std::uint64_t connection)
+    {
+        if (!g_backend)
+        {
+            g_last_error = Error::NotInitialized;
+            g_last_error_message = "Bluetooth backend is not initialized";
+            return false;
+        }
+        if (!g_le_connection_manager.is_valid(connection))
+        {
+            g_last_error = Error::InvalidHandle;
+            g_last_error_message = "Invalid LE connection handle";
+            return false;
+        }
+        return true;
+    }
+
+    bool check_le_connected(std::uint64_t connection)
+    {
+        if (g_backend->le_connection_is_connected(connection))
+            return true;
+        g_last_error = Error::Disconnected;
+        g_last_error_message = "The LE connection is not connected";
+        return false;
+    }
+
+    bool check_feature(BluetoothFeature feature, const char* message)
+    {
+        if (g_backend->feature_supported(static_cast<std::int32_t>(feature)))
+            return true;
+        g_last_error = Error::NotSupported;
+        g_last_error_message = message;
+        return false;
+    }
+}
+
+std::int32_t bluetooth_le_connection_get_mtu(std::uint64_t connection)
+{
+    if (!g_backend || !g_le_connection_manager.is_valid(connection) ||
+        !g_backend->le_connection_is_connected(connection))
+        return 0;
+    return g_backend->le_connection_mtu(connection);
+}
+
+BluetoothError bluetooth_le_connection_request_mtu(std::uint64_t connection, std::int32_t mtu, const gm::wire::GMFunction& callback)
+{
+    if (!check_le_client_connection(connection))
+        return to_gm(g_last_error);
+
+    if (mtu < 23 || mtu > 517)
+    {
+        g_last_error = Error::InvalidArgument;
+        g_last_error_message = "mtu must be 23-517";
+        return to_gm(Error::InvalidArgument);
+    }
+
+    if (!check_le_connected(connection))
+        return to_gm(g_last_error);
+
+    // Windows and Apple negotiate the MTU themselves when the link opens, and
+    // only Android can ask (LeMtuRequest, R1-140): answer with the one in effect.
+    const std::int32_t current = g_backend->le_connection_mtu(connection);
+    if (callback)
+    {
+        try
+        {
+            // callback(error_code, message, connection, mtu)
+            callback.call(static_cast<double>(Error::Ok), std::string(), static_cast<double>(connection),
+                static_cast<double>(current));
+        }
+        catch (const std::exception& e)
+        {
+            GMBT_LOG("Error dispatching request_mtu callback: %s", e.what());
+        }
+    }
+    return to_gm(Error::Ok);
+}
+
+BluetoothError bluetooth_le_connection_read_rssi(std::uint64_t connection, const gm::wire::GMFunction& callback)
+{
+    if (!check_le_client_connection(connection))
+        return to_gm(g_last_error);
+
+    if (!check_feature(BluetoothFeature::LeReadRssi, "Reading the RSSI of a connection is not supported on this platform") ||
+        !check_le_connected(connection))
+        return to_gm(g_last_error);
+
+    const auto op_id = g_le_ops.add(LeOpKind::RssiRead, callback, connection, connection);
+
+    std::string message;
+    const Error error = g_backend->le_read_rssi(op_id, connection, message);
+    set_last_error(error, message);
+
+    if (error != Error::Ok)
+        g_le_ops.erase(op_id);
+
+    return to_gm(error);
+}
+
+BluetoothError bluetooth_le_connection_request_priority(std::uint64_t connection, BluetoothLeConnectionPriority priority)
+{
+    if (!check_le_client_connection(connection))
+        return to_gm(g_last_error);
+
+    if (priority != BluetoothLeConnectionPriority::Balanced && priority != BluetoothLeConnectionPriority::High &&
+        priority != BluetoothLeConnectionPriority::LowPower)
+    {
+        g_last_error = Error::InvalidArgument;
+        g_last_error_message = "priority must be a BluetoothLeConnectionPriority";
+        return to_gm(Error::InvalidArgument);
+    }
+
+    if (!check_feature(BluetoothFeature::LeConnectionPriority, "Connection priority is not supported on this platform") ||
+        !check_le_connected(connection))
+        return to_gm(g_last_error);
+
+    std::string message;
+    const Error error = g_backend->le_request_connection_priority(connection, static_cast<std::int32_t>(priority), message);
+    set_last_error(error, message);
+    return to_gm(error);
 }
 
 // --- BLE GATT client: service / characteristic / descriptor discovery ---
