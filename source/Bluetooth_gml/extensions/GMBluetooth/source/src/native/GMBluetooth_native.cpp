@@ -26,6 +26,21 @@ namespace
     std::string g_last_error_message;
     Error g_last_error = Error::Ok;
 
+    BluetoothError to_gm(Error error)
+    {
+        return static_cast<BluetoothError>(error);
+    }
+
+    // last-error is the detail channel for a failed call: a success leaves
+    // whatever an earlier failure wrote.
+    void set_last_error(Error error, const std::string& message)
+    {
+        if (error == Error::Ok)
+            return;
+        g_last_error = error;
+        g_last_error_message = message;
+    }
+
     // The generated GML wrapper only checks buffer_exists, so offset and size are
     // validated here against the buffer's real length - the same rule as
     // Android's bufferRangeInvalid.
@@ -249,6 +264,14 @@ namespace
         {
             std::scoped_lock lock(mutex_);
             connections_.erase(handle);
+        }
+
+        // A handle from the same counter that names no client connection: the
+        // server side's connection to a remote central.
+        std::uint64_t reserve_handle()
+        {
+            std::scoped_lock lock(mutex_);
+            return next_handle_++;
         }
 
         // next_handle_ keeps counting, so a handle from before the clear
@@ -486,8 +509,6 @@ namespace
         std::uint64_t parent = 0;
         std::string uuid;
         std::int32_t properties = 0;
-        std::vector<std::uint8_t> value;
-        bool has_value = false;
     };
 
     // parent: the characteristic.
@@ -495,40 +516,9 @@ namespace
     {
         std::uint64_t parent = 0;
         std::string uuid;
-        std::vector<std::uint8_t> value;
-        bool has_value = false;
     };
 
-    // The last value read or notified, for the two caches that hold one.
-    template <typename Entry>
-    class ValueCache : public AttributeCache<Entry>
-    {
-    public:
-        void set_value(std::uint64_t handle, std::vector<std::uint8_t> value)
-        {
-            std::scoped_lock lock(this->mutex_);
-            const auto it = this->entries_.find(handle);
-            if (it == this->entries_.end())
-                return;
-            it->second.value = std::move(value);
-            it->second.has_value = true;
-        }
-
-        std::int32_t get_value(std::uint64_t handle, std::uint8_t* out, std::size_t max_size) const
-        {
-            std::scoped_lock lock(this->mutex_);
-            const auto it = this->entries_.find(handle);
-            if (it == this->entries_.end() || !it->second.has_value)
-                return 0;
-            const auto& value = it->second.value;
-            const std::size_t n = std::min(max_size, value.size());
-            if (n > 0 && out)
-                std::memcpy(out, value.data(), n);
-            return static_cast<std::int32_t>(n);
-        }
-    };
-
-    class CharacteristicCache : public ValueCache<CharacteristicEntry>
+    class CharacteristicCache : public AttributeCache<CharacteristicEntry>
     {
     public:
         std::uint64_t find_or_insert(std::uint64_t service, const std::string& uuid, std::int32_t properties)
@@ -550,7 +540,7 @@ namespace
 
     CharacteristicCache g_characteristic_cache;
 
-    class DescriptorCache : public ValueCache<DescriptorEntry>
+    class DescriptorCache : public AttributeCache<DescriptorEntry>
     {
     public:
         std::uint64_t find_or_insert(std::uint64_t characteristic, const std::string& uuid)
@@ -562,6 +552,77 @@ namespace
     };
 
     DescriptorCache g_descriptor_cache;
+
+    // The bytes a read or a notification delivered, held under a value id until
+    // GML copies or releases them (R1-11): each event carries its own value, so
+    // a burst no longer collapses to the last one. Ids count up and are never
+    // reused. A value outlives its link, since its callback may still be queued
+    // behind the disconnect; the cap bounds what a game that never copies leaves
+    // behind, and shutdown frees the rest.
+    class ValueStore
+    {
+    public:
+        static constexpr std::size_t k_max_values = 256;
+
+        std::uint64_t add(std::vector<std::uint8_t> bytes)
+        {
+            std::scoped_lock lock(mutex_);
+            const std::uint64_t id = next_id_++;
+            values_.emplace(id, std::move(bytes));
+            if (values_.size() > k_max_values)
+            {
+                GMBT_LOG("value store full, dropping value %llu",
+                    static_cast<unsigned long long>(values_.begin()->first));
+                values_.erase(values_.begin());
+            }
+            return id;
+        }
+
+        // Copies the whole value to out at offset and frees it. Too small a
+        // buffer copies nothing and keeps the value, so the call can be retried.
+        Error copy(std::uint64_t id, const GMBuffer& out, unsigned int offset, std::string& message)
+        {
+            std::scoped_lock lock(mutex_);
+            const auto it = values_.find(id);
+            if (it == values_.end())
+            {
+                message = "Unknown or already copied value " + std::to_string(id);
+                return Error::InvalidHandle;
+            }
+
+            const auto& bytes = it->second;
+            if (static_cast<std::uint64_t>(offset) + bytes.size() > out.length())
+            {
+                message = "Buffer too small for value " + std::to_string(id) + ": it needs " +
+                    std::to_string(bytes.size()) + " bytes at offset " + std::to_string(offset);
+                return Error::InvalidArgument;
+            }
+
+            if (!bytes.empty())
+                std::memcpy(static_cast<std::uint8_t*>(out.data()) + offset, bytes.data(), bytes.size());
+            values_.erase(it);
+            return Error::Ok;
+        }
+
+        bool release(std::uint64_t id)
+        {
+            std::scoped_lock lock(mutex_);
+            return values_.erase(id) != 0;
+        }
+
+        void clear()
+        {
+            std::scoped_lock lock(mutex_);
+            values_.clear();
+        }
+
+    private:
+        std::mutex mutex_;
+        std::map<std::uint64_t, std::vector<std::uint8_t>> values_;
+        std::uint64_t next_id_ = 1;
+    };
+
+    ValueStore g_values;
 
     // Drops what discovery cached for one LE connection: its services, their
     // characteristics and those characteristics' descriptors.
@@ -700,8 +761,10 @@ namespace
     PendingLeOps g_le_ops;
 
     // Fires a taken op's callback with its usual arguments. Called with no lock
-    // held, after the op has left the registry.
-    void fire_le_op(const PendingLeOp& op, Error error, const std::string& message = std::string())
+    // held, after the op has left the registry. value and size are the read's
+    // value id and byte count; 0 for every other op and every failure.
+    void fire_le_op(const PendingLeOp& op, Error error, const std::string& message = std::string(),
+        std::uint64_t value = 0, std::size_t size = 0)
     {
         if (!op.callback)
             return;
@@ -715,6 +778,12 @@ namespace
                     // callback(error_code, message)
                     op.callback.call(static_cast<double>(error), message);
                     break;
+                case LeOpKind::CharacteristicRead:
+                case LeOpKind::DescriptorRead:
+                    // callback(error_code, message, handle, value, size)
+                    op.callback.call(static_cast<double>(error), message, static_cast<double>(op.context),
+                        static_cast<double>(value), static_cast<double>(size));
+                    break;
                 default:
                     // callback(error_code, message, handle)
                     op.callback.call(static_cast<double>(error), message, static_cast<double>(op.context));
@@ -727,8 +796,9 @@ namespace
         }
     }
 
-    // Settles the op a LeOpCompleted event names: stores what the call
-    // returned under the handle the op reports, then fires its callback. An id
+    // Settles the op a LeOpCompleted event names: caches what discovery
+    // returned, or holds a read's bytes under a new value id, then fires its
+    // callback. An id
     // the registry no longer holds - its op was purged on disconnect or
     // shutdown - is logged and dropped.
     void complete_le_op(const BackendEvent& event)
@@ -742,6 +812,8 @@ namespace
             return;
         }
 
+        std::uint64_t value = 0;
+        std::size_t size = 0;
         if (event.error == Error::Ok)
         {
             const LeOpResult& result = event.result;
@@ -760,17 +832,20 @@ namespace
                         g_descriptor_cache.find_or_insert(op->context, attribute.uuid);
                     break;
                 case LeOpKind::CharacteristicRead:
-                    g_characteristic_cache.set_value(op->context, result.value);
-                    break;
                 case LeOpKind::DescriptorRead:
-                    g_descriptor_cache.set_value(op->context, result.value);
+                    // Nobody would copy a value for an op with no callback.
+                    if (op->callback)
+                    {
+                        size = result.value.size();
+                        value = g_values.add(result.value);
+                    }
                     break;
                 default:
                     break;
             }
         }
 
-        fire_le_op(*op, event.error, event.message);
+        fire_le_op(*op, event.error, event.message, value, size);
     }
 
     void fail_le_ops(std::vector<PendingLeOp> ops, Error error, const std::string& message)
@@ -930,6 +1005,109 @@ namespace
         return request;
     }
 
+    // A remote central using our GATT server, under the key its backend names
+    // it by (Windows: the session's device id; Apple: the central's identifier).
+    // connection is minted from the LE connection handle space, so it never
+    // equals a client connection, and is retired on the central's disconnect
+    // (R1-49): a later visit gets a new one.
+    struct ServerCentral
+    {
+        std::uint64_t connection = 0;
+        std::uint64_t device = 0;
+    };
+
+    std::mutex g_server_centrals_mutex;
+    std::unordered_map<std::string, ServerCentral> g_server_centrals;
+
+    void fire_le_server_connection_state(std::uint64_t connection, bool connected, std::uint64_t device)
+    {
+        GMFunction callback;
+        { std::scoped_lock lock(g_callback_mutex); callback = g_callback_le_server_connection_state_changed; }
+        if (!callback)
+        {
+            g_dropped_events++;
+            return;
+        }
+
+        try
+        {
+            // callback(connection, connected, device)
+            callback.call(static_cast<double>(connection), connected, static_cast<double>(device));
+        }
+        catch (const std::exception& e)
+        {
+            GMBT_LOG("Error dispatching le_server_connection_state_changed callback: %s", e.what());
+        }
+    }
+
+    // The server connection for a central key, minted on its first event, which
+    // is also when GML hears it connected. 0 for an empty key, from a backend
+    // that names no central.
+    std::uint64_t note_server_central(const std::string& key, std::uint64_t device)
+    {
+        if (key.empty())
+            return 0;
+
+        ServerCentral central;
+        {
+            std::scoped_lock lock(g_server_centrals_mutex);
+            const auto it = g_server_centrals.find(key);
+            if (it != g_server_centrals.end())
+                return it->second.connection;
+
+            central.connection = g_le_connection_manager.reserve_handle();
+            central.device = device;
+            g_server_centrals.emplace(key, central);
+        }
+
+        fire_le_server_connection_state(central.connection, true, central.device);
+        return central.connection;
+    }
+
+    void retire_server_central(const std::string& key)
+    {
+        ServerCentral central;
+        {
+            std::scoped_lock lock(g_server_centrals_mutex);
+            const auto it = g_server_centrals.find(key);
+            if (it == g_server_centrals.end())
+                return;
+            central = it->second;
+            g_server_centrals.erase(it);
+        }
+
+        fire_le_server_connection_state(central.connection, false, central.device);
+    }
+
+    // Every central leaves with the server: each one GML heard connect hears
+    // the disconnect.
+    void retire_server_centrals()
+    {
+        std::unordered_map<std::string, ServerCentral> centrals;
+        {
+            std::scoped_lock lock(g_server_centrals_mutex);
+            centrals.swap(g_server_centrals);
+        }
+
+        for (const auto& [key, central] : centrals)
+        {
+            (void)key;
+            fire_le_server_connection_state(central.connection, false, central.device);
+        }
+    }
+
+    // The key a server connection handle names; empty when it names none.
+    std::string server_central_key(std::uint64_t connection)
+    {
+        std::scoped_lock lock(g_server_centrals_mutex);
+        for (const auto& [key, central] : g_server_centrals)
+        {
+            if (central.connection == connection)
+                return key;
+        }
+        return std::string();
+    }
+
     // --- LE event JSON helpers ---
 
     bool le_event_has_error(const json::Value& root)
@@ -964,6 +1142,29 @@ namespace
         if (!field || !field->is_string())
             return std::nullopt;
         return json::parse(field->string_value);
+    }
+
+    // The device a server event's central is, from the "device" object Apple
+    // nests as a string or the "address" Windows sends; 0 when neither is there.
+    std::uint64_t le_server_event_device(const json::Value& root)
+    {
+        std::string address;
+        if (auto nested = le_event_nested(root, "device"); nested && nested->is_object())
+        {
+            if (const auto* field = nested->find("address"); field && field->is_string())
+                address = field->string_value;
+        }
+        if (address.empty())
+            address = le_event_string(root, "address");
+        if (address.empty())
+            return 0;
+
+        DiscoveredDevice d;
+        d.transport = Transport::LowEnergy;
+        d.id = address;
+        d.address = address;
+        d.address_available = true;
+        return g_device_manager.upsert_device(d);
     }
 
     void append_json_string(std::string& out, std::string_view value)
@@ -1190,66 +1391,44 @@ namespace
                 return;
             }
 
-            if (const auto* value = root.find("value"); value && value->is_string())
-                g_characteristic_cache.set_value(characteristic, json::base64_decode(value->string_value));
-
             GMFunction callback;
             { std::scoped_lock lock(g_callback_mutex); callback = g_callback_le_characteristic_value_changed; }
-            if (callback)
-            {
-                try
-                {
-                    // callback(characteristic, connection)
-                    callback.call(static_cast<double>(characteristic), static_cast<double>(connection));
-                }
-                catch (const std::exception& e)
-                {
-                    GMBT_LOG("Error dispatching le_characteristic_value_changed callback: %s", e.what());
-                }
-            }
-            else
+            if (!callback)
             {
                 g_dropped_events++;
+                return;
+            }
+
+            std::vector<std::uint8_t> bytes;
+            if (const auto* value = root.find("value"); value && value->is_string())
+                bytes = json::base64_decode(value->string_value);
+            const std::size_t size = bytes.size();
+            const std::uint64_t value = g_values.add(std::move(bytes));
+
+            try
+            {
+                // callback(characteristic, connection, value, size)
+                callback.call(static_cast<double>(characteristic), static_cast<double>(connection),
+                    static_cast<double>(value), static_cast<double>(size));
+            }
+            catch (const std::exception& e)
+            {
+                GMBT_LOG("Error dispatching le_characteristic_value_changed callback: %s", e.what());
             }
         }
         else if (type == "bluetooth_le_server_connection_state_changed")
         {
+            // A backend reports a central's arrival where it sees one (a
+            // subscription) and its departure where the platform has one; the
+            // first event of any kind from a central is its connect.
             const auto* connected_field = root.find("connected");
             const bool connected = connected_field && connected_field->as_bool(false);
+            const std::string central = le_event_string(root, "central");
 
-            std::uint64_t device = 0;
-            if (auto nested = le_event_nested(root, "device"); nested && nested->is_object())
-            {
-                if (const auto* address = nested->find("address"); address && address->is_string())
-                {
-                    DiscoveredDevice d;
-                    d.transport = Transport::LowEnergy;
-                    d.id = address->string_value;
-                    d.address = address->string_value;
-                    d.address_available = true;
-                    device = g_device_manager.upsert_device(d);
-                }
-            }
-
-            GMFunction callback;
-            { std::scoped_lock lock(g_callback_mutex); callback = g_callback_le_server_connection_state_changed; }
-            if (callback)
-            {
-                try
-                {
-                    // callback(connection, connected, device) - Apple never reports
-                    // which connection this is for on this event, so connection is 0.
-                    callback.call(0.0, static_cast<double>(connected ? 1 : 0), static_cast<double>(device));
-                }
-                catch (const std::exception& e)
-                {
-                    GMBT_LOG("Error dispatching le_server_connection_state_changed callback: %s", e.what());
-                }
-            }
+            if (connected)
+                note_server_central(central, le_server_event_device(root));
             else
-            {
-                g_dropped_events++;
-            }
+                retire_server_central(central);
         }
         else if (type == "bluetooth_le_server_characteristic_read_request" ||
                  type == "bluetooth_le_server_descriptor_read_request")
@@ -1261,6 +1440,7 @@ namespace
             const std::string descriptor_uuid = canonical_uuid(le_event_string(root, "descriptor_uuid"));
             const auto* offset_field = root.find("offset");
             const std::int32_t offset = offset_field ? offset_field->as_int(0) : 0;
+            const std::uint64_t connection = note_server_central(le_event_string(root, "central"), le_server_event_device(root));
 
             GMFunction callback;
             { std::scoped_lock lock(g_callback_mutex); callback = g_callback_le_server_read_request; }
@@ -1277,7 +1457,7 @@ namespace
             {
                 std::scoped_lock lock(g_pending_le_server_requests_mutex);
                 PendingLeServerRequest request;
-                request.connection = 0; // never reported by Apple for this event
+                request.connection = connection;
                 request.service_uuid = service_uuid;
                 request.characteristic_uuid = characteristic_uuid;
                 request.descriptor_uuid = descriptor_uuid;
@@ -1289,7 +1469,8 @@ namespace
             {
                 // callback(request_id, connection, service_uuid, characteristic_uuid, descriptor_uuid_or_empty, offset)
                 // GML answers with the value's bytes from offset on, as on Android.
-                callback.call(static_cast<double>(request_id), 0.0, service_uuid, characteristic_uuid, descriptor_uuid, static_cast<double>(offset));
+                callback.call(static_cast<double>(request_id), static_cast<double>(connection), service_uuid, characteristic_uuid,
+                    descriptor_uuid, static_cast<double>(offset));
             }
             catch (const std::exception& e)
             {
@@ -1306,6 +1487,7 @@ namespace
             const std::string descriptor_uuid = canonical_uuid(le_event_string(root, "descriptor_uuid"));
             const auto* response_needed_field = root.find("response_needed");
             const bool response_needed = !response_needed_field || response_needed_field->as_bool(true);
+            const std::uint64_t connection = note_server_central(le_event_string(root, "central"), le_server_event_device(root));
 
             GMFunction callback;
             { std::scoped_lock lock(g_callback_mutex); callback = g_callback_le_server_write_request; }
@@ -1326,7 +1508,7 @@ namespace
             {
                 std::scoped_lock lock(g_pending_le_server_requests_mutex);
                 PendingLeServerRequest request;
-                request.connection = 0; // never reported by Apple for this event
+                request.connection = connection;
                 request.service_uuid = service_uuid;
                 request.characteristic_uuid = characteristic_uuid;
                 request.descriptor_uuid = descriptor_uuid;
@@ -1339,7 +1521,8 @@ namespace
             try
             {
                 // callback(request_id, connection, service_uuid, characteristic_uuid, descriptor_uuid_or_empty)
-                callback.call(static_cast<double>(request_id), 0.0, service_uuid, characteristic_uuid, descriptor_uuid);
+                callback.call(static_cast<double>(request_id), static_cast<double>(connection), service_uuid, characteristic_uuid,
+                    descriptor_uuid);
             }
             catch (const std::exception& e)
             {
@@ -1583,8 +1766,7 @@ bool bluetooth_initialize()
 
     std::string message;
     const Error error = g_backend->initialize(message);
-    g_last_error = error;
-    g_last_error_message = message;
+    set_last_error(error, message);
 
     GMBT_LOG("backend initialize() -> error=%d message='%s' | ble=%d le_advertise=%d le_server=%d classic=%d classic_server=%d",
         static_cast<int>(error),
@@ -1672,6 +1854,11 @@ void bluetooth_shutdown()
         std::scoped_lock lock(g_pending_le_server_requests_mutex);
         g_pending_le_server_requests.clear();
     }
+    {
+        std::scoped_lock lock(g_server_centrals_mutex);
+        g_server_centrals.clear();
+    }
+    g_values.clear();
     g_descriptor_cache.clear();
     g_characteristic_cache.clear();
     g_service_cache.clear();
@@ -1685,9 +1872,9 @@ bool bluetooth_is_initialized()
     return g_backend != nullptr;
 }
 
-std::int32_t bluetooth_last_error_code()
+BluetoothError bluetooth_last_error_code()
 {
-    return static_cast<std::int32_t>(g_last_error);
+    return to_gm(g_last_error);
 }
 
 std::string bluetooth_last_error_message()
@@ -1720,7 +1907,7 @@ bool bluetooth_classic_server_is_supported()
     return g_backend && g_backend->supports_classic_server();
 }
 
-std::int32_t bluetooth_permission_get_status()
+BluetoothPermissionStatus bluetooth_permission_get_status()
 {
     const std::int32_t status = g_backend
         ? static_cast<std::int32_t>(g_backend->permission_status())
@@ -1734,31 +1921,30 @@ std::int32_t bluetooth_permission_get_status()
         last_status = status;
     }
 
-    return status;
+    return static_cast<BluetoothPermissionStatus>(status);
 }
 
-std::int32_t bluetooth_permission_request()
+BluetoothError bluetooth_permission_request()
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
         GMBT_LOG("permission request rejected: backend is not initialized");
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     std::string message;
     const Error error = g_backend->permission_request(message);
-    g_last_error = error;
-    g_last_error_message = message;
+    set_last_error(error, message);
     GMBT_LOG("permission request -> error=%d message='%s' status now %d",
         static_cast<int>(error),
         message.c_str(),
         static_cast<int>(g_backend->permission_status()));
-    return static_cast<std::int32_t>(error);
+    return to_gm(error);
 }
 
-std::int32_t bluetooth_le_scan_start(bool active)
+BluetoothError bluetooth_le_scan_start(bool active)
 {
     GMBT_LOG("BLE scan start requested (active=%d)", active ? 1 : 0);
 
@@ -1767,21 +1953,20 @@ std::int32_t bluetooth_le_scan_start(bool active)
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
         GMBT_LOG("BLE scan start rejected: backend is not initialized");
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     std::string message;
     const Error error = g_backend->le_scan_start(active, message);
-    g_last_error = error;
-    g_last_error_message = message;
+    set_last_error(error, message);
     GMBT_LOG("BLE scan start -> error=%d message='%s' | backend reports running=%d",
         static_cast<int>(error),
         message.c_str(),
         g_backend->le_scan_is_running() ? 1 : 0);
-    return static_cast<std::int32_t>(error);
+    return to_gm(error);
 }
 
-std::int32_t bluetooth_le_scan_stop()
+BluetoothError bluetooth_le_scan_stop()
 {
     GMBT_LOG("BLE scan stop requested");
 
@@ -1790,18 +1975,17 @@ std::int32_t bluetooth_le_scan_stop()
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
         GMBT_LOG("BLE scan stop rejected: backend is not initialized");
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     std::string message;
     const Error error = g_backend->le_scan_stop(message);
-    g_last_error = error;
-    g_last_error_message = message;
+    set_last_error(error, message);
     GMBT_LOG("BLE scan stop -> error=%d message='%s' | backend reports running=%d",
         static_cast<int>(error),
         message.c_str(),
         g_backend->le_scan_is_running() ? 1 : 0);
-    return static_cast<std::int32_t>(error);
+    return to_gm(error);
 }
 
 bool bluetooth_le_scan_is_running()
@@ -1819,36 +2003,34 @@ bool bluetooth_le_scan_is_running()
     return running;
 }
 
-std::int32_t bluetooth_classic_scan_start()
+BluetoothError bluetooth_classic_scan_start()
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     std::string message;
     const Error error = g_backend->classic_scan_start(message);
-    g_last_error = error;
-    g_last_error_message = message;
-    return static_cast<std::int32_t>(error);
+    set_last_error(error, message);
+    return to_gm(error);
 }
 
-std::int32_t bluetooth_classic_scan_stop()
+BluetoothError bluetooth_classic_scan_stop()
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     std::string message;
     const Error error = g_backend->classic_scan_stop(message);
-    g_last_error = error;
-    g_last_error_message = message;
-    return static_cast<std::int32_t>(error);
+    set_last_error(error, message);
+    return to_gm(error);
 }
 
 bool bluetooth_classic_scan_is_running()
@@ -1877,10 +2059,10 @@ bool bluetooth_device_is_valid(std::uint64_t device)
     return g_device_manager.is_valid(device);
 }
 
-int bluetooth_device_get_transport(std::uint64_t device)
+BluetoothTransport bluetooth_device_get_transport(std::uint64_t device)
 {
     const auto dev = g_device_manager.get_device(device);
-    return dev ? static_cast<int>(dev->transport) : static_cast<int>(Transport::Unknown);
+    return static_cast<BluetoothTransport>(dev ? dev->transport : Transport::Unknown);
 }
 
 std::string bluetooth_device_get_id(std::uint64_t device)
@@ -1957,8 +2139,7 @@ std::uint64_t bluetooth_classic_connect(std::uint64_t device, std::string_view s
 
     std::string message;
     const Error error = g_backend->classic_connect(connection, *dev, std::string(service_uuid), message);
-    g_last_error = error;
-    g_last_error_message = message;
+    set_last_error(error, message);
 
     if (error != Error::Ok)
     {
@@ -1982,13 +2163,13 @@ bool bluetooth_pairing_is_supported(std::uint64_t device)
     return dev && g_backend->pairing_is_supported(*dev);
 }
 
-std::int32_t bluetooth_pair(std::uint64_t device, const gm::wire::GMFunction& callback)
+BluetoothError bluetooth_pair(std::uint64_t device, const gm::wire::GMFunction& callback)
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     const auto dev = g_device_manager.get_device(device);
@@ -1996,7 +2177,7 @@ std::int32_t bluetooth_pair(std::uint64_t device, const gm::wire::GMFunction& ca
     {
         g_last_error = Error::InvalidArgument;
         g_last_error_message = "Invalid device handle";
-        return static_cast<std::int32_t>(Error::InvalidArgument);
+        return to_gm(Error::InvalidArgument);
     }
 
     // Registered before calling the backend: pairing runs asynchronously and may
@@ -2009,15 +2190,14 @@ std::int32_t bluetooth_pair(std::uint64_t device, const gm::wire::GMFunction& ca
         {
             g_last_error = Error::Busy;
             g_last_error_message = "A pairing for this device is already in progress";
-            return static_cast<std::int32_t>(Error::Busy);
+            return to_gm(Error::Busy);
         }
         g_pending_pair_callbacks[device] = callback;
     }
 
     std::string message;
     const Error error = g_backend->pair(device, *dev, message);
-    g_last_error = error;
-    g_last_error_message = message;
+    set_last_error(error, message);
 
     if (error != Error::Ok)
     {
@@ -2025,7 +2205,7 @@ std::int32_t bluetooth_pair(std::uint64_t device, const gm::wire::GMFunction& ca
         g_pending_pair_callbacks.erase(device);
     }
 
-    return static_cast<std::int32_t>(error);
+    return to_gm(error);
 }
 
 bool bluetooth_device_is_paired(std::uint64_t device)
@@ -2034,13 +2214,13 @@ bool bluetooth_device_is_paired(std::uint64_t device)
     return dev && g_backend && g_backend->is_paired(*dev);
 }
 
-std::int32_t bluetooth_classic_disconnect(std::uint64_t connection)
+BluetoothError bluetooth_classic_disconnect(std::uint64_t connection)
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     const bool remote_closed = g_classic_connection_manager.is_closed(connection);
@@ -2055,8 +2235,7 @@ std::int32_t bluetooth_classic_disconnect(std::uint64_t connection)
         error = Error::Ok;
         message.clear();
     }
-    g_last_error = error;
-    g_last_error_message = message;
+    set_last_error(error, message);
 
     // A connect still in flight is cancelled, not completed: its callback
     // fires now, and a late completion from the backend finds none.
@@ -2085,7 +2264,7 @@ std::int32_t bluetooth_classic_disconnect(std::uint64_t connection)
         }
     }
 
-    return static_cast<std::int32_t>(error);
+    return to_gm(error);
 }
 
 namespace
@@ -2129,24 +2308,23 @@ std::int32_t bluetooth_classic_receive_available(std::uint64_t connection)
     return available;
 }
 
-std::int32_t bluetooth_classic_send(std::uint64_t connection, struct gm::wire::GMBuffer data, unsigned int offset, unsigned int size)
+BluetoothError bluetooth_classic_send(std::uint64_t connection, struct gm::wire::GMBuffer data, unsigned int offset, unsigned int size)
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     if (!buffer_range_valid(data, offset, size, "bluetooth_classic_send"))
-        return static_cast<std::int32_t>(Error::InvalidArgument);
+        return to_gm(Error::InvalidArgument);
 
     const std::uint8_t* buffer = static_cast<const std::uint8_t*>(data.data()) + offset;
     std::string message;
     const Error error = g_backend->classic_send_bytes(connection, buffer, size, message);
-    g_last_error = error;
-    g_last_error_message = message;
-    return static_cast<std::int32_t>(error);
+    set_last_error(error, message);
+    return to_gm(error);
 }
 
 std::int32_t bluetooth_classic_receive(std::uint64_t connection, struct gm::wire::GMBuffer data, unsigned int offset, unsigned int max_size)
@@ -2163,39 +2341,37 @@ std::int32_t bluetooth_classic_receive(std::uint64_t connection, struct gm::wire
     return static_cast<std::int32_t>(received);
 }
 
-std::int32_t bluetooth_classic_server_start(std::string_view name, std::string_view service_uuid)
+BluetoothError bluetooth_classic_server_start(std::string_view name, std::string_view service_uuid)
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     if (!check_uuid(service_uuid))
-        return static_cast<std::int32_t>(Error::InvalidArgument);
+        return to_gm(Error::InvalidArgument);
 
     std::string message;
     const Error error = g_backend->classic_server_start(std::string(name), std::string(service_uuid), message);
-    g_last_error = error;
-    g_last_error_message = message;
-    return static_cast<std::int32_t>(error);
+    set_last_error(error, message);
+    return to_gm(error);
 }
 
-std::int32_t bluetooth_classic_server_stop()
+BluetoothError bluetooth_classic_server_stop()
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     std::string message;
     const Error error = g_backend->classic_server_stop(message);
-    g_last_error = error;
-    g_last_error_message = message;
-    return static_cast<std::int32_t>(error);
+    set_last_error(error, message);
+    return to_gm(error);
 }
 
 bool bluetooth_classic_server_is_running()
@@ -2203,36 +2379,34 @@ bool bluetooth_classic_server_is_running()
     return g_backend && g_backend->classic_server_is_running();
 }
 
-std::int32_t bluetooth_classic_discoverable_start(std::int32_t duration_seconds)
+BluetoothError bluetooth_classic_discoverable_start(std::int32_t duration_seconds)
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     std::string message;
     const Error error = g_backend->classic_discoverable_start(duration_seconds, message);
-    g_last_error = error;
-    g_last_error_message = message;
-    return static_cast<std::int32_t>(error);
+    set_last_error(error, message);
+    return to_gm(error);
 }
 
-std::int32_t bluetooth_classic_discoverable_stop()
+BluetoothError bluetooth_classic_discoverable_stop()
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     std::string message;
     const Error error = g_backend->classic_discoverable_stop(message);
-    g_last_error = error;
-    g_last_error_message = message;
-    return static_cast<std::int32_t>(error);
+    set_last_error(error, message);
+    return to_gm(error);
 }
 
 bool bluetooth_classic_discoverable_is_running()
@@ -2389,8 +2563,7 @@ std::uint64_t bluetooth_le_connect(std::uint64_t device, const gm::wire::GMFunct
 
     std::string message;
     const Error error = g_backend->le_connect(connection, *dev, message);
-    g_last_error = error;
-    g_last_error_message = message;
+    set_last_error(error, message);
 
     if (error != Error::Ok)
     {
@@ -2405,19 +2578,18 @@ std::uint64_t bluetooth_le_connect(std::uint64_t device, const gm::wire::GMFunct
     return connection;
 }
 
-std::int32_t bluetooth_le_disconnect(std::uint64_t connection)
+BluetoothError bluetooth_le_disconnect(std::uint64_t connection)
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     std::string message;
     const Error error = g_backend->le_disconnect(connection, message);
-    g_last_error = error;
-    g_last_error_message = message;
+    set_last_error(error, message);
 
     // Whatever the backend answered, the game is done with this link: no op
     // waiting on it may outlive the call, and its handle is retired.
@@ -2449,7 +2621,7 @@ std::int32_t bluetooth_le_disconnect(std::uint64_t connection)
         }
     }
 
-    return static_cast<std::int32_t>(error);
+    return to_gm(error);
 }
 
 bool bluetooth_le_connection_is_valid(std::uint64_t connection)
@@ -2469,33 +2641,32 @@ std::uint64_t bluetooth_le_connection_get_device(std::uint64_t connection)
 
 // --- BLE GATT client: service / characteristic / descriptor discovery ---
 
-std::int32_t bluetooth_le_services_discover(std::uint64_t connection, const gm::wire::GMFunction& callback)
+BluetoothError bluetooth_le_services_discover(std::uint64_t connection, const gm::wire::GMFunction& callback)
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     if (!g_le_connection_manager.is_valid(connection))
     {
         g_last_error = Error::InvalidHandle;
         g_last_error_message = "Invalid LE connection handle";
-        return static_cast<std::int32_t>(Error::InvalidHandle);
+        return to_gm(Error::InvalidHandle);
     }
 
     const auto op_id = g_le_ops.add(LeOpKind::ServicesDiscover, callback, connection, connection);
 
     std::string message;
     const Error error = g_backend->le_services_discover(op_id, connection, message);
-    g_last_error = error;
-    g_last_error_message = message;
+    set_last_error(error, message);
 
     if (error != Error::Ok)
         g_le_ops.erase(op_id);
 
-    return static_cast<std::int32_t>(error);
+    return to_gm(error);
 }
 
 std::int32_t bluetooth_le_service_get_count(std::uint64_t connection)
@@ -2513,20 +2684,20 @@ std::string bluetooth_le_service_get_uuid(std::uint64_t service)
     return g_service_cache.get_uuid(service);
 }
 
-std::int32_t bluetooth_le_characteristics_discover(std::uint64_t service, const gm::wire::GMFunction& callback)
+BluetoothError bluetooth_le_characteristics_discover(std::uint64_t service, const gm::wire::GMFunction& callback)
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     if (!g_service_cache.is_valid(service))
     {
         g_last_error = Error::InvalidHandle;
         g_last_error_message = "Invalid service handle";
-        return static_cast<std::int32_t>(Error::InvalidHandle);
+        return to_gm(Error::InvalidHandle);
     }
 
     const std::uint64_t connection = g_service_cache.get_parent(service);
@@ -2536,13 +2707,12 @@ std::int32_t bluetooth_le_characteristics_discover(std::uint64_t service, const 
 
     std::string message;
     const Error error = g_backend->le_characteristics_discover(op_id, connection, uuid, message);
-    g_last_error = error;
-    g_last_error_message = message;
+    set_last_error(error, message);
 
     if (error != Error::Ok)
         g_le_ops.erase(op_id);
 
-    return static_cast<std::int32_t>(error);
+    return to_gm(error);
 }
 
 std::int32_t bluetooth_le_characteristic_get_count(std::uint64_t service)
@@ -2565,20 +2735,20 @@ std::int32_t bluetooth_le_characteristic_get_properties(std::uint64_t characteri
     return g_characteristic_cache.get_properties(characteristic);
 }
 
-std::int32_t bluetooth_le_descriptors_discover(std::uint64_t characteristic, const gm::wire::GMFunction& callback)
+BluetoothError bluetooth_le_descriptors_discover(std::uint64_t characteristic, const gm::wire::GMFunction& callback)
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     if (!g_characteristic_cache.is_valid(characteristic))
     {
         g_last_error = Error::InvalidHandle;
         g_last_error_message = "Invalid characteristic handle";
-        return static_cast<std::int32_t>(Error::InvalidHandle);
+        return to_gm(Error::InvalidHandle);
     }
 
     const std::uint64_t service = g_characteristic_cache.get_parent(characteristic);
@@ -2590,13 +2760,12 @@ std::int32_t bluetooth_le_descriptors_discover(std::uint64_t characteristic, con
 
     std::string message;
     const Error error = g_backend->le_descriptors_discover(op_id, connection, service_uuid, characteristic_uuid, message);
-    g_last_error = error;
-    g_last_error_message = message;
+    set_last_error(error, message);
 
     if (error != Error::Ok)
         g_le_ops.erase(op_id);
 
-    return static_cast<std::int32_t>(error);
+    return to_gm(error);
 }
 
 std::int32_t bluetooth_le_descriptor_get_count(std::uint64_t characteristic)
@@ -2616,20 +2785,20 @@ std::string bluetooth_le_descriptor_get_uuid(std::uint64_t descriptor)
 
 // --- BLE GATT client: characteristic / descriptor read, write, subscribe ---
 
-std::int32_t bluetooth_le_characteristic_read(std::uint64_t characteristic, const gm::wire::GMFunction& callback)
+BluetoothError bluetooth_le_characteristic_read(std::uint64_t characteristic, const gm::wire::GMFunction& callback)
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     if (!g_characteristic_cache.is_valid(characteristic))
     {
         g_last_error = Error::InvalidHandle;
         g_last_error_message = "Invalid characteristic handle";
-        return static_cast<std::int32_t>(Error::InvalidHandle);
+        return to_gm(Error::InvalidHandle);
     }
 
     const std::uint64_t service = g_characteristic_cache.get_parent(characteristic);
@@ -2641,38 +2810,36 @@ std::int32_t bluetooth_le_characteristic_read(std::uint64_t characteristic, cons
 
     std::string message;
     const Error error = g_backend->le_characteristic_read(op_id, connection, service_uuid, characteristic_uuid, message);
-    g_last_error = error;
-    g_last_error_message = message;
+    set_last_error(error, message);
 
     if (error != Error::Ok)
         g_le_ops.erase(op_id);
 
-    return static_cast<std::int32_t>(error);
+    return to_gm(error);
 }
 
-std::int32_t bluetooth_le_characteristic_get_value(std::uint64_t characteristic, struct gm::wire::GMBuffer out_data, unsigned int offset, unsigned int max_size)
-{
-    if (!buffer_range_valid(out_data, offset, max_size, "bluetooth_le_characteristic_get_value"))
-        return 0;
-
-    std::uint8_t* buffer = static_cast<std::uint8_t*>(out_data.data()) + offset;
-    return g_characteristic_cache.get_value(characteristic, buffer, max_size);
-}
-
-std::int32_t bluetooth_le_characteristic_write(std::uint64_t characteristic, struct gm::wire::GMBuffer data, unsigned int offset, unsigned int size, std::int32_t write_type, const gm::wire::GMFunction& callback)
+BluetoothError bluetooth_le_characteristic_write(std::uint64_t characteristic, struct gm::wire::GMBuffer data, unsigned int offset, unsigned int size, BluetoothLeWriteType write_type, const gm::wire::GMFunction& callback)
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     if (!g_characteristic_cache.is_valid(characteristic))
     {
         g_last_error = Error::InvalidHandle;
         g_last_error_message = "Invalid characteristic handle";
-        return static_cast<std::int32_t>(Error::InvalidHandle);
+        return to_gm(Error::InvalidHandle);
+    }
+
+    // The wire carries any int32; only the two members mean anything (R1-149).
+    if (write_type != BluetoothLeWriteType::WithResponse && write_type != BluetoothLeWriteType::WithoutResponse)
+    {
+        g_last_error = Error::InvalidArgument;
+        g_last_error_message = "write_type must be a BluetoothLeWriteType";
+        return to_gm(Error::InvalidArgument);
     }
 
     const std::uint64_t service = g_characteristic_cache.get_parent(characteristic);
@@ -2681,39 +2848,46 @@ std::int32_t bluetooth_le_characteristic_write(std::uint64_t characteristic, str
     const std::string characteristic_uuid = g_characteristic_cache.get_uuid(characteristic);
 
     if (!buffer_range_valid(data, offset, size, "bluetooth_le_characteristic_write"))
-        return static_cast<std::int32_t>(Error::InvalidArgument);
+        return to_gm(Error::InvalidArgument);
 
     const std::uint8_t* buffer = static_cast<const std::uint8_t*>(data.data()) + offset;
     const std::string value_base64 = json::base64_encode(buffer, size);
-    const bool with_response = (write_type == 0);
+    const bool with_response = (write_type == BluetoothLeWriteType::WithResponse);
 
     const auto op_id = g_le_ops.add(LeOpKind::CharacteristicWrite, callback, characteristic, connection);
 
     std::string message;
     const Error error = g_backend->le_characteristic_write(op_id, connection, service_uuid, characteristic_uuid, value_base64, with_response, message);
-    g_last_error = error;
-    g_last_error_message = message;
+    set_last_error(error, message);
 
     if (error != Error::Ok)
         g_le_ops.erase(op_id);
 
-    return static_cast<std::int32_t>(error);
+    return to_gm(error);
 }
 
-std::int32_t bluetooth_le_characteristic_subscribe(std::uint64_t characteristic, std::int32_t mode, const gm::wire::GMFunction& callback)
+BluetoothError bluetooth_le_characteristic_subscribe(std::uint64_t characteristic, BluetoothLeSubscribeMode mode, const gm::wire::GMFunction& callback)
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     if (!g_characteristic_cache.is_valid(characteristic))
     {
         g_last_error = Error::InvalidHandle;
         g_last_error_message = "Invalid characteristic handle";
-        return static_cast<std::int32_t>(Error::InvalidHandle);
+        return to_gm(Error::InvalidHandle);
+    }
+
+    if (mode != BluetoothLeSubscribeMode::Unsubscribe && mode != BluetoothLeSubscribeMode::Notify &&
+        mode != BluetoothLeSubscribeMode::Indicate)
+    {
+        g_last_error = Error::InvalidArgument;
+        g_last_error_message = "mode must be a BluetoothLeSubscribeMode";
+        return to_gm(Error::InvalidArgument);
     }
 
     const std::uint64_t service = g_characteristic_cache.get_parent(characteristic);
@@ -2724,30 +2898,30 @@ std::int32_t bluetooth_le_characteristic_subscribe(std::uint64_t characteristic,
     const auto op_id = g_le_ops.add(LeOpKind::CharacteristicSubscribe, callback, characteristic, connection);
 
     std::string message;
-    const Error error = g_backend->le_characteristic_subscribe(op_id, connection, service_uuid, characteristic_uuid, mode, message);
-    g_last_error = error;
-    g_last_error_message = message;
+    const Error error = g_backend->le_characteristic_subscribe(op_id, connection, service_uuid, characteristic_uuid,
+        static_cast<std::int32_t>(mode), message);
+    set_last_error(error, message);
 
     if (error != Error::Ok)
         g_le_ops.erase(op_id);
 
-    return static_cast<std::int32_t>(error);
+    return to_gm(error);
 }
 
-std::int32_t bluetooth_le_descriptor_read(std::uint64_t descriptor, const gm::wire::GMFunction& callback)
+BluetoothError bluetooth_le_descriptor_read(std::uint64_t descriptor, const gm::wire::GMFunction& callback)
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     if (!g_descriptor_cache.is_valid(descriptor))
     {
         g_last_error = Error::InvalidHandle;
         g_last_error_message = "Invalid descriptor handle";
-        return static_cast<std::int32_t>(Error::InvalidHandle);
+        return to_gm(Error::InvalidHandle);
     }
 
     const std::uint64_t characteristic = g_descriptor_cache.get_parent(descriptor);
@@ -2761,38 +2935,28 @@ std::int32_t bluetooth_le_descriptor_read(std::uint64_t descriptor, const gm::wi
 
     std::string message;
     const Error error = g_backend->le_descriptor_read(op_id, connection, service_uuid, characteristic_uuid, descriptor_uuid, message);
-    g_last_error = error;
-    g_last_error_message = message;
+    set_last_error(error, message);
 
     if (error != Error::Ok)
         g_le_ops.erase(op_id);
 
-    return static_cast<std::int32_t>(error);
+    return to_gm(error);
 }
 
-std::int32_t bluetooth_le_descriptor_get_value(std::uint64_t descriptor, struct gm::wire::GMBuffer out_data, unsigned int offset, unsigned int max_size)
-{
-    if (!buffer_range_valid(out_data, offset, max_size, "bluetooth_le_descriptor_get_value"))
-        return 0;
-
-    std::uint8_t* buffer = static_cast<std::uint8_t*>(out_data.data()) + offset;
-    return g_descriptor_cache.get_value(descriptor, buffer, max_size);
-}
-
-std::int32_t bluetooth_le_descriptor_write(std::uint64_t descriptor, struct gm::wire::GMBuffer data, unsigned int offset, unsigned int size, const gm::wire::GMFunction& callback)
+BluetoothError bluetooth_le_descriptor_write(std::uint64_t descriptor, struct gm::wire::GMBuffer data, unsigned int offset, unsigned int size, const gm::wire::GMFunction& callback)
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     if (!g_descriptor_cache.is_valid(descriptor))
     {
         g_last_error = Error::InvalidHandle;
         g_last_error_message = "Invalid descriptor handle";
-        return static_cast<std::int32_t>(Error::InvalidHandle);
+        return to_gm(Error::InvalidHandle);
     }
 
     const std::uint64_t characteristic = g_descriptor_cache.get_parent(descriptor);
@@ -2808,11 +2972,11 @@ std::int32_t bluetooth_le_descriptor_write(std::uint64_t descriptor, struct gm::
     {
         g_last_error = Error::InvalidArgument;
         g_last_error_message = "The CCCD is written by bluetooth_le_characteristic_subscribe";
-        return static_cast<std::int32_t>(Error::InvalidArgument);
+        return to_gm(Error::InvalidArgument);
     }
 
     if (!buffer_range_valid(data, offset, size, "bluetooth_le_descriptor_write"))
-        return static_cast<std::int32_t>(Error::InvalidArgument);
+        return to_gm(Error::InvalidArgument);
 
     const std::uint8_t* buffer = static_cast<const std::uint8_t*>(data.data()) + offset;
     const std::string value_base64 = json::base64_encode(buffer, size);
@@ -2821,76 +2985,123 @@ std::int32_t bluetooth_le_descriptor_write(std::uint64_t descriptor, struct gm::
 
     std::string message;
     const Error error = g_backend->le_descriptor_write(op_id, connection, service_uuid, characteristic_uuid, descriptor_uuid, value_base64, message);
-    g_last_error = error;
-    g_last_error_message = message;
+    set_last_error(error, message);
 
     if (error != Error::Ok)
         g_le_ops.erase(op_id);
 
-    return static_cast<std::int32_t>(error);
+    return to_gm(error);
+}
+
+// --- BLE values ---
+
+BluetoothError bluetooth_le_value_copy(std::uint64_t value, struct gm::wire::GMBuffer out_data, unsigned int offset)
+{
+    std::string message;
+    const Error error = g_values.copy(value, out_data, offset, message);
+    set_last_error(error, message);
+    return to_gm(error);
+}
+
+BluetoothError bluetooth_le_value_release(std::uint64_t value)
+{
+    if (g_values.release(value))
+        return to_gm(Error::Ok);
+
+    g_last_error = Error::InvalidHandle;
+    g_last_error_message = "Unknown or already copied value " + std::to_string(value);
+    return to_gm(Error::InvalidHandle);
 }
 
 // --- BLE advertise ---
 
-std::int32_t bluetooth_le_advertise_start(std::string_view settings_json, std::string_view data_json, const gm::wire::GMFunction& callback)
+BluetoothError bluetooth_le_advertise_start(const BluetoothLeAdvertiseSettings& settings, const BluetoothLeAdvertiseData& data, const gm::wire::GMFunction& callback)
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
-    // Only the service UUIDs are checked here; JSON that does not parse is
-    // still the backend's to reject.
-    if (auto data = json::parse(data_json); data && data->is_object())
+    // Checked once here, so every backend sees only what it can act on; what a
+    // backend cannot send is its own NotSupported (R1-36).
+    LeAdvertiseSettings advertise_settings;
+    advertise_settings.connectable = settings.connectable;
+    if (settings.tx_power)
     {
-        if (const auto* services = data->find("services"); services && services->is_array())
+        const auto level = static_cast<std::int32_t>(*settings.tx_power);
+        if (level < static_cast<std::int32_t>(LeAdvertiseTxPower::UltraLow) || level > static_cast<std::int32_t>(LeAdvertiseTxPower::High))
         {
-            for (const auto& entry : services->array_value)
-            {
-                const auto* uuid = entry.is_object() ? entry.find("uuid") : nullptr;
-                if (!uuid)
-                    continue;
-                if (!uuid->is_string())
-                {
-                    g_last_error = Error::InvalidArgument;
-                    g_last_error_message = "Invalid UUID: advertised service uuid is not a string";
-                    return static_cast<std::int32_t>(Error::InvalidArgument);
-                }
-                if (!check_uuid(uuid->string_value))
-                    return static_cast<std::int32_t>(Error::InvalidArgument);
-            }
+            g_last_error = Error::InvalidArgument;
+            g_last_error_message = "tx_power must be a BluetoothLeAdvertiseTxPower";
+            return to_gm(Error::InvalidArgument);
         }
+        advertise_settings.tx_power = static_cast<LeAdvertiseTxPower>(level);
+    }
+
+    LeAdvertiseData advertise_data;
+    advertise_data.include_name = data.include_name;
+    advertise_data.include_tx_power = data.include_tx_power;
+
+    for (const auto& uuid : data.service_uuids)
+    {
+        if (!check_uuid(uuid))
+            return to_gm(Error::InvalidArgument);
+        advertise_data.service_uuids.push_back(canonical_uuid(uuid));
+    }
+
+    for (const auto& entry : data.service_data)
+    {
+        if (!check_uuid(entry.uuid))
+            return to_gm(Error::InvalidArgument);
+        const std::string uuid = canonical_uuid(entry.uuid);
+        // A UUID with data is advertised as a UUID too, on every platform.
+        if (std::find(advertise_data.service_uuids.begin(), advertise_data.service_uuids.end(), uuid) == advertise_data.service_uuids.end())
+        {
+            g_last_error = Error::InvalidArgument;
+            g_last_error_message = "Service data for " + uuid + " needs the uuid in service_uuids too";
+            return to_gm(Error::InvalidArgument);
+        }
+        advertise_data.service_data.push_back({ uuid, entry.data });
+    }
+
+    for (const auto& entry : data.manufacturer_data)
+    {
+        if (entry.company_id < 0 || entry.company_id > 0xFFFF)
+        {
+            g_last_error = Error::InvalidArgument;
+            g_last_error_message = "company_id must be 0-65535, got " + std::to_string(entry.company_id);
+            return to_gm(Error::InvalidArgument);
+        }
+        advertise_data.manufacturer_data.push_back({ static_cast<std::uint16_t>(entry.company_id), entry.data });
     }
 
     const auto op_id = g_le_ops.add(LeOpKind::AdvertiseStart, callback, 0, 0);
 
     std::string message;
-    const Error error = g_backend->le_advertise_start(op_id, std::string(settings_json), std::string(data_json), message);
-    g_last_error = error;
-    g_last_error_message = message;
+    const Error error = g_backend->le_advertise_start(op_id, advertise_settings, advertise_data, message);
+    set_last_error(error, message);
 
     if (error != Error::Ok)
         g_le_ops.erase(op_id);
 
-    return static_cast<std::int32_t>(error);
+    return to_gm(error);
 }
 
-std::int32_t bluetooth_le_advertise_stop()
+BluetoothError bluetooth_le_advertise_stop()
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     std::string message;
     const Error error = g_backend->le_advertise_stop(message);
-    g_last_error = error;
-    g_last_error_message = message;
-    return static_cast<std::int32_t>(error);
+    set_last_error(error, message);
+    return to_gm(error);
 }
 
 bool bluetooth_le_advertise_is_running()
@@ -2900,29 +3111,28 @@ bool bluetooth_le_advertise_is_running()
 
 // --- BLE GATT server (peripheral) ---
 
-std::int32_t bluetooth_le_server_start()
+BluetoothError bluetooth_le_server_start()
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     std::string message;
     const Error error = g_backend->le_server_start(message);
-    g_last_error = error;
-    g_last_error_message = message;
-    return static_cast<std::int32_t>(error);
+    set_last_error(error, message);
+    return to_gm(error);
 }
 
-std::int32_t bluetooth_le_server_stop()
+BluetoothError bluetooth_le_server_stop()
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     // Answered while the backend still holds them; it forgets them on stop.
@@ -2930,9 +3140,10 @@ std::int32_t bluetooth_le_server_stop()
 
     std::string message;
     const Error error = g_backend->le_server_stop(message);
-    g_last_error = error;
-    g_last_error_message = message;
-    return static_cast<std::int32_t>(error);
+    set_last_error(error, message);
+    if (error == Error::Ok)
+        retire_server_centrals();
+    return to_gm(error);
 }
 
 bool bluetooth_le_server_is_running()
@@ -2940,25 +3151,25 @@ bool bluetooth_le_server_is_running()
     return g_backend && g_backend->le_server_is_running();
 }
 
-std::int32_t bluetooth_le_server_add_service(const BluetoothLeServiceDefinition& service, const gm::wire::GMFunction& callback)
+BluetoothError bluetooth_le_server_add_service(const BluetoothLeServiceDefinition& service, const gm::wire::GMFunction& callback)
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     if (!check_uuid(service.uuid))
-        return static_cast<std::int32_t>(Error::InvalidArgument);
+        return to_gm(Error::InvalidArgument);
     for (const auto& characteristic : service.characteristics)
     {
         if (!check_uuid(characteristic.uuid))
-            return static_cast<std::int32_t>(Error::InvalidArgument);
+            return to_gm(Error::InvalidArgument);
         for (const auto& descriptor : characteristic.descriptors)
         {
             if (!check_uuid(descriptor.uuid))
-                return static_cast<std::int32_t>(Error::InvalidArgument);
+                return to_gm(Error::InvalidArgument);
         }
     }
 
@@ -2967,22 +3178,21 @@ std::int32_t bluetooth_le_server_add_service(const BluetoothLeServiceDefinition&
     const std::string service_json = serialize_le_service_definition(service);
     std::string message;
     const Error error = g_backend->le_server_add_service(op_id, service_json, message);
-    g_last_error = error;
-    g_last_error_message = message;
+    set_last_error(error, message);
 
     if (error != Error::Ok)
         g_le_ops.erase(op_id);
 
-    return static_cast<std::int32_t>(error);
+    return to_gm(error);
 }
 
-std::int32_t bluetooth_le_server_clear_services()
+BluetoothError bluetooth_le_server_clear_services()
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     // The services the requests name are going away.
@@ -2990,72 +3200,67 @@ std::int32_t bluetooth_le_server_clear_services()
 
     std::string message;
     const Error error = g_backend->le_server_clear_services(message);
-    g_last_error = error;
-    g_last_error_message = message;
-    return static_cast<std::int32_t>(error);
+    set_last_error(error, message);
+    return to_gm(error);
 }
 
-std::int32_t bluetooth_le_server_respond_read(std::int32_t request_id, std::int32_t error_code, struct gm::wire::GMBuffer data, unsigned int offset, unsigned int size)
+BluetoothError bluetooth_le_server_respond_read(std::int32_t request_id, std::int32_t error_code, struct gm::wire::GMBuffer data, unsigned int offset, unsigned int size)
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     // Checked before the request is erased, so a call with a bad id, kind or
     // range can be retried instead of leaving the remote central to time out.
     if (!check_le_server_request(request_id, false, "bluetooth_le_server_respond_write"))
-        return static_cast<std::int32_t>(g_last_error);
+        return to_gm(g_last_error);
 
     if (error_code == static_cast<std::int32_t>(Error::Ok) && size > 0 &&
         !buffer_range_valid(data, offset, size, "bluetooth_le_server_respond_read"))
-        return static_cast<std::int32_t>(Error::InvalidArgument);
+        return to_gm(Error::InvalidArgument);
 
     if (!take_le_server_request(request_id))
-        return static_cast<std::int32_t>(g_last_error);
+        return to_gm(g_last_error);
 
     const std::uint8_t* buffer = static_cast<const std::uint8_t*>(data.data()) + offset;
     const std::string value_base64 = json::base64_encode(buffer, size);
 
     std::string message;
     const Error error = g_backend->le_server_respond_read(request_id, error_code, value_base64, message);
-    g_last_error = error;
-    g_last_error_message = message;
-    return static_cast<std::int32_t>(error);
+    set_last_error(error, message);
+    return to_gm(error);
 }
 
-std::int32_t bluetooth_le_server_respond_write(std::int32_t request_id, std::int32_t error_code)
+BluetoothError bluetooth_le_server_respond_write(std::int32_t request_id, std::int32_t error_code)
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
     if (!check_le_server_request(request_id, true, "bluetooth_le_server_respond_read"))
-        return static_cast<std::int32_t>(g_last_error);
+        return to_gm(g_last_error);
 
     const auto request = take_le_server_request(request_id);
     if (!request)
-        return static_cast<std::int32_t>(g_last_error);
+        return to_gm(g_last_error);
 
     // A write without response was completed when it arrived; answering it is
     // allowed everywhere and changes nothing (R1-15).
     if (!request->response_needed)
     {
-        g_last_error = Error::Ok;
-        g_last_error_message.clear();
-        return static_cast<std::int32_t>(Error::Ok);
+        return to_gm(Error::Ok);
     }
 
     std::string message;
     const Error error = g_backend->le_server_respond_write(request_id, error_code, message);
-    g_last_error = error;
-    g_last_error_message = message;
-    return static_cast<std::int32_t>(error);
+    set_last_error(error, message);
+    return to_gm(error);
 }
 
 std::int32_t bluetooth_le_server_write_request_get_value(std::int32_t request_id, struct gm::wire::GMBuffer out_data, unsigned int offset, unsigned int max_size)
@@ -3078,34 +3283,42 @@ std::int32_t bluetooth_le_server_write_request_get_value(std::int32_t request_id
     return static_cast<std::int32_t>(n);
 }
 
-std::int32_t bluetooth_le_server_notify_value(std::string_view service_uuid, std::string_view characteristic_uuid, std::uint64_t connection, struct gm::wire::GMBuffer data, unsigned int offset, unsigned int size)
+BluetoothError bluetooth_le_server_notify_value(std::string_view service_uuid, std::string_view characteristic_uuid, std::uint64_t connection, struct gm::wire::GMBuffer data, unsigned int offset, unsigned int size)
 {
     if (!g_backend)
     {
         g_last_error = Error::NotInitialized;
         g_last_error_message = "Bluetooth backend is not initialized";
-        return static_cast<std::int32_t>(Error::NotInitialized);
+        return to_gm(Error::NotInitialized);
     }
 
-    // The backend broadcasts to every current subscriber; there is no
-    // per-connection targeting available below this layer yet, so
-    // `connection` is accepted for forward-compatibility but not honored.
-    (void)connection;
-
     if (!check_uuid(service_uuid) || !check_uuid(characteristic_uuid))
-        return static_cast<std::int32_t>(Error::InvalidArgument);
+        return to_gm(Error::InvalidArgument);
+
+    // 0 broadcasts; a server connection names one central (R1-48).
+    std::string central;
+    if (connection != 0)
+    {
+        central = server_central_key(connection);
+        if (central.empty())
+        {
+            g_last_error = Error::InvalidHandle;
+            g_last_error_message = "Unknown or disconnected server connection " + std::to_string(connection);
+            return to_gm(Error::InvalidHandle);
+        }
+    }
 
     if (!buffer_range_valid(data, offset, size, "bluetooth_le_server_notify_value"))
-        return static_cast<std::int32_t>(Error::InvalidArgument);
+        return to_gm(Error::InvalidArgument);
 
     const std::uint8_t* buffer = static_cast<const std::uint8_t*>(data.data()) + offset;
     const std::string value_base64 = json::base64_encode(buffer, size);
 
     std::string message;
-    const Error error = g_backend->le_server_notify_value(std::string(service_uuid), std::string(characteristic_uuid), value_base64, message);
-    g_last_error = error;
-    g_last_error_message = message;
-    return static_cast<std::int32_t>(error);
+    const Error error = g_backend->le_server_notify_value(canonical_uuid(service_uuid), canonical_uuid(characteristic_uuid), central,
+        value_base64, message);
+    set_last_error(error, message);
+    return to_gm(error);
 }
 
 // --- BLE callbacks ---

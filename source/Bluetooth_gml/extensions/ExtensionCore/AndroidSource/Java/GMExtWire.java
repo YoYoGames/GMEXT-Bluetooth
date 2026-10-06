@@ -528,6 +528,11 @@ public class GMExtWire
             super.writeTo(dst);
         }
 
+        /** What writeTo() emits: the tag and count header, then the payload. */
+        public int serializedLength() {
+            return Byte.BYTES + Short.BYTES + length();
+        }
+
         @Override
         protected void serializeTo(DataStream dst) {
             dst.buf.writeI8(tag);
@@ -805,7 +810,9 @@ public class GMExtWire
                 if (packed.length() == 0) return 0.0;
             }
 
-            int need = packed.length();
+            // writeTo() puts the array header in front of the payload, so the size
+            // reported back has to count it or the caller's buffer ends 3 bytes short.
+            int need = packed.serializedLength();
             if (need > output.remaining()) return - (double) need;
 
             packed.writeTo(output);

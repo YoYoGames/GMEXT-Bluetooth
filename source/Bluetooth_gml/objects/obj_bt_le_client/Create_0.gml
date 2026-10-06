@@ -112,11 +112,15 @@ bluetooth_set_callback_scan_stopped(function(_error, _message)
 });
 
 bluetooth_set_callback_le_characteristic_value_changed(
-    function(_characteristic, _connection)
+    function(_characteristic, _connection, _value, _size)
     {
         if (instance_exists(global.ble_conn_inst))
         {
-            global.ble_conn_inst.on_value_changed(_characteristic, _connection);
+            global.ble_conn_inst.on_value_changed(_characteristic, _connection, _value, _size);
+        }
+        else
+        {
+            bluetooth_le_value_release(_value);
         }
     }
 );

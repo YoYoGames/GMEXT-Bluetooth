@@ -60,6 +60,22 @@ enum BluetoothLeCharacteristicProperty : int32 {
     ExtendedProperties        = 128
 }
 
+[global, bind = typed_gml]
+enum BluetoothLeWriteType : int32 {
+    WithResponse    = 0,
+    WithoutResponse = 1
+}
+
+/// Advertising transmit power. The members are Android's AdvertiseSettings
+/// levels; Windows maps them to -21, -15, -7 and 1 dBm.
+[global, bind = typed_gml]
+enum BluetoothLeAdvertiseTxPower : int32 {
+    UltraLow = 0,
+    Low      = 1,
+    Medium   = 2,
+    High     = 3
+}
+
 /// Normalized local Bluetooth adapter/manager state.
 [global, bind = typed_gml]
 enum BluetoothState : int32 {
@@ -115,6 +131,59 @@ class `[[BluetoothLeServiceDefinition]]` prototype Object {
 }
 
 // =============================================================================
+// BLE advertising definitions
+// =============================================================================
+
+/// How the advertisement is sent. tx_power left undefined is the platform default.
+[global]
+class `[[BluetoothLeAdvertiseSettings]]` prototype Object {
+    [field]
+    property connectable : bool { get; set; }
+
+    [field, type_hint=`BluetoothLeAdvertiseTxPower?`]
+    property tx_power : gmval { get; set; }
+}
+
+/// Service data for one service. Its uuid must also be in service_uuids.
+[global]
+class `[[BluetoothLeAdvertiseServiceData]]` prototype Object {
+    [field]
+    property uuid : string { get; set; }
+
+    [field, type_hint=`uint8[]`]
+    property data : gmval { get; set; }
+}
+
+/// Manufacturer-specific data under a Bluetooth SIG company identifier (0-65535).
+[global]
+class `[[BluetoothLeAdvertiseManufacturerData]]` prototype Object {
+    [field]
+    property company_id : int32 { get; set; }
+
+    [field, type_hint=`uint8[]`]
+    property data : gmval { get; set; }
+}
+
+/// What the advertisement carries.
+[global]
+class `[[BluetoothLeAdvertiseData]]` prototype Object {
+    [field]
+    property include_name : bool { get; set; }
+
+    [field]
+    property include_tx_power : bool { get; set; }
+
+    [field, type_hint=`string[]`]
+    property service_uuids : gmval { get; set; }
+
+    [field, type_hint=`BluetoothLeAdvertiseServiceData[]`]
+    property service_data : gmval { get; set; }
+
+    [field, type_hint=`BluetoothLeAdvertiseManufacturerData[]`]
+    property manufacturer_data : gmval { get; set; }
+}
+
+// =============================================================================
 // Lifecycle / event pump
 // =============================================================================
 
@@ -132,8 +201,8 @@ function bluetooth_is_initialized(): bool;
 // Error state
 // =============================================================================
 
-[global, bind = typed_gml]
-function bluetooth_last_error_code(): int32;
+[global, bind = typed_gml, type_hint=`BluetoothError`]
+function bluetooth_last_error_code(): gmval;
 
 [global, bind = typed_gml]
 function bluetooth_last_error_message(): string;
@@ -159,24 +228,24 @@ function bluetooth_classic_server_is_supported(): bool;
 
 /// Windows returns Granted. Android checks the runtime Bluetooth/location
 /// permission set required by the current Android version.
-[global, bind = typed_gml]
-function bluetooth_permission_get_status(): int32;
+[global, bind = typed_gml, type_hint=`BluetoothPermissionStatus`]
+function bluetooth_permission_get_status(): gmval;
 
 /// Android: starts the system permission request when needed.
 /// Windows: returns Ok immediately.
-[global, bind = typed_gml]
-function bluetooth_permission_request(): int32;
+[global, bind = typed_gml, type_hint=`BluetoothError`]
+function bluetooth_permission_request(): gmval;
 
 // =============================================================================
 // BLE discovery
 // =============================================================================
 
 /// active=true requests scan-response packets where the platform supports it.
-[global, bind = typed_gml]
-function bluetooth_le_scan_start(active: bool): int32;
+[global, bind = typed_gml, type_hint=`BluetoothError`]
+function bluetooth_le_scan_start(active: bool): gmval;
 
-[global, bind = typed_gml]
-function bluetooth_le_scan_stop(): int32;
+[global, bind = typed_gml, type_hint=`BluetoothError`]
+function bluetooth_le_scan_stop(): gmval;
 
 [global, bind = typed_gml]
 function bluetooth_le_scan_is_running(): bool;
@@ -185,11 +254,11 @@ function bluetooth_le_scan_is_running(): bool;
 // Bluetooth Classic discovery
 // =============================================================================
 
-[global, bind = typed_gml]
-function bluetooth_classic_scan_start(): int32;
+[global, bind = typed_gml, type_hint=`BluetoothError`]
+function bluetooth_classic_scan_start(): gmval;
 
-[global, bind = typed_gml]
-function bluetooth_classic_scan_stop(): int32;
+[global, bind = typed_gml, type_hint=`BluetoothError`]
+function bluetooth_classic_scan_stop(): gmval;
 
 [global, bind = typed_gml]
 function bluetooth_classic_scan_is_running(): bool;
@@ -210,8 +279,8 @@ function bluetooth_device_get_at(index: int32): gmval;
 [global, bind = typed_gml]
 function bluetooth_device_is_valid([type_hint=`uint64`] device: gmval): bool;
 
-[global, bind = typed_gml]
-function bluetooth_device_get_transport([type_hint=`uint64`] device: gmval): int32;
+[global, bind = typed_gml, type_hint=`BluetoothTransport`]
+function bluetooth_device_get_transport([type_hint=`uint64`] device: gmval): gmval;
 
 /// Opaque platform identifier. Do not assume this is a MAC address.
 [global, bind = typed_gml]
@@ -249,10 +318,10 @@ function bluetooth_classic_connect(
     callback: func
 ): gmval;
 
-[global, bind = typed_gml]
+[global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_classic_disconnect(
     [type_hint=`uint64`] connection: gmval
-): int32;
+): gmval;
 
 [global, bind = typed_gml]
 function bluetooth_classic_connection_is_valid(
@@ -276,13 +345,13 @@ function bluetooth_classic_receive_available(
 ): int32;
 
 /// Sends bytes from a GameMaker buffer over the RFCOMM connection.
-[global, bind = typed_gml]
+[global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_classic_send(
     [type_hint=`uint64`] connection: gmval,
     [type_hint=buffer] data: gmval,
     offset: uint32,
     size: uint32
-): int32;
+): gmval;
 
 /// Copies available RFCOMM bytes into a GameMaker buffer.
 [global, bind = typed_gml]
@@ -298,14 +367,14 @@ function bluetooth_classic_receive(
 // =============================================================================
 
 /// Starts an RFCOMM service using the supplied UUID.
-[global, bind = typed_gml]
+[global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_classic_server_start(
     name: string,
     service_uuid: string
-): int32;
+): gmval;
 
-[global, bind = typed_gml]
-function bluetooth_classic_server_stop(): int32;
+[global, bind = typed_gml, type_hint=`BluetoothError`]
+function bluetooth_classic_server_stop(): gmval;
 
 [global, bind = typed_gml]
 function bluetooth_classic_server_is_running(): bool;
@@ -323,13 +392,13 @@ function bluetooth_classic_server_is_running(): bool;
 ///   no OS API to cancel discoverability early, so bluetooth_classic_discoverable_stop returns
 ///   NotSupported on this platform and it simply expires on its own.
 /// macOS/iOS: no public API exists; returns NotSupported.
-[global, bind = typed_gml]
-function bluetooth_classic_discoverable_start(duration_seconds: int32): int32;
+[global, bind = typed_gml, type_hint=`BluetoothError`]
+function bluetooth_classic_discoverable_start(duration_seconds: int32): gmval;
 
 /// Stops discoverability early. See bluetooth_classic_discoverable_start for per-platform support
 /// (NotSupported on Android and Apple).
-[global, bind = typed_gml]
-function bluetooth_classic_discoverable_stop(): int32;
+[global, bind = typed_gml, type_hint=`BluetoothError`]
+function bluetooth_classic_discoverable_stop(): gmval;
 
 [global, bind = typed_gml]
 function bluetooth_classic_discoverable_is_running(): bool;
@@ -357,8 +426,8 @@ function bluetooth_pairing_is_supported([type_hint=`uint64`] device: gmval): boo
 ///   BLE bonding on Apple platforms happens implicitly when a protected characteristic is
 ///   accessed and cannot be triggered explicitly.
 /// iOS: always NotSupported (Classic isn't supported on iOS; BLE bonding is implicit, as above).
-[global, bind = typed_gml]
-function bluetooth_pair([type_hint=`uint64`] device: gmval, callback: func): int32;
+[global, bind = typed_gml, type_hint=`BluetoothError`]
+function bluetooth_pair([type_hint=`uint64`] device: gmval, callback: func): gmval;
 
 /// Whether the given device is currently paired/bonded at the OS level.
 /// Android: BluetoothDevice.getBondState() == BOND_BONDED. Works for Classic and LE.
@@ -382,10 +451,10 @@ function bluetooth_le_connect(
     callback: func
 ): gmval;
 
-[global, bind = typed_gml]
+[global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_le_disconnect(
     [type_hint=`uint64`] connection: gmval
-): int32;
+): gmval;
 
 [global, bind = typed_gml]
 function bluetooth_le_connection_is_valid(
@@ -408,11 +477,11 @@ function bluetooth_le_connection_get_device(
 
 /// Starts asynchronous service discovery for a connected LE device.
 /// callback(error_code, message, connection)
-[global, bind = typed_gml]
+[global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_le_services_discover(
     [type_hint=`uint64`] connection: gmval,
     callback: func
-): int32;
+): gmval;
 
 [global, bind = typed_gml]
 function bluetooth_le_service_get_count(
@@ -432,11 +501,11 @@ function bluetooth_le_service_get_uuid(
 
 /// Starts asynchronous characteristic discovery for a discovered service.
 /// callback(error_code, message, service)
-[global, bind = typed_gml]
+[global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_le_characteristics_discover(
     [type_hint=`uint64`] service: gmval,
     callback: func
-): int32;
+): gmval;
 
 [global, bind = typed_gml]
 function bluetooth_le_characteristic_get_count(
@@ -462,11 +531,11 @@ function bluetooth_le_characteristic_get_properties(
 
 /// Starts asynchronous descriptor discovery for a discovered characteristic.
 /// callback(error_code, message, characteristic)
-[global, bind = typed_gml]
+[global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_le_descriptors_discover(
     [type_hint=`uint64`] characteristic: gmval,
     callback: func
-): int32;
+): gmval;
 
 [global, bind = typed_gml]
 function bluetooth_le_descriptor_get_count(
@@ -489,81 +558,90 @@ function bluetooth_le_descriptor_get_uuid(
 // =============================================================================
 
 /// Starts an asynchronous characteristic read.
-/// callback(error_code, message, characteristic)
-[global, bind = typed_gml]
+/// callback(error_code, message, characteristic, value, size). value is a value
+/// handle holding the bytes read (0, with size 0, on failure); copy them with
+/// bluetooth_le_value_copy().
+[global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_le_characteristic_read(
     [type_hint=`uint64`] characteristic: gmval,
     callback: func
-): int32;
+): gmval;
 
-/// Copies the last-read/last-notified value into out_data. Returns bytes copied, or -1 if none available.
-[global, bind = typed_gml]
-function bluetooth_le_characteristic_get_value(
-    [type_hint=`uint64`] characteristic: gmval,
-    [type_hint=buffer] out_data: gmval,
-    offset: uint32,
-    max_size: uint32
-): int32;
-
-/// write_type: 0 = with response, 1 = without response.
 /// callback(error_code, message, characteristic)
-[global, bind = typed_gml]
+[global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_le_characteristic_write(
     [type_hint=`uint64`] characteristic: gmval,
     [type_hint=buffer] data: gmval,
     offset: uint32,
     size: uint32,
-    write_type: int32,
+    [type_hint=`BluetoothLeWriteType`] write_type: gmval,
     callback: func
-): int32;
+): gmval;
 
-/// mode: see BluetoothLeSubscribeMode. callback(error_code, message, characteristic)
-[global, bind = typed_gml]
+/// callback(error_code, message, characteristic)
+[global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_le_characteristic_subscribe(
     [type_hint=`uint64`] characteristic: gmval,
-    mode: int32,
+    [type_hint=`BluetoothLeSubscribeMode`] mode: gmval,
     callback: func
-): int32;
+): gmval;
 
-[global, bind = typed_gml]
+/// callback(error_code, message, descriptor, value, size), as for
+/// bluetooth_le_characteristic_read().
+[global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_le_descriptor_read(
     [type_hint=`uint64`] descriptor: gmval,
     callback: func
-): int32;
+): gmval;
 
-[global, bind = typed_gml]
-function bluetooth_le_descriptor_get_value(
-    [type_hint=`uint64`] descriptor: gmval,
-    [type_hint=buffer] out_data: gmval,
-    offset: uint32,
-    max_size: uint32
-): int32;
-
-[global, bind = typed_gml]
+[global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_le_descriptor_write(
     [type_hint=`uint64`] descriptor: gmval,
     [type_hint=buffer] data: gmval,
     offset: uint32,
     size: uint32,
     callback: func
-): int32;
+): gmval;
+
+// =============================================================================
+// BLE values
+// =============================================================================
+
+/// Copies a value delivered by a read or a notification callback into out_data at
+/// offset - all size bytes the callback reported - and frees the value. A buffer
+/// too small for it is InvalidArgument and keeps the value. At most 256 values are
+/// held; past that the oldest is dropped, and shutdown frees them all.
+[global, bind = typed_gml, type_hint=`BluetoothError`]
+function bluetooth_le_value_copy(
+    [type_hint=`uint64`] value: gmval,
+    [type_hint=buffer] out_data: gmval,
+    offset: uint32
+): gmval;
+
+/// Frees a value without copying it.
+[global, bind = typed_gml, type_hint=`BluetoothError`]
+function bluetooth_le_value_release(
+    [type_hint=`uint64`] value: gmval
+): gmval;
 
 // =============================================================================
 // BLE advertise
 // =============================================================================
 
-/// settings_json: {"txPowerLevel": int, ...}.
-/// data_json: {"includeName":bool,"includePowerLevel":bool,"services":[{"uuid":string,"data":base64}],"manufacturer":{"id":int,"data":base64}}
+/// Starts advertising. A field the platform cannot send is NotSupported before
+/// anything starts: Apple sends only the name and the service UUIDs and is always
+/// connectable; Windows sends a service UUID, its service data and the name only
+/// through a registered GATT service.
 /// callback(error_code, message)
-[global, bind = typed_gml]
+[global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_le_advertise_start(
-    settings_json: string,
-    data_json: string,
+    [type_hint=`BluetoothLeAdvertiseSettings`] settings: gmval,
+    [type_hint=`BluetoothLeAdvertiseData`] data: gmval,
     callback: func
-): int32;
+): gmval;
 
-[global, bind = typed_gml]
-function bluetooth_le_advertise_stop(): int32;
+[global, bind = typed_gml, type_hint=`BluetoothError`]
+function bluetooth_le_advertise_stop(): gmval;
 
 [global, bind = typed_gml]
 function bluetooth_le_advertise_is_running(): bool;
@@ -572,42 +650,42 @@ function bluetooth_le_advertise_is_running(): bool;
 // BLE GATT server (peripheral)
 // =============================================================================
 
-[global, bind = typed_gml]
-function bluetooth_le_server_start(): int32;
+[global, bind = typed_gml, type_hint=`BluetoothError`]
+function bluetooth_le_server_start(): gmval;
 
-[global, bind = typed_gml]
-function bluetooth_le_server_stop(): int32;
+[global, bind = typed_gml, type_hint=`BluetoothError`]
+function bluetooth_le_server_stop(): gmval;
 
 [global, bind = typed_gml]
 function bluetooth_le_server_is_running(): bool;
 
 /// Adds a typed primary GATT service definition to the local peripheral/server.
 /// callback(error_code, message)
-[global, bind = typed_gml]
+[global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_le_server_add_service(
     [type_hint=`BluetoothLeServiceDefinition`] service: gmval,
     callback: func
-): int32;
+): gmval;
 
-[global, bind = typed_gml]
-function bluetooth_le_server_clear_services(): int32;
+[global, bind = typed_gml, type_hint=`BluetoothError`]
+function bluetooth_le_server_clear_services(): gmval;
 
 /// Call from inside the characteristic/descriptor read-request callback.
-[global, bind = typed_gml]
+[global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_le_server_respond_read(
     request_id: int32,
     error_code: int32,
     [type_hint=buffer] data: gmval,
     offset: uint32,
     size: uint32
-): int32;
+): gmval;
 
 /// Call from inside the characteristic/descriptor write-request callback.
-[global, bind = typed_gml]
+[global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_le_server_respond_write(
     request_id: int32,
     error_code: int32
-): int32;
+): gmval;
 
 /// Copies the bytes a remote central wrote in a pending write request into out_data.
 [global, bind = typed_gml]
@@ -618,8 +696,10 @@ function bluetooth_le_server_write_request_get_value(
     max_size: uint32
 ): int32;
 
-/// Pushes an updated value to a subscribed central. connection=0 broadcasts to all subscribers.
-[global, bind = typed_gml]
+/// Pushes an updated value to subscribed centrals. connection=0 broadcasts to all
+/// subscribers; a server connection handle sends to that central only, and is
+/// NotFound when it is not subscribed to the characteristic.
+[global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_le_server_notify_value(
     service_uuid: string,
     characteristic_uuid: string,
@@ -627,7 +707,7 @@ function bluetooth_le_server_notify_value(
     [type_hint=buffer] data: gmval,
     offset: uint32,
     size: uint32
-): int32;
+): gmval;
 
 // =============================================================================
 // Callbacks
@@ -689,17 +769,22 @@ function bluetooth_set_callback_le_disconnected(callback: func): bool;
 [global, bind = typed_gml]
 function bluetooth_remove_callback_le_disconnected(): bool;
 
-/// callback(characteristic, connection)
-/// Fired for unsolicited notify/indicate value updates. Read the new value via
-/// bluetooth_le_characteristic_get_value().
+/// callback(characteristic, connection, value, size)
+/// Fired for every notify/indicate value update. value is a value handle holding
+/// the bytes; copy them with bluetooth_le_value_copy().
 [global, bind = typed_gml]
 function bluetooth_set_callback_le_characteristic_value_changed(callback: func): bool;
 
 [global, bind = typed_gml]
 function bluetooth_remove_callback_le_characteristic_value_changed(): bool;
 
-/// callback(connection, connected, device)
+/// callback(connection, connected, device), connected a bool.
 /// Fired when a remote central connects to or disconnects from our GATT server.
+/// connection is the server connection handle the read and write requests carry,
+/// and is retired on the disconnect. Windows reports a central on its first
+/// request or subscription and its session closing; Apple, which has no
+/// peripheral-side connection event, on its first request or subscription and
+/// when its last subscription ends.
 [global, bind = typed_gml]
 function bluetooth_set_callback_le_server_connection_state_changed(callback: func): bool;
 

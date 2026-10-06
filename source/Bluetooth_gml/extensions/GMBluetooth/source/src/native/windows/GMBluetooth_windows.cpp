@@ -36,6 +36,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -326,8 +327,44 @@ namespace gmbluetooth
             return out;
         }
 
+        // A remote device id ends in its address ("BluetoothLE#BluetoothLE
+        // <local>-<remote>"); empty when it does not.
+        std::string address_from_device_id(const std::string& device_id)
+        {
+            const auto dash = device_id.rfind('-');
+            if (dash == std::string::npos)
+                return std::string();
+
+            std::string address = device_id.substr(dash + 1);
+            if (address.size() != 17)
+                return std::string();
+            for (std::size_t i = 0; i < address.size(); ++i)
+            {
+                const bool colon = (i % 3) == 2;
+                if (colon ? address[i] != ':' : std::isxdigit(static_cast<unsigned char>(address[i])) == 0)
+                    return std::string();
+            }
+            std::transform(address.begin(), address.end(), address.begin(), [](unsigned char c)
+            {
+                return static_cast<char>(std::toupper(c));
+            });
+            return address;
+        }
+
+        // The central fields every GATT server event carries: the key the core
+        // maps to a server connection, and the device address when known.
+        std::string server_central_json(const std::string& central, const std::string& address)
+        {
+            std::string out = "\"central\":\"" + json_escape(central) + "\"";
+            if (!address.empty())
+                out += ",\"address\":\"" + json_escape(address) + "\"";
+            return out;
+        }
+
         std::string make_server_request_json(
             std::int32_t request_id,
+            const std::string& central,
+            const std::string& address,
             const std::string& service_uuid,
             const std::string& characteristic_uuid,
             const std::string& descriptor_uuid,
@@ -336,6 +373,7 @@ namespace gmbluetooth
             bool response_needed = true)
         {
             std::string out = "{\"request_id\":" + std::to_string(request_id) +
+                "," + server_central_json(central, address) +
                 ",\"service_uuid\":\"" + json_escape(service_uuid) +
                 "\",\"characteristic_uuid\":\"" + json_escape(characteristic_uuid) +
                 "\",\"descriptor_uuid\":\"" + json_escape(descriptor_uuid) +
@@ -405,6 +443,7 @@ namespace gmbluetooth
             WDBG::GattLocalCharacteristic characteristic{nullptr};
             winrt::event_token read_token{};
             winrt::event_token write_token{};
+            winrt::event_token subscribed_token{};
             std::vector<std::shared_ptr<LocalGattDescriptorState>> descriptors;
         };
 
@@ -621,6 +660,8 @@ namespace gmbluetooth
         struct PendingNotify
         {
             WDBG::GattLocalCharacteristic characteristic{nullptr};
+            // Set for a notify to one central; null broadcasts to every subscriber.
+            WDBG::GattSubscribedClient client{nullptr};
             std::vector<std::uint8_t> bytes;
         };
 
@@ -683,6 +724,28 @@ namespace gmbluetooth
 
                 try
                 {
+                    if (next.client)
+                    {
+                        auto operation = next.characteristic.NotifyValueAsync(bytes_to_buffer(next.bytes), next.client);
+                        operation.Completed(
+                            [notifies](const WF::IAsyncOperation<WDBG::GattClientNotificationResult>& done, WF::AsyncStatus status)
+                            {
+                                try
+                                {
+                                    if (status != WF::AsyncStatus::Completed)
+                                        GMBT_LOG("GATT notify did not complete: status=%d", static_cast<int>(status));
+                                    else if (done.GetResults().Status() != WDBG::GattCommunicationStatus::Success)
+                                        GMBT_LOG("GATT notify failed for its central: status=%d", static_cast<int>(done.GetResults().Status()));
+                                }
+                                catch (const winrt::hresult_error& error)
+                                {
+                                    GMBT_LOG("GATT notify failed: %s", winrt::to_string(error.message()).c_str());
+                                }
+                                start_next_notify(notifies);
+                            });
+                        return;
+                    }
+
                     auto operation = next.characteristic.NotifyValueAsync(bytes_to_buffer(next.bytes));
                     operation.Completed(
                         [notifies](const NotifyOperation& done, WF::AsyncStatus status)
@@ -2369,7 +2432,21 @@ namespace gmbluetooth
 
         // ===== BLE Advertiser =====
 
-        Error le_advertise_start(std::uint64_t op_id, const std::string& settings_json, const std::string& data_json, std::string& message) override
+        // BluetoothLeAdvertiseTxPower in dBm: the values Android documents for
+        // its four AdvertiseSettings levels.
+        static std::int16_t advertise_tx_power_dbm(LeAdvertiseTxPower level)
+        {
+            switch (level)
+            {
+                case LeAdvertiseTxPower::UltraLow: return -21;
+                case LeAdvertiseTxPower::Low:      return -15;
+                case LeAdvertiseTxPower::Medium:   return -7;
+                case LeAdvertiseTxPower::High:     return 1;
+            }
+            return -7;
+        }
+
+        Error le_advertise_start(std::uint64_t op_id, const LeAdvertiseSettings& settings, const LeAdvertiseData& data, std::string& message) override
         {
             if (!initialized_)
             {
@@ -2388,81 +2465,56 @@ namespace gmbluetooth
                 return Error::Ok;
             }
 
-            try
+            // The generic Windows advertisement publisher cannot write
+            // system-reserved sections such as LocalName or Service UUIDs.
+            // Those are published by a registered service's GattServiceProvider,
+            // so a service UUID, its service data and the name go out only
+            // through one; the publisher carries manufacturer data and the
+            // TX power. Each refusal names the field, before anything starts.
+            std::unordered_set<std::string> service_uuids;
+            std::vector<WDBG::GattServiceProvider> providers;
+            for (const auto& raw_uuid : data.service_uuids)
             {
-                advertise_connectable_ = true;
-                advertise_discoverable_ = true;
-                advertise_include_power_ = false;
-                advertise_tx_power_.reset();
-                advertise_service_data_.clear();
-
-                if (const auto settings = json::parse(settings_json); settings && settings->is_object())
-                {
-                    if (const auto* connectable = settings->find("connectable"))
-                        advertise_connectable_ = connectable->as_bool(true);
-                    if (const auto* tx = settings->find("txPowerLevel"); tx && tx->is_number())
-                        advertise_tx_power_ = tx->as_int(0);
-                }
-
-                std::optional<std::uint16_t> manufacturer_id;
-                std::vector<std::uint8_t> manufacturer_bytes;
-
-                if (const auto data = json::parse(data_json); data && data->is_object())
-                {
-                    if (const auto* include_name = data->find("includeName"))
-                        advertise_discoverable_ = include_name->as_bool(true);
-                    if (const auto* include_power = data->find("includePowerLevel"))
-                        advertise_include_power_ = include_power->as_bool(false);
-
-                    if (const auto* services = data->find("services"); services && services->is_array())
-                    {
-                        for (const auto& service : services->array_value)
-                        {
-                            if (!service.is_object())
-                                continue;
-                            const auto* uuid = service.find("uuid");
-                            if (!uuid || !uuid->is_string())
-                                continue;
-
-                            std::vector<std::uint8_t> service_data;
-                            if (const auto* value = service.find("data"); value && value->is_string())
-                                service_data = json::base64_decode(value->string_value);
-                            advertise_service_data_[normalize_uuid(uuid->string_value)] = std::move(service_data);
-                        }
-                    }
-
-                    if (const auto* manufacturer = data->find("manufacturer"); manufacturer && manufacturer->is_object())
-                    {
-                        if (const auto* id = manufacturer->find("id"); id && id->is_number())
-                        {
-                            const auto raw_id = id->as_int(-1);
-                            if (raw_id >= 0 && raw_id <= 0xFFFF)
-                                manufacturer_id = static_cast<std::uint16_t>(raw_id);
-                        }
-                        if (const auto* value = manufacturer->find("data"); value && value->is_string())
-                            manufacturer_bytes = json::base64_decode(value->string_value);
-                    }
-                }
-
-                // The generic Windows advertisement publisher cannot write
-                // system-reserved sections such as LocalName or Service UUIDs.
-                // Those are published by GattServiceProvider below. The generic
-                // publisher is used for manufacturer data and TX-power metadata.
-                const bool start_publisher = manufacturer_id || advertise_include_power_;
-
-                std::vector<WDBG::GattServiceProvider> providers;
-                for (auto& [_, service] : gatt_services_)
-                {
-                    if (service && service->provider)
-                        providers.push_back(service->provider);
-                }
-
-                if (!start_publisher && providers.empty())
+                const std::string uuid = normalize_uuid(raw_uuid);
+                const auto service_it = gatt_services_.find(uuid);
+                if (service_it == gatt_services_.end() || !service_it->second || !service_it->second->provider)
                 {
                     le_advertising_.store(false);
-                    message = "Windows cannot advertise without manufacturer data, a power level or a registered GATT service";
+                    message = "service_uuids: Windows advertises a service UUID only through a registered GATT service, and " +
+                        uuid + " is not one";
                     return Error::NotSupported;
                 }
+                if (service_uuids.insert(uuid).second)
+                    providers.push_back(service_it->second->provider);
+            }
+
+            if (data.include_name && providers.empty())
+            {
+                le_advertising_.store(false);
+                message = "include_name: Windows advertises the name only through a registered GATT service in service_uuids";
+                return Error::NotSupported;
+            }
+
+            const bool start_publisher = !data.manufacturer_data.empty() || data.include_tx_power || settings.tx_power.has_value();
+            if (!start_publisher && providers.empty())
+            {
+                le_advertising_.store(false);
+                message = "Windows cannot advertise without manufacturer data, a power level or a registered GATT service";
+                return Error::NotSupported;
+            }
+
+            try
+            {
+                advertise_connectable_ = settings.connectable;
+                advertise_discoverable_ = data.include_name;
+                advertise_include_power_ = data.include_tx_power;
+                advertise_tx_power_.reset();
+                if (settings.tx_power)
+                    advertise_tx_power_ = advertise_tx_power_dbm(*settings.tx_power);
+                advertise_service_uuids_ = std::move(service_uuids);
+                advertise_service_data_.clear();
+                for (const auto& entry : data.service_data)
+                    advertise_service_data_[normalize_uuid(entry.uuid)] = entry.data;
 
                 auto tracker = std::make_shared<AdvertiseStartTracker>();
                 tracker->op_id = op_id;
@@ -2481,12 +2533,12 @@ namespace gmbluetooth
                 tracker->remaining.store(to_start);
 
                 advertiser_ = WDBA::BluetoothLEAdvertisementPublisher{};
-                if (manufacturer_id)
+                for (const auto& manufacturer : data.manufacturer_data)
                 {
                     advertiser_.Advertisement().ManufacturerData().Append(
                         WDBA::BluetoothLEManufacturerData(
-                            *manufacturer_id,
-                            bytes_to_buffer(manufacturer_bytes)));
+                            manufacturer.company_id,
+                            bytes_to_buffer(manufacturer.data)));
                 }
 
                 advertiser_.IncludeTransmitPowerLevel(advertise_include_power_);
@@ -2579,8 +2631,8 @@ namespace gmbluetooth
                 if (start_publisher)
                     advertiser_.Start();
 
-                for (auto& [_, service] : gatt_services_)
-                    start_service_advertising(service);
+                for (const auto& uuid : advertise_service_uuids_)
+                    start_service_advertising(gatt_services_[uuid]);
 
                 // Every provider was already advertising and there is no
                 // publisher: nothing will report, so the start is done now.
@@ -2765,6 +2817,7 @@ namespace gmbluetooth
             clear_queued_notifies(notify_queue_);
             complete_parked_gatt_requests_noexcept();
             clear_gatt_services_noexcept();
+            release_server_sessions_noexcept();
             message.clear();
             return Error::Ok;
         }
@@ -2876,6 +2929,25 @@ namespace gmbluetooth
                         characteristic_state->characteristic_uuid = characteristic_uuid;
                         characteristic_state->characteristic = characteristic_result.Characteristic();
 
+                        characteristic_state->subscribed_token = characteristic_state->characteristic.SubscribedClientsChanged(
+                            [this](const WDBG::GattLocalCharacteristic& characteristic, const winrt::Windows::Foundation::IInspectable&)
+                            {
+                                try
+                                {
+                                    for (const auto& client : characteristic.SubscribedClients())
+                                    {
+                                        std::string address;
+                                        bool is_new = false;
+                                        const std::string central = note_server_session(client.Session(), address, is_new);
+                                        if (is_new)
+                                            push_server_connection_state(central, address, true);
+                                    }
+                                }
+                                catch (...)
+                                {
+                                }
+                            });
+
                         characteristic_state->read_token = characteristic_state->characteristic.ReadRequested(
                             [this, service_uuid, characteristic_uuid](
                                 const WDBG::GattLocalCharacteristic&,
@@ -2897,6 +2969,10 @@ namespace gmbluetooth
                                         pending_gatt_reads_[request_id] = PendingGattRead{request, deferral};
                                     }
 
+                                    std::string central_address;
+                                    bool central_is_new = false;
+                                    const std::string central = note_server_session(args.Session(), central_address, central_is_new);
+
                                     if (hooks_.push_event)
                                     {
                                         BackendEvent event;
@@ -2905,6 +2981,8 @@ namespace gmbluetooth
                                         event.event_type = "bluetooth_le_server_characteristic_read_request";
                                         event.json = make_server_request_json(
                                             request_id,
+                                            central,
+                                            central_address,
                                             service_uuid,
                                             characteristic_uuid,
                                             {},
@@ -2950,6 +3028,10 @@ namespace gmbluetooth
                                         deferral.Complete();
                                     }
 
+                                    std::string central_address;
+                                    bool central_is_new = false;
+                                    const std::string central = note_server_session(args.Session(), central_address, central_is_new);
+
                                     if (hooks_.push_event)
                                     {
                                         BackendEvent event;
@@ -2958,6 +3040,8 @@ namespace gmbluetooth
                                         event.event_type = "bluetooth_le_server_characteristic_write_request";
                                         event.json = make_server_request_json(
                                             request_id,
+                                            central,
+                                            central_address,
                                             service_uuid,
                                             characteristic_uuid,
                                             {},
@@ -3032,6 +3116,10 @@ namespace gmbluetooth
                                                 pending_gatt_reads_[request_id] = PendingGattRead{request, deferral};
                                             }
 
+                                            std::string central_address;
+                                            bool central_is_new = false;
+                                            const std::string central = note_server_session(args.Session(), central_address, central_is_new);
+
                                             if (hooks_.push_event)
                                             {
                                                 BackendEvent event;
@@ -3040,6 +3128,8 @@ namespace gmbluetooth
                                                 event.event_type = "bluetooth_le_server_descriptor_read_request";
                                                 event.json = make_server_request_json(
                                                     request_id,
+                                                    central,
+                                                    central_address,
                                                     service_uuid,
                                                     characteristic_uuid,
                                                     descriptor_uuid,
@@ -3085,6 +3175,10 @@ namespace gmbluetooth
                                                 deferral.Complete();
                                             }
 
+                                            std::string central_address;
+                                            bool central_is_new = false;
+                                            const std::string central = note_server_session(args.Session(), central_address, central_is_new);
+
                                             if (hooks_.push_event)
                                             {
                                                 BackendEvent event;
@@ -3093,6 +3187,8 @@ namespace gmbluetooth
                                                 event.event_type = "bluetooth_le_server_descriptor_write_request";
                                                 event.json = make_server_request_json(
                                                     request_id,
+                                                    central,
+                                                    central_address,
                                                     service_uuid,
                                                     characteristic_uuid,
                                                     descriptor_uuid,
@@ -3272,6 +3368,7 @@ namespace gmbluetooth
         Error le_server_notify_value(
             const std::string& service_uuid,
             const std::string& characteristic_uuid,
+            const std::string& central,
             const std::string& value_base64,
             std::string& message) override
         {
@@ -3290,6 +3387,34 @@ namespace gmbluetooth
                 return Error::NotFound;
             }
 
+            // A notify to one central goes to its subscription only (R1-48).
+            WDBG::GattSubscribedClient client{nullptr};
+            if (!central.empty())
+            {
+                try
+                {
+                    for (const auto& subscribed : characteristic_it->second->characteristic.SubscribedClients())
+                    {
+                        if (winrt::to_string(subscribed.Session().DeviceId().Id()) == central)
+                        {
+                            client = subscribed;
+                            break;
+                        }
+                    }
+                }
+                catch (const winrt::hresult_error& error)
+                {
+                    message = winrt::to_string(error.message());
+                    return Error::OperationFailed;
+                }
+
+                if (!client)
+                {
+                    message = "The central is not subscribed to this characteristic";
+                    return Error::NotFound;
+                }
+            }
+
             const auto notifies = notify_queue_;
             bool start = false;
             {
@@ -3302,6 +3427,7 @@ namespace gmbluetooth
 
                 PendingNotify pending;
                 pending.characteristic = characteristic_it->second->characteristic;
+                pending.client = client;
                 pending.bytes = json::base64_decode(value_base64);
                 notifies->queue.push_back(std::move(pending));
 
@@ -4019,9 +4145,122 @@ namespace gmbluetooth
         }
 
     private:
+        // A remote central's GattSession, kept from its first server event
+        // until it closes. Windows has no "central connected" event for a
+        // GATT server; the first request or subscription stands for it, and
+        // the session closing is the disconnect (R1-23).
+        struct ServerSession
+        {
+            WDBG::GattSession session{nullptr};
+            winrt::event_token status_token{};
+        };
+
+        // The key the core knows the central by - its session's device id -
+        // registering the session on first sight; is_new says it was. Empty
+        // for a session that names no device.
+        std::string note_server_session(const WDBG::GattSession& session, std::string& address, bool& is_new)
+        {
+            is_new = false;
+            if (!session)
+                return std::string();
+
+            std::string central;
+            try
+            {
+                central = winrt::to_string(session.DeviceId().Id());
+            }
+            catch (...)
+            {
+                return std::string();
+            }
+            address = address_from_device_id(central);
+
+            std::scoped_lock lock(server_sessions_mutex_);
+            if (server_sessions_.find(central) != server_sessions_.end())
+                return central;
+
+            ServerSession entry;
+            entry.session = session;
+            try
+            {
+                entry.status_token = session.SessionStatusChanged(
+                    [this, central, address](const WDBG::GattSession&, const WDBG::GattSessionStatusChangedEventArgs& args)
+                    {
+                        if (args.Status() == WDBG::GattSessionStatus::Closed)
+                            server_session_closed(central, address);
+                    });
+            }
+            catch (...)
+            {
+            }
+            server_sessions_.emplace(central, std::move(entry));
+            is_new = true;
+            return central;
+        }
+
+        void push_server_connection_state(const std::string& central, const std::string& address, bool connected)
+        {
+            if (!hooks_.push_event || central.empty())
+                return;
+
+            BackendEvent event;
+            event.type = BackendEventType::LeEvent;
+            event.transport = Transport::LowEnergy;
+            event.event_type = "bluetooth_le_server_connection_state_changed";
+            event.json = std::string("{\"connected\":") + (connected ? "true" : "false") + "," +
+                server_central_json(central, address) + "}";
+            hooks_.push_event(std::move(event));
+        }
+
+        void server_session_closed(const std::string& central, const std::string& address)
+        {
+            ServerSession entry;
+            {
+                std::scoped_lock lock(server_sessions_mutex_);
+                const auto it = server_sessions_.find(central);
+                if (it == server_sessions_.end())
+                    return;
+                entry = std::move(it->second);
+                server_sessions_.erase(it);
+            }
+
+            try
+            {
+                entry.session.SessionStatusChanged(entry.status_token);
+            }
+            catch (...)
+            {
+            }
+            push_server_connection_state(central, address, false);
+        }
+
+        // The server stopped: the core retires every central itself, so the
+        // sessions are only let go.
+        void release_server_sessions_noexcept() noexcept
+        {
+            std::unordered_map<std::string, ServerSession> sessions;
+            {
+                std::scoped_lock lock(server_sessions_mutex_);
+                sessions.swap(server_sessions_);
+            }
+
+            for (auto& [_, entry] : sessions)
+            {
+                try
+                {
+                    entry.session.SessionStatusChanged(entry.status_token);
+                }
+                catch (...)
+                {
+                }
+            }
+        }
+
         void start_service_advertising(const std::shared_ptr<LocalGattServiceState>& service)
         {
             if (!service || !service->provider)
+                return;
+            if (advertise_service_uuids_.find(service->uuid) == advertise_service_uuids_.end())
                 return;
 
             WDBG::GattServiceProviderAdvertisingParameters parameters;
@@ -4181,7 +4420,12 @@ namespace gmbluetooth
         bool advertise_connectable_ = true;
         bool advertise_discoverable_ = true;
         bool advertise_include_power_ = false;
-        std::optional<std::int32_t> advertise_tx_power_;
+        std::optional<std::int16_t> advertise_tx_power_;
+        // The registered services advertise_start listed: only these advertise.
+        std::unordered_set<std::string> advertise_service_uuids_;
+
+        std::mutex server_sessions_mutex_;
+        std::unordered_map<std::string, ServerSession> server_sessions_;
         std::unordered_map<std::string, std::vector<std::uint8_t>> advertise_service_data_;
 
         std::atomic_bool le_server_open_{false};

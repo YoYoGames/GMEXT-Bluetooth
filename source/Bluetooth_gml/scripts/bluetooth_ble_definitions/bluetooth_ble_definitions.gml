@@ -8,10 +8,6 @@
 #macro GATT_PERMISSION_WRITE 0x10
 #macro GATT_PERMISSION_READ  0x01
 
-// write_type argument of bluetooth_le_characteristic_write().
-#macro BLE_WRITE_WITH_RESPONSE    0
-#macro BLE_WRITE_WITHOUT_RESPONSE 1
-
 /// @func ble_bytes_to_string(buffer, size)
 /// @desc Reads the first `size` bytes of a buffer as plain ASCII text.
 function ble_bytes_to_string(_buf, _n)

@@ -94,8 +94,8 @@ function add_characteristic_row(_characteristic, _service_uuid)
     ))
     {
         var _write_type = (_properties & BluetoothLeCharacteristicProperty.Write)
-            ? BLE_WRITE_WITH_RESPONSE
-            : BLE_WRITE_WITHOUT_RESPONSE;
+            ? BluetoothLeWriteType.WithResponse
+            : BluetoothLeWriteType.WithoutResponse;
 
         _bx = _add_button(obj_bt_le_button_write, _bx, _by, {
             row: _row,
@@ -256,21 +256,21 @@ function discover_all()
 }
 
 // Forwarded from obj_bt_le_client's le_characteristic_value_changed callback.
-on_value_changed = function(_characteristic, _connection)
+on_value_changed = function(_characteristic, _connection, _value, _size)
 {
-    var _buf = buffer_create(512, buffer_grow, 1);
-    var _n = bluetooth_le_characteristic_get_value(_characteristic, _buf, 0, 512);
+    var _buf = buffer_create(max(_size, 1), buffer_fixed, 1);
+    var _copy = bluetooth_le_value_copy(_value, _buf, 0);
 
-    if (_n > 0)
+    if (_copy == BluetoothError.Ok && _size > 0)
     {
-        var _text = ble_bytes_to_string(_buf, _n);
+        var _text = ble_bytes_to_string(_buf, _size);
         log_msg("notification: " + _text);
 
         var _row = find_row_for_characteristic(_characteristic);
         if (_row != noone)
         {
             _row.value_text = _text;
-            _row.status_text = "Notification received (" + string(_n) + " bytes)";
+            _row.status_text = "Notification received (" + string(_size) + " bytes)";
         }
     }
 

@@ -1,6 +1,16 @@
 package ${YYAndroidPackageName};
 
 import ${YYAndroidPackageName}.GMExtWire.GMFunction;
+import ${YYAndroidPackageName}.enums.BluetoothError;
+import ${YYAndroidPackageName}.enums.BluetoothLeAdvertiseTxPower;
+import ${YYAndroidPackageName}.enums.BluetoothLeSubscribeMode;
+import ${YYAndroidPackageName}.enums.BluetoothLeWriteType;
+import ${YYAndroidPackageName}.enums.BluetoothPermissionStatus;
+import ${YYAndroidPackageName}.enums.BluetoothTransport;
+import ${YYAndroidPackageName}.records.BluetoothLeAdvertiseData;
+import ${YYAndroidPackageName}.records.BluetoothLeAdvertiseManufacturerData;
+import ${YYAndroidPackageName}.records.BluetoothLeAdvertiseServiceData;
+import ${YYAndroidPackageName}.records.BluetoothLeAdvertiseSettings;
 import ${YYAndroidPackageName}.records.BluetoothLeServiceDefinition;
 
 import android.Manifest;
@@ -36,9 +46,6 @@ import android.os.Build;
 import android.os.ParcelUuid;
 import android.provider.Settings;
 import android.util.Base64;
-
-import org.json.JSONArray;
-import org.json.JSONObject;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -80,28 +87,30 @@ public class GMBluetooth extends GMBluetoothInternal
     // Public constants -- must match spec.gmidl
     // =========================================================================
 
-    private static final int OK                 = 0;
-    private static final int UNKNOWN            = 1;
-    private static final int NOT_SUPPORTED      = 2;
-    private static final int NOT_INITIALIZED    = 3;
-    private static final int BLUETOOTH_DISABLED = 4;
-    private static final int PERMISSION_DENIED  = 5;
-    private static final int INVALID_ARGUMENT   = 6;
-    private static final int INVALID_HANDLE     = 7;
-    private static final int BUSY               = 8;
-    private static final int TIMEOUT            = 9;
-    private static final int NOT_FOUND          = 10;
-    private static final int CONNECTION_FAILED  = 11;
-    private static final int DISCONNECTED       = 12;
-    private static final int OPERATION_FAILED   = 13;
+    // BluetoothError. Exports return the enum; invoke() hands it to GML as its
+    // number, since the callback wire carries no enum type.
+    private static final BluetoothError OK                 = BluetoothError.Ok;
+    private static final BluetoothError UNKNOWN            = BluetoothError.Unknown;
+    private static final BluetoothError NOT_SUPPORTED      = BluetoothError.NotSupported;
+    private static final BluetoothError NOT_INITIALIZED    = BluetoothError.NotInitialized;
+    private static final BluetoothError BLUETOOTH_DISABLED = BluetoothError.BluetoothDisabled;
+    private static final BluetoothError PERMISSION_DENIED  = BluetoothError.PermissionDenied;
+    private static final BluetoothError INVALID_ARGUMENT   = BluetoothError.InvalidArgument;
+    private static final BluetoothError INVALID_HANDLE     = BluetoothError.InvalidHandle;
+    private static final BluetoothError BUSY               = BluetoothError.Busy;
+    private static final BluetoothError TIMEOUT            = BluetoothError.Timeout;
+    private static final BluetoothError NOT_FOUND          = BluetoothError.NotFound;
+    private static final BluetoothError CONNECTION_FAILED  = BluetoothError.ConnectionFailed;
+    private static final BluetoothError DISCONNECTED       = BluetoothError.Disconnected;
+    private static final BluetoothError OPERATION_FAILED   = BluetoothError.OperationFailed;
 
     private static final int TRANSPORT_UNKNOWN = 0;
     private static final int TRANSPORT_CLASSIC = 1;
     private static final int TRANSPORT_LE      = 2;
 
-    private static final int PERMISSION_UNKNOWN = 0;
-    private static final int PERMISSION_GRANTED = 1;
-    private static final int PERMISSION_DENIED_STATUS = 2;
+    private static final BluetoothPermissionStatus PERMISSION_UNKNOWN = BluetoothPermissionStatus.Unknown;
+    private static final BluetoothPermissionStatus PERMISSION_GRANTED = BluetoothPermissionStatus.Granted;
+    private static final BluetoothPermissionStatus PERMISSION_DENIED_STATUS = BluetoothPermissionStatus.Denied;
 
     // Keep handles inside 48 bits so callback handles are exactly representable
     // when delivered to GML as doubles.
@@ -115,8 +124,8 @@ public class GMBluetooth extends GMBluetoothInternal
 
     private static final int REQUEST_CODE_BLUETOOTH = 0xB710;
 
-    // BluetoothLeSubscribeMode (spec.gmidl) - kept as raw ints since this file
-    // has no dependency on the generated enums/ package.
+    // BluetoothLeSubscribeMode (spec.gmidl), as the subscriber bookkeeping
+    // stores it.
     private static final int SUBSCRIBE_MODE_UNSUBSCRIBE = 0;
     private static final int SUBSCRIBE_MODE_NOTIFY = 1;
     private static final int SUBSCRIBE_MODE_INDICATE = 2;
@@ -159,7 +168,7 @@ public class GMBluetooth extends GMBluetoothInternal
     // Error state
     // =========================================================================
 
-    private volatile int lastErrorCode = OK;
+    private volatile BluetoothError lastErrorCode = OK;
     private volatile String lastErrorMessage = "";
 
 
@@ -460,11 +469,6 @@ public class GMBluetooth extends GMBluetoothInternal
         boolean descriptorsDiscovered = false;
         volatile int subscribeMode = SUBSCRIBE_MODE_UNSUBSCRIBE;
 
-        // The last value read or notified, copied in the GATT callback. The
-        // stack and the write path both overwrite the shared characteristic
-        // object, so get_value never reads it.
-        volatile byte[] lastValue = new byte[0];
-
         final ArrayList<Long> descriptorHandles = new ArrayList<>();
     }
 
@@ -474,9 +478,6 @@ public class GMBluetooth extends GMBluetoothInternal
         long characteristic;
         BluetoothGattDescriptor gattDescriptor;
         String uuid = "";
-
-        // As LeCharacteristicEntry.lastValue, for the last read.
-        volatile byte[] lastValue = new byte[0];
     }
 
     private static final class LeServerRequestEntry
@@ -599,6 +600,21 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     // =========================================================================
+    // BLE values
+    // =========================================================================
+
+    // A value read or notified, held for GML under its own id until
+    // bluetooth_le_value_copy or _release frees it. Values outlive their link,
+    // so one delivered just before a disconnect can still be copied; the cap
+    // drops the oldest, and shutdown frees the rest.
+    private static final int LE_VALUE_LIMIT = 256;
+
+    private final Object leValueLock = new Object();
+    private long nextLeValueId = 1;
+    private final LinkedHashMap<Long, byte[]> leValues = new LinkedHashMap<>();
+
+
+    // =========================================================================
     // GML callbacks
     // =========================================================================
 
@@ -657,16 +673,20 @@ public class GMBluetooth extends GMBluetoothInternal
     }
 
 
-    private void setLastError(int code, String message)
+    private void setLastError(BluetoothError code, String message)
     {
         lastErrorCode = code;
         lastErrorMessage = message != null ? message : "";
     }
 
 
-    private int result(int code, String message)
+    // An export's result. Last-error is the detail for a failure; a success
+    // leaves it alone.
+    private BluetoothError result(BluetoothError code, String message)
     {
-        setLastError(code, message);
+        if (code != OK)
+            setLastError(code, message);
+
         return code;
     }
 
@@ -987,7 +1007,7 @@ public class GMBluetooth extends GMBluetoothInternal
     }
 
 
-    private void dispatchScanStopped(int transport, int error, String message)
+    private void dispatchScanStopped(int transport, BluetoothError error, String message)
     {
         String safeMessage = message != null ? message : "";
 
@@ -1001,7 +1021,7 @@ public class GMBluetooth extends GMBluetoothInternal
     private void dispatchConnectResult(
         long connection,
         long device,
-        int error,
+        BluetoothError error,
         String message,
         GMFunction callback)
     {
@@ -1030,7 +1050,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
     private void dispatchDisconnected(
         long connection,
-        int error,
+        BluetoothError error,
         String message)
     {
         String safeMessage = message != null ? message : "";
@@ -1105,6 +1125,12 @@ public class GMBluetooth extends GMBluetoothInternal
     {
         if (callback == null)
             return;
+
+        for (int i = 0; i < arguments.length; i++)
+        {
+            if (arguments[i] instanceof BluetoothError)
+                arguments[i] = ((BluetoothError) arguments[i]).value();
+        }
 
         try
         {
@@ -1337,42 +1363,57 @@ public class GMBluetooth extends GMBluetoothInternal
     }
 
 
-    // Copies a read or notified value onto the characteristic's entry, in the
-    // GATT callback. Returns the characteristic's handle, null when the
-    // object is not one this extension knows.
-    private Long storeCharacteristicValue(
-        BluetoothGattCharacteristic characteristic,
-        byte[] value)
+    // The characteristic's handle, null when the object is not one this
+    // extension knows.
+    private Long characteristicHandleOf(BluetoothGattCharacteristic characteristic)
     {
-        byte[] copy = value != null ? value.clone() : new byte[0];
-
         synchronized (leEntityLock)
         {
             Long handle = leCharacteristicHandleByObject.get(characteristic);
-            LeCharacteristicEntry entry = handle != null ? leCharacteristics.get(handle) : null;
-
-            if (entry != null)
-                entry.lastValue = copy;
-
-            return handle;
+            return handle != null && leCharacteristics.containsKey(handle) ? handle : null;
         }
     }
 
 
-    private void storeDescriptorValue(
-        BluetoothGattDescriptor descriptor,
-        byte[] value)
+    // Copies a value in the GATT callback - the stack and the write path both
+    // reuse the shared characteristic object - and holds it for GML. Returns
+    // its id.
+    private long storeLeValue(byte[] value)
     {
         byte[] copy = value != null ? value.clone() : new byte[0];
 
-        synchronized (leEntityLock)
+        synchronized (leValueLock)
         {
-            Long handle = leDescriptorHandleByObject.get(descriptor);
-            LeDescriptorEntry entry = handle != null ? leDescriptors.get(handle) : null;
+            long id = nextLeValueId++;
+            leValues.put(id, copy);
 
-            if (entry != null)
-                entry.lastValue = copy;
+            if (leValues.size() > LE_VALUE_LIMIT)
+            {
+                Iterator<Long> oldest = leValues.keySet().iterator();
+                oldest.next();
+                oldest.remove();
+            }
+
+            return id;
         }
+    }
+
+
+    // A read op's callback carries (value, size) after its target, 0 and 0
+    // when it failed.
+    private static boolean isReadOp(LePendingOp op)
+    {
+        return op.kind == LePendingOp.KIND_READ_CHARACTERISTIC ||
+            op.kind == LePendingOp.KIND_READ_DESCRIPTOR;
+    }
+
+
+    private void failOp(LePendingOp op, BluetoothError error, String message)
+    {
+        if (isReadOp(op))
+            invoke(op.callback, error, message, (double) op.targetHandle, 0.0, 0);
+        else
+            invoke(op.callback, error, message, (double) op.targetHandle);
     }
 
 
@@ -1405,11 +1446,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
         if (closed)
         {
-            invoke(
-                op.callback,
-                DISCONNECTED,
-                LE_OP_DISCONNECTED_MESSAGE,
-                (double) op.targetHandle);
+            failOp(op, DISCONNECTED, LE_OP_DISCONNECTED_MESSAGE);
             return;
         }
 
@@ -1455,11 +1492,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
             // A purge may have failed it already.
             if (takeCurrentOp(connection) == op)
-                invoke(
-                    op.callback,
-                    OPERATION_FAILED,
-                    op.startFailureMessage,
-                    (double) op.targetHandle);
+                failOp(op, OPERATION_FAILED, op.startFailureMessage);
         }
     }
 
@@ -1484,7 +1517,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
     // Fails the current op and every queued one, once each, and refuses any
     // op queued afterwards: the link is closed, so no completion will come.
-    private void failGattOps(LeConnectionEntry connection, int error, String message)
+    private void failGattOps(LeConnectionEntry connection, BluetoothError error, String message)
     {
         ArrayList<LePendingOp> failed = new ArrayList<>();
 
@@ -1502,7 +1535,7 @@ public class GMBluetooth extends GMBluetoothInternal
         }
 
         for (LePendingOp op : failed)
-            invoke(op.callback, error, message, (double) op.targetHandle);
+            failOp(op, error, message);
     }
 
 
@@ -1510,7 +1543,7 @@ public class GMBluetooth extends GMBluetoothInternal
     // BLE GATT dispatch helpers
     // =========================================================================
 
-    private void dispatchLeDisconnected(long connection, int error, String message)
+    private void dispatchLeDisconnected(long connection, BluetoothError error, String message)
     {
         String safeMessage = message != null ? message : "";
 
@@ -1523,12 +1556,31 @@ public class GMBluetooth extends GMBluetoothInternal
 
     private void dispatchLeCharacteristicValueChanged(
         long characteristic,
-        long connection)
+        long connection,
+        byte[] value)
     {
+        // No handler, no one to free the value.
+        if (callbackLeCharacteristicValueChanged == null)
+            return;
+
+        int size = value != null ? value.length : 0;
+        long id = storeLeValue(value);
+
         invoke(
             callbackLeCharacteristicValueChanged,
             (double) characteristic,
-            (double) connection);
+            (double) connection,
+            (double) id,
+            size);
+    }
+
+
+    private void dispatchReadValue(LePendingOp op, byte[] value)
+    {
+        int size = value != null ? value.length : 0;
+        long id = storeLeValue(value);
+
+        invoke(op.callback, OK, "", (double) op.targetHandle, (double) id, size);
     }
 
 
@@ -1614,10 +1666,7 @@ public class GMBluetooth extends GMBluetoothInternal
     public boolean bluetooth_initialize()
     {
         if (initialized)
-        {
-            setLastError(OK, "");
             return true;
-        }
 
         Context current = context();
 
@@ -1650,7 +1699,6 @@ public class GMBluetooth extends GMBluetoothInternal
             generation.incrementAndGet();
             initialized = true;
             ensureStateReceiver();
-            setLastError(OK, "");
             return true;
         }
         catch (Throwable throwable)
@@ -1671,6 +1719,11 @@ public class GMBluetooth extends GMBluetoothInternal
 
         initialized = false;
         generation.incrementAndGet();
+
+        synchronized (leValueLock)
+        {
+            leValues.clear();
+        }
 
         // Stop scanner without emitting callbacks during shutdown.
         try
@@ -1838,7 +1891,7 @@ public class GMBluetooth extends GMBluetoothInternal
     // =========================================================================
 
     @Override
-    public int bluetooth_last_error_code()
+    public BluetoothError bluetooth_last_error_code()
     {
         return lastErrorCode;
     }
@@ -1925,7 +1978,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     @Override
-    public int bluetooth_permission_get_status()
+    public BluetoothPermissionStatus bluetooth_permission_get_status()
     {
         if (!initialized)
             return PERMISSION_UNKNOWN;
@@ -1998,7 +2051,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     @Override
-    public int bluetooth_permission_request()
+    public BluetoothError bluetooth_permission_request()
     {
         if (!initialized)
             return result(
@@ -2013,7 +2066,7 @@ public class GMBluetooth extends GMBluetoothInternal
                 "Current Android Activity is unavailable");
 
         if (bluetooth_permission_get_status() == PERMISSION_GRANTED)
-            return result(OK, "");
+            return OK;
 
         try
         {
@@ -2039,7 +2092,7 @@ public class GMBluetooth extends GMBluetoothInternal
                     REQUEST_CODE_BLUETOOTH);
             }
 
-            return result(OK, "");
+            return OK;
         }
         catch (Throwable throwable)
         {
@@ -2103,7 +2156,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     @Override
-    public int bluetooth_le_scan_start(boolean active)
+    public BluetoothError bluetooth_le_scan_start(boolean active)
     {
         // Android's scanner does not expose a direct active/passive flag in the
         // same sense as Windows. Keep the API argument for cross-platform parity.
@@ -2126,7 +2179,7 @@ public class GMBluetooth extends GMBluetoothInternal
                 "Bluetooth is disabled");
 
         if (leScanning.get())
-            return result(OK, "");
+            return OK;
 
         try
         {
@@ -2140,7 +2193,7 @@ public class GMBluetooth extends GMBluetoothInternal
             leScanner.startScan(leScanCallback);
             leScanning.set(true);
 
-            return result(OK, "");
+            return OK;
         }
         catch (SecurityException exception)
         {
@@ -2158,7 +2211,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     @Override
-    public int bluetooth_le_scan_stop()
+    public BluetoothError bluetooth_le_scan_stop()
     {
         if (!initialized)
             return result(
@@ -2166,7 +2219,7 @@ public class GMBluetooth extends GMBluetoothInternal
                 "Bluetooth is not initialized");
 
         if (!leScanning.getAndSet(false))
-            return result(OK, "");
+            return OK;
 
         try
         {
@@ -2180,7 +2233,7 @@ public class GMBluetooth extends GMBluetoothInternal
         }
 
         dispatchScanStopped(TRANSPORT_LE, OK, "");
-        return result(OK, "");
+        return OK;
     }
 
 
@@ -2367,21 +2420,14 @@ public class GMBluetooth extends GMBluetoothInternal
                 if (entry == null)
                     return;
 
-                if (status == BluetoothGatt.GATT_SUCCESS)
-                    storeCharacteristicValue(characteristic, value);
-
                 LePendingOp op = takeCurrentOp(entry);
 
                 if (op != null)
                 {
                     if (status == BluetoothGatt.GATT_SUCCESS)
-                        invoke(op.callback, OK, "", (double) op.targetHandle);
+                        dispatchReadValue(op, value);
                     else
-                        invoke(
-                            op.callback,
-                            OPERATION_FAILED,
-                            "GATT status " + status,
-                            (double) op.targetHandle);
+                        failOp(op, OPERATION_FAILED, "GATT status " + status);
                 }
 
                 completeGattOp(entry);
@@ -2452,21 +2498,14 @@ public class GMBluetooth extends GMBluetoothInternal
                 if (entry == null)
                     return;
 
-                if (status == BluetoothGatt.GATT_SUCCESS)
-                    storeDescriptorValue(descriptor, value);
-
                 LePendingOp op = takeCurrentOp(entry);
 
                 if (op != null)
                 {
                     if (status == BluetoothGatt.GATT_SUCCESS)
-                        invoke(op.callback, OK, "", (double) op.targetHandle);
+                        dispatchReadValue(op, value);
                     else
-                        invoke(
-                            op.callback,
-                            OPERATION_FAILED,
-                            "GATT status " + status,
-                            (double) op.targetHandle);
+                        failOp(op, OPERATION_FAILED, "GATT status " + status);
                 }
 
                 completeGattOp(entry);
@@ -2558,12 +2597,13 @@ public class GMBluetooth extends GMBluetoothInternal
                 if (generation.get() != workerGeneration)
                     return;
 
-                Long characteristicHandle = storeCharacteristicValue(characteristic, value);
+                Long characteristicHandle = characteristicHandleOf(characteristic);
 
                 if (characteristicHandle != null)
                     dispatchLeCharacteristicValueChanged(
                         characteristicHandle,
-                        connection);
+                        connection,
+                        value);
             }
         };
     }
@@ -2639,8 +2679,6 @@ public class GMBluetooth extends GMBluetoothInternal
         LeConnectionEntry entry = getLeConnection(connection);
         entry.connectCallback = callback;
 
-        setLastError(OK, "");
-
         try
         {
             BluetoothGattCallback gattCallback =
@@ -2688,7 +2726,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     @Override
-    public int bluetooth_le_disconnect(long connection)
+    public BluetoothError bluetooth_le_disconnect(long connection)
     {
         LeConnectionEntry entry = getLeConnection(connection);
 
@@ -2705,13 +2743,13 @@ public class GMBluetooth extends GMBluetoothInternal
         if (gatt == null)
         {
             eraseLeConnection(connection);
-            return result(OK, "");
+            return OK;
         }
 
         try
         {
             gatt.disconnect();
-            return result(OK, "");
+            return OK;
         }
         catch (Throwable throwable)
         {
@@ -2748,7 +2786,7 @@ public class GMBluetooth extends GMBluetoothInternal
     // =========================================================================
 
     @Override
-    public int bluetooth_le_services_discover(long connection, GMFunction callback)
+    public BluetoothError bluetooth_le_services_discover(long connection, GMFunction callback)
     {
         if (!initialized)
             return result(NOT_INITIALIZED, "Bluetooth is not initialized");
@@ -2772,7 +2810,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
         enqueueGattOp(connEntry, op);
 
-        return result(OK, "");
+        return OK;
     }
 
 
@@ -2818,7 +2856,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     @Override
-    public int bluetooth_le_characteristics_discover(
+    public BluetoothError bluetooth_le_characteristics_discover(
         long service,
         GMFunction callback)
     {
@@ -2855,7 +2893,7 @@ public class GMBluetooth extends GMBluetoothInternal
         }
 
         invoke(callback, OK, "", (double) service);
-        return result(OK, "");
+        return OK;
     }
 
 
@@ -2913,7 +2951,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     @Override
-    public int bluetooth_le_descriptors_discover(
+    public BluetoothError bluetooth_le_descriptors_discover(
         long characteristic,
         GMFunction callback)
     {
@@ -2943,7 +2981,7 @@ public class GMBluetooth extends GMBluetoothInternal
         }
 
         invoke(callback, OK, "", (double) characteristic);
-        return result(OK, "");
+        return OK;
     }
 
 
@@ -2993,7 +3031,7 @@ public class GMBluetooth extends GMBluetoothInternal
     // =========================================================================
 
     @Override
-    public int bluetooth_le_characteristic_read(
+    public BluetoothError bluetooth_le_characteristic_read(
         long characteristic,
         GMFunction callback)
     {
@@ -3023,59 +3061,25 @@ public class GMBluetooth extends GMBluetoothInternal
 
         enqueueGattOp(connEntry, op);
 
-        return result(OK, "");
+        return OK;
     }
 
 
     @Override
-    public int bluetooth_le_characteristic_get_value(
-        long characteristic,
-        ByteBuffer out_data,
-        int offset,
-        int max_size)
-    {
-        LeCharacteristicEntry entry = getLeCharacteristic(characteristic);
-
-        if (entry == null || entry.gattCharacteristic == null)
-            return 0;
-
-        byte[] value = entry.lastValue;
-
-        if (value == null || value.length == 0)
-            return 0;
-
-        if (bufferRangeInvalid(out_data, offset, max_size))
-        {
-            setLastError(
-                INVALID_ARGUMENT,
-                "Invalid buffer offset/size for bluetooth_le_characteristic_get_value");
-            return 0;
-        }
-
-        int copyLength = Math.min(max_size, value.length);
-
-        if (copyLength <= 0)
-            return 0;
-
-        ByteBuffer view = out_data.duplicate();
-        view.position(offset);
-        view.put(value, 0, copyLength);
-
-        return copyLength;
-    }
-
-
-    @Override
-    public int bluetooth_le_characteristic_write(
+    public BluetoothError bluetooth_le_characteristic_write(
         long characteristic,
         ByteBuffer data,
         int offset,
         int size,
-        int write_type,
+        BluetoothLeWriteType write_type,
         GMFunction callback)
     {
         if (!initialized)
             return result(NOT_INITIALIZED, "Bluetooth is not initialized");
+
+        if (write_type != BluetoothLeWriteType.WithResponse &&
+            write_type != BluetoothLeWriteType.WithoutResponse)
+            return result(INVALID_ARGUMENT, "Invalid BluetoothLeWriteType value");
 
         LeCharacteristicEntry charEntry = getLeCharacteristic(characteristic);
 
@@ -3104,7 +3108,7 @@ public class GMBluetooth extends GMBluetoothInternal
         final BluetoothGatt gatt = connEntry.gatt;
         final BluetoothGattCharacteristic gattCharacteristic =
             charEntry.gattCharacteristic;
-        final int androidWriteType = write_type == 1
+        final int androidWriteType = write_type == BluetoothLeWriteType.WithoutResponse
             ? BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
             : BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT;
 
@@ -3122,16 +3126,18 @@ public class GMBluetooth extends GMBluetoothInternal
 
         enqueueGattOp(connEntry, op);
 
-        return result(OK, "");
+        return OK;
     }
 
 
     @Override
-    public int bluetooth_le_characteristic_subscribe(
+    public BluetoothError bluetooth_le_characteristic_subscribe(
         long characteristic,
-        int mode,
+        BluetoothLeSubscribeMode subscribeMode,
         GMFunction callback)
     {
+        final int mode = subscribeMode != null ? subscribeMode.value() : -1;
+
         if (!initialized)
             return result(NOT_INITIALIZED, "Bluetooth is not initialized");
 
@@ -3193,12 +3199,12 @@ public class GMBluetooth extends GMBluetoothInternal
 
         enqueueGattOp(connEntry, op);
 
-        return result(OK, "");
+        return OK;
     }
 
 
     @Override
-    public int bluetooth_le_descriptor_read(long descriptor, GMFunction callback)
+    public BluetoothError bluetooth_le_descriptor_read(long descriptor, GMFunction callback)
     {
         if (!initialized)
             return result(NOT_INITIALIZED, "Bluetooth is not initialized");
@@ -3230,50 +3236,12 @@ public class GMBluetooth extends GMBluetoothInternal
 
         enqueueGattOp(connEntry, op);
 
-        return result(OK, "");
+        return OK;
     }
 
 
     @Override
-    public int bluetooth_le_descriptor_get_value(
-        long descriptor,
-        ByteBuffer out_data,
-        int offset,
-        int max_size)
-    {
-        LeDescriptorEntry entry = getLeDescriptor(descriptor);
-
-        if (entry == null || entry.gattDescriptor == null)
-            return 0;
-
-        byte[] value = entry.lastValue;
-
-        if (value == null || value.length == 0)
-            return 0;
-
-        if (bufferRangeInvalid(out_data, offset, max_size))
-        {
-            setLastError(
-                INVALID_ARGUMENT,
-                "Invalid buffer offset/size for bluetooth_le_descriptor_get_value");
-            return 0;
-        }
-
-        int copyLength = Math.min(max_size, value.length);
-
-        if (copyLength <= 0)
-            return 0;
-
-        ByteBuffer view = out_data.duplicate();
-        view.position(offset);
-        view.put(value, 0, copyLength);
-
-        return copyLength;
-    }
-
-
-    @Override
-    public int bluetooth_le_descriptor_write(
+    public BluetoothError bluetooth_le_descriptor_write(
         long descriptor,
         ByteBuffer data,
         int offset,
@@ -3334,7 +3302,50 @@ public class GMBluetooth extends GMBluetoothInternal
 
         enqueueGattOp(connEntry, op);
 
-        return result(OK, "");
+        return OK;
+    }
+
+
+    @Override
+    public BluetoothError bluetooth_le_value_copy(long value, ByteBuffer out_data, int offset)
+    {
+        synchronized (leValueLock)
+        {
+            byte[] bytes = leValues.get(value);
+
+            if (bytes == null)
+                return result(INVALID_HANDLE, "Unknown or already freed BLE value");
+
+            if (bufferRangeInvalid(out_data, offset, bytes.length))
+                return result(
+                    INVALID_ARGUMENT,
+                    "The buffer cannot take the value: " + bytes.length +
+                        " bytes are needed at offset " + offset);
+
+            if (bytes.length > 0)
+            {
+                ByteBuffer view = out_data.duplicate();
+                view.position(offset);
+                view.put(bytes, 0, bytes.length);
+            }
+
+            leValues.remove(value);
+        }
+
+        return OK;
+    }
+
+
+    @Override
+    public BluetoothError bluetooth_le_value_release(long value)
+    {
+        synchronized (leValueLock)
+        {
+            if (leValues.remove(value) == null)
+                return result(INVALID_HANDLE, "Unknown or already freed BLE value");
+        }
+
+        return OK;
     }
 
 
@@ -3380,14 +3391,151 @@ public class GMBluetooth extends GMBluetoothInternal
     }
 
 
+    private static byte[] toBytes(java.util.List<Byte> values)
+    {
+        if (values == null)
+            return new byte[0];
+
+        byte[] bytes = new byte[values.size()];
+
+        for (int i = 0; i < bytes.length; i++)
+        {
+            Byte value = values.get(i);
+            bytes[i] = value != null ? value : 0;
+        }
+
+        return bytes;
+    }
+
+
+    private static int advertiseTxPowerLevel(BluetoothLeAdvertiseTxPower power)
+    {
+        switch (power)
+        {
+            case UltraLow:
+                return AdvertiseSettings.ADVERTISE_TX_POWER_ULTRA_LOW;
+            case Low:
+                return AdvertiseSettings.ADVERTISE_TX_POWER_LOW;
+            case High:
+                return AdvertiseSettings.ADVERTISE_TX_POWER_HIGH;
+            default:
+                return AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM;
+        }
+    }
+
+
+    private static BluetoothError advertiseFailureError(int errorCode)
+    {
+        switch (errorCode)
+        {
+            case AdvertiseCallback.ADVERTISE_FAILED_DATA_TOO_LARGE:
+                return INVALID_ARGUMENT;
+            case AdvertiseCallback.ADVERTISE_FAILED_TOO_MANY_ADVERTISERS:
+            case AdvertiseCallback.ADVERTISE_FAILED_ALREADY_STARTED:
+                return BUSY;
+            case AdvertiseCallback.ADVERTISE_FAILED_FEATURE_UNSUPPORTED:
+                return NOT_SUPPORTED;
+            default:
+                return OPERATION_FAILED;
+        }
+    }
+
+
+    private static String advertiseFailureName(int errorCode)
+    {
+        switch (errorCode)
+        {
+            case AdvertiseCallback.ADVERTISE_FAILED_DATA_TOO_LARGE:
+                return "ADVERTISE_FAILED_DATA_TOO_LARGE";
+            case AdvertiseCallback.ADVERTISE_FAILED_TOO_MANY_ADVERTISERS:
+                return "ADVERTISE_FAILED_TOO_MANY_ADVERTISERS";
+            case AdvertiseCallback.ADVERTISE_FAILED_ALREADY_STARTED:
+                return "ADVERTISE_FAILED_ALREADY_STARTED";
+            case AdvertiseCallback.ADVERTISE_FAILED_FEATURE_UNSUPPORTED:
+                return "ADVERTISE_FAILED_FEATURE_UNSUPPORTED";
+            case AdvertiseCallback.ADVERTISE_FAILED_INTERNAL_ERROR:
+                return "ADVERTISE_FAILED_INTERNAL_ERROR";
+            default:
+                return "error " + errorCode;
+        }
+    }
+
+
     @Override
-    public int bluetooth_le_advertise_start(
-        String settings_json,
-        String data_json,
+    public BluetoothError bluetooth_le_advertise_start(
+        BluetoothLeAdvertiseSettings settings,
+        BluetoothLeAdvertiseData data,
         GMFunction callback)
     {
         if (!initialized || adapter == null)
             return result(NOT_INITIALIZED, "Bluetooth is not initialized");
+
+        if (settings == null || data == null)
+            return result(INVALID_ARGUMENT, "settings and data cannot be undefined");
+
+        // Checked as the native core checks them, before anything starts.
+        ArrayList<UUID> serviceUuids = new ArrayList<>();
+
+        if (data.service_uuids() != null)
+        {
+            for (String text : data.service_uuids())
+            {
+                try
+                {
+                    serviceUuids.add(parseUuid(text));
+                }
+                catch (Throwable throwable)
+                {
+                    return result(INVALID_ARGUMENT, "Invalid UUID in service_uuids: " + text);
+                }
+            }
+        }
+
+        ArrayList<UUID> serviceDataUuids = new ArrayList<>();
+        ArrayList<byte[]> serviceDataBytes = new ArrayList<>();
+
+        if (data.service_data() != null)
+        {
+            for (BluetoothLeAdvertiseServiceData entry : data.service_data())
+            {
+                if (entry == null)
+                    return result(INVALID_ARGUMENT, "A service_data entry is undefined");
+
+                UUID uuid;
+
+                try
+                {
+                    uuid = parseUuid(entry.uuid());
+                }
+                catch (Throwable throwable)
+                {
+                    return result(INVALID_ARGUMENT, "Invalid UUID in service_data: " + entry.uuid());
+                }
+
+                // Its UUID is advertised as a UUID too, on every platform.
+                if (!serviceUuids.contains(uuid))
+                    return result(
+                        INVALID_ARGUMENT,
+                        "service_data uuid " + entry.uuid() + " is not in service_uuids");
+
+                serviceDataUuids.add(uuid);
+                serviceDataBytes.add(toBytes(entry.data()));
+            }
+        }
+
+        if (data.manufacturer_data() != null)
+        {
+            for (BluetoothLeAdvertiseManufacturerData entry : data.manufacturer_data())
+            {
+                if (entry == null)
+                    return result(INVALID_ARGUMENT, "A manufacturer_data entry is undefined");
+
+                if (entry.company_id() < 0 || entry.company_id() > 0xFFFF)
+                    return result(
+                        INVALID_ARGUMENT,
+                        "company_id " + entry.company_id() + " is outside 0-65535");
+            }
+        }
 
         if (!hasAdvertisePermission())
             return result(
@@ -3398,7 +3546,7 @@ public class GMBluetooth extends GMBluetoothInternal
             return result(BLUETOOTH_DISABLED, "Bluetooth is disabled");
 
         if (leAdvertising.get())
-            return result(OK, "");
+            return OK;
 
         BluetoothLeAdvertiser advertiser;
 
@@ -3414,74 +3562,30 @@ public class GMBluetooth extends GMBluetoothInternal
         if (advertiser == null)
             return result(NOT_SUPPORTED, "Bluetooth LE advertising is unavailable");
 
-        int txPowerLevel = AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM;
+        AdvertiseData.Builder dataBuilder = new AdvertiseData.Builder()
+            .setIncludeDeviceName(data.include_name())
+            .setIncludeTxPowerLevel(data.include_tx_power());
 
-        try
+        for (UUID uuid : serviceUuids)
+            dataBuilder.addServiceUuid(new ParcelUuid(uuid));
+
+        for (int i = 0; i < serviceDataUuids.size(); i++)
+            dataBuilder.addServiceData(new ParcelUuid(serviceDataUuids.get(i)), serviceDataBytes.get(i));
+
+        if (data.manufacturer_data() != null)
         {
-            if (settings_json != null && !settings_json.isEmpty())
-            {
-                JSONObject settings = new JSONObject(settings_json);
-
-                if (settings.has("txPowerLevel"))
-                    txPowerLevel = settings.getInt("txPowerLevel");
-            }
-        }
-        catch (Throwable throwable)
-        {
-            return result(INVALID_ARGUMENT, "Invalid settings_json: " + throwable.getMessage());
+            for (BluetoothLeAdvertiseManufacturerData entry : data.manufacturer_data())
+                dataBuilder.addManufacturerData(entry.company_id(), toBytes(entry.data()));
         }
 
-        AdvertiseData.Builder dataBuilder = new AdvertiseData.Builder();
-
-        try
-        {
-            if (data_json != null && !data_json.isEmpty())
-            {
-                JSONObject data = new JSONObject(data_json);
-
-                if (data.optBoolean("includeName", false))
-                    dataBuilder.setIncludeDeviceName(true);
-
-                if (data.optBoolean("includePowerLevel", false))
-                    dataBuilder.setIncludeTxPowerLevel(true);
-
-                if (data.has("services"))
-                {
-                    JSONArray services = data.getJSONArray("services");
-
-                    for (int i = 0; i < services.length(); i++)
-                    {
-                        JSONObject service = services.getJSONObject(i);
-                        ParcelUuid uuid =
-                            new ParcelUuid(parseUuid(service.getString("uuid")));
-
-                        if (service.has("data"))
-                            dataBuilder.addServiceData(
-                                uuid,
-                                decodeBase64(service.getString("data")));
-                        else
-                            dataBuilder.addServiceUuid(uuid);
-                    }
-                }
-
-                if (data.has("manufacturer"))
-                {
-                    JSONObject manufacturer = data.getJSONObject("manufacturer");
-                    dataBuilder.addManufacturerData(
-                        manufacturer.getInt("id"),
-                        decodeBase64(manufacturer.optString("data", "")));
-                }
-            }
-        }
-        catch (Throwable throwable)
-        {
-            return result(INVALID_ARGUMENT, "Invalid data_json: " + throwable.getMessage());
-        }
+        int txPowerLevel = settings.tx_power() != null && settings.tx_power().isPresent()
+            ? advertiseTxPowerLevel(settings.tx_power().get())
+            : AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM;
 
         AdvertiseSettings advertiseSettings = new AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
             .setTxPowerLevel(txPowerLevel)
-            .setConnectable(true)
+            .setConnectable(settings.connectable())
             .build();
 
         leAdvertiseStartCallback = callback;
@@ -3511,8 +3615,8 @@ public class GMBluetooth extends GMBluetoothInternal
 
                 invoke(
                     startCallback,
-                    OPERATION_FAILED,
-                    "Advertise start failed: " + errorCode);
+                    advertiseFailureError(errorCode),
+                    "Advertise start failed: " + advertiseFailureName(errorCode));
             }
         };
 
@@ -3533,18 +3637,18 @@ public class GMBluetooth extends GMBluetoothInternal
             return result(OPERATION_FAILED, throwableMessage(throwable));
         }
 
-        return result(OK, "");
+        return OK;
     }
 
 
     @Override
-    public int bluetooth_le_advertise_stop()
+    public BluetoothError bluetooth_le_advertise_stop()
     {
         if (!initialized)
             return result(NOT_INITIALIZED, "Bluetooth is not initialized");
 
         stopLeAdvertiseInternal();
-        return result(OK, "");
+        return OK;
     }
 
 
@@ -3576,6 +3680,11 @@ public class GMBluetooth extends GMBluetoothInternal
 
         if (newState == BluetoothProfile.STATE_CONNECTED)
         {
+            // The server callback reports every LE link, the ones this app
+            // opened with connectGatt too; those are client connections.
+            if (hasClientConnection(deviceHandle))
+                return;
+
             Long existing;
 
             synchronized (leConnectionLock)
@@ -3628,6 +3737,21 @@ public class GMBluetooth extends GMBluetoothInternal
                 dispatchLeServerConnectionStateChanged(connection, false, deviceHandle);
             }
         }
+    }
+
+
+    private boolean hasClientConnection(long deviceHandle)
+    {
+        synchronized (leConnectionLock)
+        {
+            for (LeConnectionEntry entry : leConnections.values())
+            {
+                if (!entry.serverRole && entry.device == deviceHandle)
+                    return true;
+            }
+        }
+
+        return false;
     }
 
 
@@ -4283,7 +4407,7 @@ public class GMBluetooth extends GMBluetoothInternal
     }
 
 
-    private void stopLeServerInternal(int addError, String addMessage)
+    private void stopLeServerInternal(BluetoothError addError, String addMessage)
     {
         leServerRunning.set(false);
 
@@ -4392,7 +4516,7 @@ public class GMBluetooth extends GMBluetoothInternal
     // Fails every pending add once. While the server stays open, an add the
     // stack already holds stays at the head, cancelled, because the stack takes
     // no other add until its onServiceAdded arrives.
-    private void failServiceAdds(int error, String message, boolean serverClosed)
+    private void failServiceAdds(BluetoothError error, String message, boolean serverClosed)
     {
         ArrayList<LeServerAddEntry> failed = new ArrayList<>();
 
@@ -4421,7 +4545,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     @Override
-    public int bluetooth_le_server_start()
+    public BluetoothError bluetooth_le_server_start()
     {
         if (!initialized || adapter == null)
             return result(NOT_INITIALIZED, "Bluetooth is not initialized");
@@ -4435,7 +4559,7 @@ public class GMBluetooth extends GMBluetoothInternal
             return result(BLUETOOTH_DISABLED, "Bluetooth is disabled");
 
         if (leServerRunning.get())
-            return result(OK, "");
+            return OK;
 
         Context current = context();
 
@@ -4466,7 +4590,7 @@ public class GMBluetooth extends GMBluetoothInternal
             gattServer = server;
             leServerRunning.set(true);
 
-            return result(OK, "");
+            return OK;
         }
         catch (SecurityException exception)
         {
@@ -4480,7 +4604,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     @Override
-    public int bluetooth_le_server_stop()
+    public BluetoothError bluetooth_le_server_stop()
     {
         if (!initialized)
             return result(NOT_INITIALIZED, "Bluetooth is not initialized");
@@ -4488,7 +4612,7 @@ public class GMBluetooth extends GMBluetoothInternal
         stopLeServerInternal(
             OPERATION_FAILED,
             "BLE server stopped before the service was added");
-        return result(OK, "");
+        return OK;
     }
 
 
@@ -4500,7 +4624,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     @Override
-    public int bluetooth_le_server_add_service(BluetoothLeServiceDefinition service, GMFunction callback)
+    public BluetoothError bluetooth_le_server_add_service(BluetoothLeServiceDefinition service, GMFunction callback)
     {
         if (!initialized)
             return result(NOT_INITIALIZED, "Bluetooth is not initialized");
@@ -4608,12 +4732,12 @@ public class GMBluetooth extends GMBluetoothInternal
 
         startNextServiceAdd();
 
-        return result(OK, "");
+        return OK;
     }
 
 
     @Override
-    public int bluetooth_le_server_clear_services()
+    public BluetoothError bluetooth_le_server_clear_services()
     {
         if (!initialized)
             return result(NOT_INITIALIZED, "Bluetooth is not initialized");
@@ -4645,12 +4769,12 @@ public class GMBluetooth extends GMBluetoothInternal
             "Services were cleared before the service was added",
             false);
 
-        return result(OK, "");
+        return OK;
     }
 
 
     @Override
-    public int bluetooth_le_server_respond_read(
+    public BluetoothError bluetooth_le_server_respond_read(
         int request_id,
         int error_code,
         ByteBuffer data,
@@ -4682,7 +4806,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
         byte[] payload = new byte[0];
 
-        if (error_code == OK && size > 0)
+        if (error_code == OK.value() && size > 0)
         {
             if (bufferRangeInvalid(data, offset, size))
                 return result(
@@ -4702,7 +4826,7 @@ public class GMBluetooth extends GMBluetoothInternal
                 return result(INVALID_HANDLE, "Unknown or expired request_id");
         }
 
-        int status = error_code == OK
+        int status = error_code == OK.value()
             ? BluetoothGatt.GATT_SUCCESS
             : BluetoothGatt.GATT_FAILURE;
 
@@ -4717,7 +4841,7 @@ public class GMBluetooth extends GMBluetoothInternal
             // caller intends to answer with, so the ATT-level offset
             // handed back to Android is always 0.
             server.sendResponse(request.device, request.stackRequestId, status, 0, payload);
-            return result(OK, "");
+            return OK;
         }
         catch (Throwable throwable)
         {
@@ -4727,7 +4851,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     @Override
-    public int bluetooth_le_server_respond_write(int request_id, int error_code)
+    public BluetoothError bluetooth_le_server_respond_write(int request_id, int error_code)
     {
         if (!initialized)
             return result(NOT_INITIALIZED, "Bluetooth is not initialized");
@@ -4758,16 +4882,16 @@ public class GMBluetooth extends GMBluetoothInternal
 
         // A write without response was never waiting on an answer.
         if (!request.responseNeeded)
-            return result(OK, "");
+            return OK;
 
-        int status = error_code == OK
+        int status = error_code == OK.value()
             ? BluetoothGatt.GATT_SUCCESS
             : BluetoothGatt.GATT_FAILURE;
 
         if (request.batch != null)
         {
             finishLeServerWriteBatchPart(request.batch, status);
-            return result(OK, "");
+            return OK;
         }
 
         BluetoothGattServer server = gattServer;
@@ -4778,7 +4902,7 @@ public class GMBluetooth extends GMBluetoothInternal
         try
         {
             server.sendResponse(request.device, request.stackRequestId, status, 0, request.writeValue);
-            return result(OK, "");
+            return OK;
         }
         catch (Throwable throwable)
         {
@@ -4831,7 +4955,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     @Override
-    public int bluetooth_le_server_notify_value(
+    public BluetoothError bluetooth_le_server_notify_value(
         String service_uuid,
         String characteristic_uuid,
         long connection,
@@ -4914,7 +5038,7 @@ public class GMBluetooth extends GMBluetoothInternal
         }
 
         if (targets.isEmpty())
-            return result(OK, "");
+            return OK;
 
         boolean indicate =
             (characteristic.getProperties() & BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0 &&
@@ -4942,7 +5066,7 @@ public class GMBluetooth extends GMBluetoothInternal
             }
         }
 
-        return result(OK, "");
+        return OK;
     }
 
 
@@ -5179,7 +5303,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     @Override
-    public int bluetooth_pair(long device, GMFunction callback)
+    public BluetoothError bluetooth_pair(long device, GMFunction callback)
     {
         if (!initialized || adapter == null)
             return result(
@@ -5218,7 +5342,7 @@ public class GMBluetooth extends GMBluetoothInternal
         if (androidDevice.getBondState() == BluetoothDevice.BOND_BONDED)
         {
             invoke(callback, OK, "", (double) device);
-            return result(OK, "");
+            return OK;
         }
 
         ensureBondReceiver();
@@ -5270,7 +5394,7 @@ public class GMBluetooth extends GMBluetoothInternal
                 "createBond() returned false");
         }
 
-        return result(OK, "");
+        return OK;
     }
 
 
@@ -5300,7 +5424,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     @Override
-    public int bluetooth_classic_scan_start()
+    public BluetoothError bluetooth_classic_scan_start()
     {
         if (!initialized || adapter == null)
             return result(
@@ -5321,7 +5445,7 @@ public class GMBluetooth extends GMBluetoothInternal
                 "Bluetooth is disabled");
 
         if (classicScanning.get())
-            return result(OK, "");
+            return OK;
 
         try
         {
@@ -5354,7 +5478,7 @@ public class GMBluetooth extends GMBluetoothInternal
                     "Android Bluetooth discovery could not start");
 
             classicScanning.set(true);
-            return result(OK, "");
+            return OK;
         }
         catch (SecurityException exception)
         {
@@ -5372,7 +5496,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     @Override
-    public int bluetooth_classic_scan_stop()
+    public BluetoothError bluetooth_classic_scan_stop()
     {
         if (!initialized)
             return result(
@@ -5380,7 +5504,7 @@ public class GMBluetooth extends GMBluetoothInternal
                 "Bluetooth is not initialized");
 
         if (!classicScanning.get())
-            return result(OK, "");
+            return OK;
 
         try
         {
@@ -5397,7 +5521,7 @@ public class GMBluetooth extends GMBluetoothInternal
                 OK,
                 "");
 
-        return result(OK, "");
+        return OK;
     }
 
 
@@ -5455,10 +5579,10 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     @Override
-    public int bluetooth_device_get_transport(long device)
+    public BluetoothTransport bluetooth_device_get_transport(long device)
     {
         DeviceEntry entry = copyDevice(device);
-        return entry != null ? entry.transport : TRANSPORT_UNKNOWN;
+        return BluetoothTransport.from(entry != null ? entry.transport : TRANSPORT_UNKNOWN);
     }
 
 
@@ -5592,8 +5716,6 @@ public class GMBluetooth extends GMBluetoothInternal
 
         final long connection = createConnection(device);
         final long workerGeneration = generation.get();
-
-        setLastError(OK, "");
 
         Thread thread = new Thread(
             () ->
@@ -5959,7 +6081,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     @Override
-    public int bluetooth_classic_disconnect(long connection)
+    public BluetoothError bluetooth_classic_disconnect(long connection)
     {
         ConnectionEntry entry = getConnection(connection);
 
@@ -5972,7 +6094,7 @@ public class GMBluetooth extends GMBluetoothInternal
         {
             // The peer already hung up; the game is done with its unread bytes.
             eraseConnection(connection);
-            return result(OK, "");
+            return OK;
         }
 
         final BluetoothSocket socket = entry.socket;
@@ -5991,7 +6113,7 @@ public class GMBluetooth extends GMBluetoothInternal
             try
             {
                 socket.close();
-                return result(OK, "");
+                return OK;
             }
             catch (IOException exception)
             {
@@ -6040,7 +6162,7 @@ public class GMBluetooth extends GMBluetoothInternal
             closer.start();
         }
 
-        return result(OK, "");
+        return OK;
     }
 
 
@@ -6108,7 +6230,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     @Override
-    public int bluetooth_classic_send(
+    public BluetoothError bluetooth_classic_send(
         long connection,
         ByteBuffer data,
         int offset,
@@ -6137,7 +6259,7 @@ public class GMBluetooth extends GMBluetoothInternal
                 "Invalid buffer offset/size for bluetooth_classic_send");
 
         if (size == 0)
-            return result(OK, "");
+            return OK;
 
         byte[] chunk = new byte[size];
 
@@ -6168,7 +6290,7 @@ public class GMBluetooth extends GMBluetoothInternal
             entry.sendLock.notifyAll();
         }
 
-        return result(OK, "");
+        return OK;
     }
 
 
@@ -6249,7 +6371,7 @@ public class GMBluetooth extends GMBluetoothInternal
     // =========================================================================
 
     @Override
-    public int bluetooth_classic_server_start(
+    public BluetoothError bluetooth_classic_server_start(
         String name,
         String service_uuid)
     {
@@ -6269,7 +6391,7 @@ public class GMBluetooth extends GMBluetoothInternal
                 "Bluetooth is disabled");
 
         if (serverRunning.get())
-            return result(OK, "");
+            return OK;
 
         if (service_uuid == null || service_uuid.isEmpty())
             return result(
@@ -6421,7 +6543,7 @@ public class GMBluetooth extends GMBluetoothInternal
         thread.setDaemon(true);
         thread.start();
 
-        return result(OK, "");
+        return OK;
     }
 
 
@@ -6446,7 +6568,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     @Override
-    public int bluetooth_classic_server_stop()
+    public BluetoothError bluetooth_classic_server_stop()
     {
         if (!initialized)
             return result(
@@ -6454,7 +6576,7 @@ public class GMBluetooth extends GMBluetoothInternal
                 "Bluetooth is not initialized");
 
         stopServerInternal();
-        return result(OK, "");
+        return OK;
     }
 
 
@@ -6466,7 +6588,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     @Override
-    public int bluetooth_classic_discoverable_start(int duration_seconds)
+    public BluetoothError bluetooth_classic_discoverable_start(int duration_seconds)
     {
         if (!initialized)
             return result(
@@ -6510,12 +6632,12 @@ public class GMBluetooth extends GMBluetoothInternal
                 throwableMessage(throwable));
         }
 
-        return result(OK, "");
+        return OK;
     }
 
 
     @Override
-    public int bluetooth_classic_discoverable_stop()
+    public BluetoothError bluetooth_classic_discoverable_stop()
     {
         return result(
             NOT_SUPPORTED,

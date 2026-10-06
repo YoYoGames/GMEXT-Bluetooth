@@ -44,10 +44,16 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         return __result ? 1.0 : 0.0;
     }
 
-    public double __EXT_NATIVE__bluetooth_last_error_code()
+    public double __EXT_NATIVE__bluetooth_last_error_code(ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
-        int __result = bluetooth_last_error_code();
-        return (double)__result;
+        BluetoothError __result = bluetooth_last_error_code();
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
     public String __EXT_NATIVE__bluetooth_last_error_message()
@@ -86,28 +92,52 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         return __result ? 1.0 : 0.0;
     }
 
-    public double __EXT_NATIVE__bluetooth_permission_get_status()
+    public double __EXT_NATIVE__bluetooth_permission_get_status(ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
-        int __result = bluetooth_permission_get_status();
-        return (double)__result;
+        BluetoothPermissionStatus __result = bluetooth_permission_get_status();
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothPermissionStatus
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
-    public double __EXT_NATIVE__bluetooth_permission_request()
+    public double __EXT_NATIVE__bluetooth_permission_request(ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
-        int __result = bluetooth_permission_request();
-        return (double)__result;
+        BluetoothError __result = bluetooth_permission_request();
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
-    public double __EXT_NATIVE__bluetooth_le_scan_start(double active)
+    public double __EXT_NATIVE__bluetooth_le_scan_start(double active, ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
-        int __result = bluetooth_le_scan_start(active != 0);
-        return (double)__result;
+        BluetoothError __result = bluetooth_le_scan_start(active != 0);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
-    public double __EXT_NATIVE__bluetooth_le_scan_stop()
+    public double __EXT_NATIVE__bluetooth_le_scan_stop(ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
-        int __result = bluetooth_le_scan_stop();
-        return (double)__result;
+        BluetoothError __result = bluetooth_le_scan_stop();
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
     public double __EXT_NATIVE__bluetooth_le_scan_is_running()
@@ -116,16 +146,28 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         return __result ? 1.0 : 0.0;
     }
 
-    public double __EXT_NATIVE__bluetooth_classic_scan_start()
+    public double __EXT_NATIVE__bluetooth_classic_scan_start(ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
-        int __result = bluetooth_classic_scan_start();
-        return (double)__result;
+        BluetoothError __result = bluetooth_classic_scan_start();
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
-    public double __EXT_NATIVE__bluetooth_classic_scan_stop()
+    public double __EXT_NATIVE__bluetooth_classic_scan_stop(ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
-        int __result = bluetooth_classic_scan_stop();
-        return (double)__result;
+        BluetoothError __result = bluetooth_classic_scan_stop();
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
     public double __EXT_NATIVE__bluetooth_classic_scan_is_running()
@@ -169,15 +211,21 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         return __result ? 1.0 : 0.0;
     }
 
-    public double __EXT_NATIVE__bluetooth_device_get_transport(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    public double __EXT_NATIVE__bluetooth_device_get_transport(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
         GMExtWire.order(__arg_buffer);
 
         // field: device, type: UInt64
         long device = GMExtWire.readI64(__arg_buffer);
 
-        int __result = bluetooth_device_get_transport(device);
-        return (double)__result;
+        BluetoothTransport __result = bluetooth_device_get_transport(device);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothTransport
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
     public String __EXT_NATIVE__bluetooth_device_get_id(ByteBuffer __arg_buffer, double __arg_buffer_length)
@@ -280,15 +328,21 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         return (double)__result;
     }
 
-    public double __EXT_NATIVE__bluetooth_classic_disconnect(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    public double __EXT_NATIVE__bluetooth_classic_disconnect(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
         GMExtWire.order(__arg_buffer);
 
         // field: connection, type: UInt64
         long connection = GMExtWire.readI64(__arg_buffer);
 
-        int __result = bluetooth_classic_disconnect(connection);
-        return (double)__result;
+        BluetoothError __result = bluetooth_classic_disconnect(connection);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
     public double __EXT_NATIVE__bluetooth_classic_connection_is_valid(ByteBuffer __arg_buffer, double __arg_buffer_length)
@@ -341,7 +395,7 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         return (double)__result;
     }
 
-    public double __EXT_NATIVE__bluetooth_classic_send(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    public double __EXT_NATIVE__bluetooth_classic_send(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
         GMExtWire.order(__arg_buffer);
 
@@ -357,8 +411,14 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         // field: size, type: UInt32
         int size = GMExtWire.readI32(__arg_buffer);
 
-        int __result = bluetooth_classic_send(connection, data, offset, size);
-        return (double)__result;
+        BluetoothError __result = bluetooth_classic_send(connection, data, offset, size);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
     public double __EXT_NATIVE__bluetooth_classic_receive(ByteBuffer __arg_buffer, double __arg_buffer_length)
@@ -381,16 +441,28 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         return (double)__result;
     }
 
-    public double __EXT_NATIVE__bluetooth_classic_server_start(String name, String service_uuid)
+    public double __EXT_NATIVE__bluetooth_classic_server_start(String name, String service_uuid, ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
-        int __result = bluetooth_classic_server_start(name, service_uuid);
-        return (double)__result;
+        BluetoothError __result = bluetooth_classic_server_start(name, service_uuid);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
-    public double __EXT_NATIVE__bluetooth_classic_server_stop()
+    public double __EXT_NATIVE__bluetooth_classic_server_stop(ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
-        int __result = bluetooth_classic_server_stop();
-        return (double)__result;
+        BluetoothError __result = bluetooth_classic_server_stop();
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
     public double __EXT_NATIVE__bluetooth_classic_server_is_running()
@@ -399,16 +471,28 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         return __result ? 1.0 : 0.0;
     }
 
-    public double __EXT_NATIVE__bluetooth_classic_discoverable_start(double duration_seconds)
+    public double __EXT_NATIVE__bluetooth_classic_discoverable_start(double duration_seconds, ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
-        int __result = bluetooth_classic_discoverable_start((int)duration_seconds);
-        return (double)__result;
+        BluetoothError __result = bluetooth_classic_discoverable_start((int)duration_seconds);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
-    public double __EXT_NATIVE__bluetooth_classic_discoverable_stop()
+    public double __EXT_NATIVE__bluetooth_classic_discoverable_stop(ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
-        int __result = bluetooth_classic_discoverable_stop();
-        return (double)__result;
+        BluetoothError __result = bluetooth_classic_discoverable_stop();
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
     public double __EXT_NATIVE__bluetooth_classic_discoverable_is_running()
@@ -428,7 +512,7 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         return __result ? 1.0 : 0.0;
     }
 
-    public double __EXT_NATIVE__bluetooth_pair(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    public double __EXT_NATIVE__bluetooth_pair(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
         GMExtWire.order(__arg_buffer);
 
@@ -438,8 +522,14 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         // field: callback, type: Function
         GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
 
-        int __result = bluetooth_pair(device, callback);
-        return (double)__result;
+        BluetoothError __result = bluetooth_pair(device, callback);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
     public double __EXT_NATIVE__bluetooth_device_is_paired(ByteBuffer __arg_buffer, double __arg_buffer_length)
@@ -473,15 +563,21 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         return (double)__result;
     }
 
-    public double __EXT_NATIVE__bluetooth_le_disconnect(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    public double __EXT_NATIVE__bluetooth_le_disconnect(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
         GMExtWire.order(__arg_buffer);
 
         // field: connection, type: UInt64
         long connection = GMExtWire.readI64(__arg_buffer);
 
-        int __result = bluetooth_le_disconnect(connection);
-        return (double)__result;
+        BluetoothError __result = bluetooth_le_disconnect(connection);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
     public double __EXT_NATIVE__bluetooth_le_connection_is_valid(ByteBuffer __arg_buffer, double __arg_buffer_length)
@@ -523,7 +619,7 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         return (double)__result;
     }
 
-    public double __EXT_NATIVE__bluetooth_le_services_discover(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    public double __EXT_NATIVE__bluetooth_le_services_discover(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
         GMExtWire.order(__arg_buffer);
 
@@ -533,8 +629,14 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         // field: callback, type: Function
         GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
 
-        int __result = bluetooth_le_services_discover(connection, callback);
-        return (double)__result;
+        BluetoothError __result = bluetooth_le_services_discover(connection, callback);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
     public double __EXT_NATIVE__bluetooth_le_service_get_count(ByteBuffer __arg_buffer, double __arg_buffer_length)
@@ -579,7 +681,7 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         return __result;
     }
 
-    public double __EXT_NATIVE__bluetooth_le_characteristics_discover(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    public double __EXT_NATIVE__bluetooth_le_characteristics_discover(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
         GMExtWire.order(__arg_buffer);
 
@@ -589,8 +691,14 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         // field: callback, type: Function
         GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
 
-        int __result = bluetooth_le_characteristics_discover(service, callback);
-        return (double)__result;
+        BluetoothError __result = bluetooth_le_characteristics_discover(service, callback);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
     public double __EXT_NATIVE__bluetooth_le_characteristic_get_count(ByteBuffer __arg_buffer, double __arg_buffer_length)
@@ -646,7 +754,7 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         return (double)__result;
     }
 
-    public double __EXT_NATIVE__bluetooth_le_descriptors_discover(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    public double __EXT_NATIVE__bluetooth_le_descriptors_discover(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
         GMExtWire.order(__arg_buffer);
 
@@ -656,8 +764,14 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         // field: callback, type: Function
         GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
 
-        int __result = bluetooth_le_descriptors_discover(characteristic, callback);
-        return (double)__result;
+        BluetoothError __result = bluetooth_le_descriptors_discover(characteristic, callback);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
     public double __EXT_NATIVE__bluetooth_le_descriptor_get_count(ByteBuffer __arg_buffer, double __arg_buffer_length)
@@ -702,7 +816,7 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         return __result;
     }
 
-    public double __EXT_NATIVE__bluetooth_le_characteristic_read(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    public double __EXT_NATIVE__bluetooth_le_characteristic_read(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
         GMExtWire.order(__arg_buffer);
 
@@ -712,31 +826,17 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         // field: callback, type: Function
         GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
 
-        int __result = bluetooth_le_characteristic_read(characteristic, callback);
-        return (double)__result;
+        BluetoothError __result = bluetooth_le_characteristic_read(characteristic, callback);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
-    public double __EXT_NATIVE__bluetooth_le_characteristic_get_value(ByteBuffer __arg_buffer, double __arg_buffer_length)
-    {
-        GMExtWire.order(__arg_buffer);
-
-        // field: characteristic, type: UInt64
-        long characteristic = GMExtWire.readI64(__arg_buffer);
-
-        // field: out_data, type: Buffer
-        java.nio.ByteBuffer out_data = __buffer_queue.poll();
-
-        // field: offset, type: UInt32
-        int offset = GMExtWire.readI32(__arg_buffer);
-
-        // field: max_size, type: UInt32
-        int max_size = GMExtWire.readI32(__arg_buffer);
-
-        int __result = bluetooth_le_characteristic_get_value(characteristic, out_data, offset, max_size);
-        return (double)__result;
-    }
-
-    public double __EXT_NATIVE__bluetooth_le_characteristic_write(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    public double __EXT_NATIVE__bluetooth_le_characteristic_write(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
         GMExtWire.order(__arg_buffer);
 
@@ -752,34 +852,46 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         // field: size, type: UInt32
         int size = GMExtWire.readI32(__arg_buffer);
 
-        // field: write_type, type: Int32
-        int write_type = GMExtWire.readI32(__arg_buffer);
+        // field: write_type, type: enum BluetoothLeWriteType
+        BluetoothLeWriteType write_type = BluetoothLeWriteType.from(GMExtWire.readI32(__arg_buffer));
 
         // field: callback, type: Function
         GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
 
-        int __result = bluetooth_le_characteristic_write(characteristic, data, offset, size, write_type, callback);
-        return (double)__result;
+        BluetoothError __result = bluetooth_le_characteristic_write(characteristic, data, offset, size, write_type, callback);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
-    public double __EXT_NATIVE__bluetooth_le_characteristic_subscribe(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    public double __EXT_NATIVE__bluetooth_le_characteristic_subscribe(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
         GMExtWire.order(__arg_buffer);
 
         // field: characteristic, type: UInt64
         long characteristic = GMExtWire.readI64(__arg_buffer);
 
-        // field: mode, type: Int32
-        int mode = GMExtWire.readI32(__arg_buffer);
+        // field: mode, type: enum BluetoothLeSubscribeMode
+        BluetoothLeSubscribeMode mode = BluetoothLeSubscribeMode.from(GMExtWire.readI32(__arg_buffer));
 
         // field: callback, type: Function
         GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
 
-        int __result = bluetooth_le_characteristic_subscribe(characteristic, mode, callback);
-        return (double)__result;
+        BluetoothError __result = bluetooth_le_characteristic_subscribe(characteristic, mode, callback);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
-    public double __EXT_NATIVE__bluetooth_le_descriptor_read(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    public double __EXT_NATIVE__bluetooth_le_descriptor_read(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
         GMExtWire.order(__arg_buffer);
 
@@ -789,31 +901,17 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         // field: callback, type: Function
         GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
 
-        int __result = bluetooth_le_descriptor_read(descriptor, callback);
-        return (double)__result;
+        BluetoothError __result = bluetooth_le_descriptor_read(descriptor, callback);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
-    public double __EXT_NATIVE__bluetooth_le_descriptor_get_value(ByteBuffer __arg_buffer, double __arg_buffer_length)
-    {
-        GMExtWire.order(__arg_buffer);
-
-        // field: descriptor, type: UInt64
-        long descriptor = GMExtWire.readI64(__arg_buffer);
-
-        // field: out_data, type: Buffer
-        java.nio.ByteBuffer out_data = __buffer_queue.poll();
-
-        // field: offset, type: UInt32
-        int offset = GMExtWire.readI32(__arg_buffer);
-
-        // field: max_size, type: UInt32
-        int max_size = GMExtWire.readI32(__arg_buffer);
-
-        int __result = bluetooth_le_descriptor_get_value(descriptor, out_data, offset, max_size);
-        return (double)__result;
-    }
-
-    public double __EXT_NATIVE__bluetooth_le_descriptor_write(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    public double __EXT_NATIVE__bluetooth_le_descriptor_write(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
         GMExtWire.order(__arg_buffer);
 
@@ -832,31 +930,89 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         // field: callback, type: Function
         GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
 
-        int __result = bluetooth_le_descriptor_write(descriptor, data, offset, size, callback);
-        return (double)__result;
+        BluetoothError __result = bluetooth_le_descriptor_write(descriptor, data, offset, size, callback);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
-    public double __EXT_NATIVE__bluetooth_le_advertise_start(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    public double __EXT_NATIVE__bluetooth_le_value_copy(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
         GMExtWire.order(__arg_buffer);
 
-        // field: settings_json, type: String
-        String settings_json = GMExtWire.readString(__arg_buffer);
+        // field: value, type: UInt64
+        long value = GMExtWire.readI64(__arg_buffer);
 
-        // field: data_json, type: String
-        String data_json = GMExtWire.readString(__arg_buffer);
+        // field: out_data, type: Buffer
+        java.nio.ByteBuffer out_data = __buffer_queue.poll();
+
+        // field: offset, type: UInt32
+        int offset = GMExtWire.readI32(__arg_buffer);
+
+        BluetoothError __result = bluetooth_le_value_copy(value, out_data, offset);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_value_release(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: value, type: UInt64
+        long value = GMExtWire.readI64(__arg_buffer);
+
+        BluetoothError __result = bluetooth_le_value_release(value);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
+    }
+
+    public double __EXT_NATIVE__bluetooth_le_advertise_start(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
+    {
+        GMExtWire.order(__arg_buffer);
+
+        // field: settings, type: struct BluetoothLeAdvertiseSettings
+        BluetoothLeAdvertiseSettings settings = BluetoothLeAdvertiseSettingsCodec.read(__arg_buffer);
+
+        // field: data, type: struct BluetoothLeAdvertiseData
+        BluetoothLeAdvertiseData data = BluetoothLeAdvertiseDataCodec.read(__arg_buffer);
 
         // field: callback, type: Function
         GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
 
-        int __result = bluetooth_le_advertise_start(settings_json, data_json, callback);
-        return (double)__result;
+        BluetoothError __result = bluetooth_le_advertise_start(settings, data, callback);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
-    public double __EXT_NATIVE__bluetooth_le_advertise_stop()
+    public double __EXT_NATIVE__bluetooth_le_advertise_stop(ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
-        int __result = bluetooth_le_advertise_stop();
-        return (double)__result;
+        BluetoothError __result = bluetooth_le_advertise_stop();
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
     public double __EXT_NATIVE__bluetooth_le_advertise_is_running()
@@ -865,16 +1021,28 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         return __result ? 1.0 : 0.0;
     }
 
-    public double __EXT_NATIVE__bluetooth_le_server_start()
+    public double __EXT_NATIVE__bluetooth_le_server_start(ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
-        int __result = bluetooth_le_server_start();
-        return (double)__result;
+        BluetoothError __result = bluetooth_le_server_start();
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
-    public double __EXT_NATIVE__bluetooth_le_server_stop()
+    public double __EXT_NATIVE__bluetooth_le_server_stop(ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
-        int __result = bluetooth_le_server_stop();
-        return (double)__result;
+        BluetoothError __result = bluetooth_le_server_stop();
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
     public double __EXT_NATIVE__bluetooth_le_server_is_running()
@@ -883,7 +1051,7 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         return __result ? 1.0 : 0.0;
     }
 
-    public double __EXT_NATIVE__bluetooth_le_server_add_service(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    public double __EXT_NATIVE__bluetooth_le_server_add_service(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
         GMExtWire.order(__arg_buffer);
 
@@ -893,17 +1061,29 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         // field: callback, type: Function
         GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
 
-        int __result = bluetooth_le_server_add_service(service, callback);
-        return (double)__result;
+        BluetoothError __result = bluetooth_le_server_add_service(service, callback);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
-    public double __EXT_NATIVE__bluetooth_le_server_clear_services()
+    public double __EXT_NATIVE__bluetooth_le_server_clear_services(ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
-        int __result = bluetooth_le_server_clear_services();
-        return (double)__result;
+        BluetoothError __result = bluetooth_le_server_clear_services();
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
-    public double __EXT_NATIVE__bluetooth_le_server_respond_read(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    public double __EXT_NATIVE__bluetooth_le_server_respond_read(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
         GMExtWire.order(__arg_buffer);
 
@@ -922,14 +1102,26 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         // field: size, type: UInt32
         int size = GMExtWire.readI32(__arg_buffer);
 
-        int __result = bluetooth_le_server_respond_read(request_id, error_code, data, offset, size);
-        return (double)__result;
+        BluetoothError __result = bluetooth_le_server_respond_read(request_id, error_code, data, offset, size);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
-    public double __EXT_NATIVE__bluetooth_le_server_respond_write(double request_id, double error_code)
+    public double __EXT_NATIVE__bluetooth_le_server_respond_write(double request_id, double error_code, ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
-        int __result = bluetooth_le_server_respond_write((int)request_id, (int)error_code);
-        return (double)__result;
+        BluetoothError __result = bluetooth_le_server_respond_write((int)request_id, (int)error_code);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
     public double __EXT_NATIVE__bluetooth_le_server_write_request_get_value(ByteBuffer __arg_buffer, double __arg_buffer_length)
@@ -952,7 +1144,7 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         return (double)__result;
     }
 
-    public double __EXT_NATIVE__bluetooth_le_server_notify_value(ByteBuffer __arg_buffer, double __arg_buffer_length)
+    public double __EXT_NATIVE__bluetooth_le_server_notify_value(ByteBuffer __arg_buffer, double __arg_buffer_length, ByteBuffer __ret_buffer, double __ret_buffer_length)
     {
         GMExtWire.order(__arg_buffer);
 
@@ -974,8 +1166,14 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         // field: size, type: UInt32
         int size = GMExtWire.readI32(__arg_buffer);
 
-        int __result = bluetooth_le_server_notify_value(service_uuid, characteristic_uuid, connection, data, offset, size);
-        return (double)__result;
+        BluetoothError __result = bluetooth_le_server_notify_value(service_uuid, characteristic_uuid, connection, data, offset, size);
+
+        GMExtWire.order(__ret_buffer);
+        GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);
+        // return: __result, type: enum BluetoothError
+        GMExtWire.writeI32(__ret_buffer_writer, __result.value());
+
+        return 0;
     }
 
     public double __EXT_NATIVE__bluetooth_set_callback_state_changed(ByteBuffer __arg_buffer, double __arg_buffer_length)

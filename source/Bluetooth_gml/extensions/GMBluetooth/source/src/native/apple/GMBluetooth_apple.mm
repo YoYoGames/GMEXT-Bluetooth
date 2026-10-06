@@ -155,6 +155,13 @@
 @property(nonatomic, strong) NSMutableDictionary <NSNumber *, CBATTRequest *> *readRequestsLookup;
 @property(nonatomic, strong) NSMutableDictionary <NSNumber *, GMBTWriteBatch *> *writeRequestsLookup;
 
+// What each remote central is subscribed to, keyed by its identifier: the
+// "service|characteristic" UUID strings, and the CBCentral a targeted notify
+// sends to. CoreBluetooth has no peripheral-side disconnect, so a central's
+// last unsubscribe is reported as its disconnect.
+@property(nonatomic, strong) NSMutableDictionary <NSString *, NSMutableSet<NSString *> *> *centralSubscriptions;
+@property(nonatomic, strong) NSMutableDictionary <NSString *, CBCentral *> *subscribedCentrals;
+
 @end
 
 
@@ -452,7 +459,9 @@
         _addServiceQueue = [NSMutableArray new];
         _readRequestsLookup = [NSMutableDictionary new];
         _writeRequestsLookup = [NSMutableDictionary new];
-        
+        _centralSubscriptions = [NSMutableDictionary new];
+        _subscribedCentrals = [NSMutableDictionary new];
+
         _openPeripheralQueue = [NSMutableArray new];
         _closePeripheralQueue = [NSMutableArray new];
 
@@ -532,6 +541,8 @@ static bool _scanPendingPowerOn = false;
     [_initialValues removeAllObjects];
     [_readRequestsLookup removeAllObjects];
     [_writeRequestsLookup removeAllObjects];
+    [_centralSubscriptions removeAllObjects];
+    [_subscribedCentrals removeAllObjects];
 
     _centralManager = nil;
     _peripheralManager = nil;
@@ -687,28 +698,15 @@ static bool _scanPendingPowerOn = false;
     }];
 }
 
-- (double) bt_le_advertise_start:(NSString*)settings data:(NSString*)data opId:(NSNumber *)opId {
+// CBPeripheralManager.startAdvertising takes only LocalName and ServiceUUIDs;
+// AppleBackend::le_advertise_start refuses every other field before this.
+// The UUIDs were validated by the core, so UUIDWithString cannot throw.
+- (double) bt_le_advertise_start:(BOOL)includeName serviceUUIDs:(NSArray<NSString *> *)serviceUuidStrings opId:(NSNumber *)opId {
     if (_isAdvertising || (_peripheralManager && _peripheralManager.isAdvertising)) return -1;
-
-    NSError *settingsError = nil;
-    NSError *dataError = nil;
-    NSDictionary *settingsDict = [NSJSONSerialization JSONObjectWithData:[settings dataUsingEncoding:NSUTF8StringEncoding]
-                                                                  options:0
-                                                                    error:&settingsError];
-    NSDictionary *dataDict = [NSJSONSerialization JSONObjectWithData:[data dataUsingEncoding:NSUTF8StringEncoding]
-                                                              options:0
-                                                                error:&dataError];
-
-    if (settingsError || dataError || ![settingsDict isKindOfClass:[NSDictionary class]] || ![dataDict isKindOfClass:[NSDictionary class]]) {
-        NSLog(@"[GMBluetooth] invalid BLE advertising JSON (settings=%@, data=%@)", settingsError, dataError);
-        return -1;
-    }
 
     NSMutableDictionary *advertisementData = [NSMutableDictionary dictionary];
 
-    // CBPeripheralManager.startAdvertising supports only LocalName and ServiceUUIDs.
-    // Other advertising fields used by Android/Windows are intentionally ignored here.
-    if ([dataDict[@"includeName"] boolValue]) {
+    if (includeName) {
 #if TARGET_OS_IOS
         NSString *deviceName = [[UIDevice currentDevice] name];
 #else
@@ -719,19 +717,12 @@ static bool _scanPendingPowerOn = false;
     }
 
     NSMutableArray<CBUUID *> *serviceUUIDs = [NSMutableArray array];
-    id servicesValue = dataDict[@"services"];
-    if ([servicesValue isKindOfClass:[NSArray class]]) {
-        for (id serviceValue in (NSArray *)servicesValue) {
-            if (![serviceValue isKindOfClass:[NSDictionary class]]) continue;
-            NSString *uuidString = ((NSDictionary *)serviceValue)[@"uuid"];
-            if (![uuidString isKindOfClass:[NSString class]] || uuidString.length == 0) continue;
-            [serviceUUIDs addObject:[CBUUID UUIDWithString:uuidString]];
-        }
+    for (NSString *uuidString in serviceUuidStrings) {
+        if (uuidString.length == 0) continue;
+        [serviceUUIDs addObject:[CBUUID UUIDWithString:uuidString]];
     }
     if (serviceUUIDs.count > 0)
         advertisementData[CBAdvertisementDataServiceUUIDsKey] = serviceUUIDs;
-
-    (void)settingsDict;
 
     GMBTQueuedMutableDictionary *queued = [[GMBTQueuedMutableDictionary alloc] initWithOpId:opId
                                                                                     dictionary:advertisementData];
@@ -900,6 +891,9 @@ static bool _scanPendingPowerOn = false;
     // The core answered the requests these held before asking.
     [_readRequestsLookup removeAllObjects];
     [_writeRequestsLookup removeAllObjects];
+    // The characteristics they named are gone; no unsubscribe will come.
+    [_centralSubscriptions removeAllObjects];
+    [_subscribedCentrals removeAllObjects];
 
     [self notifyResult:@"bt_le_server_clear_services" errorCode:nil extraParams:nil];
 
@@ -912,9 +906,12 @@ static bool _scanPendingPowerOn = false;
     _isServerOpen = false;
     [_peripheralManager removeAllServices];
     [_initialValues removeAllObjects];
-    // The core answered the requests these held before asking.
+    // The core answered the requests these held before asking, and retires
+    // every central it knows once the stop succeeds.
     [_readRequestsLookup removeAllObjects];
     [_writeRequestsLookup removeAllObjects];
+    [_centralSubscriptions removeAllObjects];
+    [_subscribedCentrals removeAllObjects];
 
     if ([_peripheralManager isAdvertising]) {
         [_peripheralManager stopAdvertising];
@@ -983,7 +980,10 @@ static bool _scanPendingPowerOn = false;
     return 1; // Indicate success
 }
 
-- (double) bt_le_server_notify_value:(NSString*) serviceUuid characteristicUuid:(NSString*) characteristicUuid value:(NSString*) value {
+// central: empty broadcasts to every subscriber; otherwise the key a server
+// event named the central by. Returns 0, -1 on failure, or -2 when that
+// central is not subscribed to the characteristic.
+- (double) bt_le_server_notify_value:(NSString*) serviceUuid characteristicUuid:(NSString*) characteristicUuid central:(NSString*) centralKey value:(NSString*) value {
 
     // Decode the base64 value
     NSData *dataValue = [[NSData alloc] initWithBase64EncodedString:value options:0];
@@ -1015,8 +1015,16 @@ static bool _scanPendingPowerOn = false;
         return -1;
     }
 
-    // Notify the subscribed centrals
-    BOOL success = [_peripheralManager updateValue:dataValue forCharacteristic:characteristic onSubscribedCentrals:nil];
+    NSArray<CBCentral *> *centrals = nil;
+    if (centralKey.length > 0) {
+        CBCentral *central = _subscribedCentrals[centralKey];
+        if (!central || ![_centralSubscriptions[centralKey] containsObject:[self subscriptionKey:characteristic]])
+            return -2;
+        centrals = @[central];
+    }
+
+    // Notify the subscribed centrals, or the one named
+    BOOL success = [_peripheralManager updateValue:dataValue forCharacteristic:characteristic onSubscribedCentrals:centrals];
     if (!success) {
         NSLog(@"Failed to notify subscribed centrals");
         return -1;
@@ -1057,6 +1065,13 @@ static bool _scanPendingPowerOn = false;
         return;
 
     _isAdvertising = false;
+
+    // The radio is gone and every central with it; no unsubscribe follows.
+    NSArray<CBCentral *> *centrals = _subscribedCentrals.allValues;
+    [_centralSubscriptions removeAllObjects];
+    [_subscribedCentrals removeAllObjects];
+    for (CBCentral *central in centrals)
+        [self notifyServerCentral:central connected:NO];
 
     while (_startAdvertisementQueue.count > 0) {
         GMBTQueuedMutableDictionary *queued = [self queueDequeue:_startAdvertisementQueue];
@@ -1132,22 +1147,54 @@ static bool _scanPendingPowerOn = false;
     return [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
 }
 
-- (void) peripheralManager:(CBPeripheralManager *)peripheral central:(CBCentral *)central didSubscribeToCharacteristic:(CBCharacteristic *)characteristic {
-    
+// The key a server event names its central by, for the core's server
+// connection handles.
+- (NSString *) centralKey:(CBCentral *)central {
+    NSString *key = central.identifier.UUIDString;
+    return key != nil ? key : @"";
+}
+
+- (NSString *) subscriptionKey:(CBCharacteristic *)characteristic {
+    return [NSString stringWithFormat:@"%@|%@", characteristic.service.UUID.UUIDString, characteristic.UUID.UUIDString];
+}
+
+- (void) notifyServerCentral:(CBCentral *)central connected:(BOOL)connected {
     NSMutableDictionary *params = [NSMutableDictionary dictionary];
     params[@"success"] = @(true);
-    params[@"connected"] = @(true);
+    params[@"connected"] = @(connected);
+    params[@"central"] = [self centralKey:central];
     params[@"device"] = [self createJSONFromCentral: central];
     [self notifyOperation:@"bt_le_server_connection_state_changed" extraParams: params];
 }
 
+// The core reports a central connected on the first event naming it, so a
+// repeated connected:true is harmless.
+- (void) peripheralManager:(CBPeripheralManager *)peripheral central:(CBCentral *)central didSubscribeToCharacteristic:(CBCharacteristic *)characteristic {
+    NSString *key = [self centralKey:central];
+    NSMutableSet<NSString *> *subscriptions = _centralSubscriptions[key];
+    if (!subscriptions) {
+        subscriptions = [NSMutableSet set];
+        _centralSubscriptions[key] = subscriptions;
+    }
+    [subscriptions addObject:[self subscriptionKey:characteristic]];
+    _subscribedCentrals[key] = central;
+
+    [self notifyServerCentral:central connected:YES];
+}
+
+// A central's last unsubscribe is the only sign CoreBluetooth gives of it
+// leaving: it unsubscribes from everything when its link drops.
 - (void) peripheralManager:(CBPeripheralManager *)peripheral central:(CBCentral *)central didUnsubscribeFromCharacteristic:(CBCharacteristic *)characteristic {
-    
-    NSMutableDictionary *params = [NSMutableDictionary dictionary];
-    params[@"success"] = @(true);
-    params[@"connected"] = @(false);
-    params[@"device"] = [self createJSONFromCentral: central];
-    [self notifyOperation:@"bt_le_server_connection_state_changed" extraParams: params];
+    NSString *key = [self centralKey:central];
+    NSMutableSet<NSString *> *subscriptions = _centralSubscriptions[key];
+    if (!subscriptions) return;
+
+    [subscriptions removeObject:[self subscriptionKey:characteristic]];
+    if (subscriptions.count > 0) return;
+
+    [_centralSubscriptions removeObjectForKey:key];
+    [_subscribedCentrals removeObjectForKey:key];
+    [self notifyServerCentral:central connected:NO];
 }
 
 - (void) peripheralManager:(CBPeripheralManager *)peripheral didReceiveReadRequest:(CBATTRequest *)request {
@@ -1178,6 +1225,8 @@ static bool _scanPendingPowerOn = false;
     params[@"characteristic_uuid"] = request.characteristic.UUID.UUIDString;
     // A Read Blob continues a long value; GML answers from this offset on.
     params[@"offset"] = @(request.offset);
+    params[@"central"] = [self centralKey:request.central];
+    params[@"device"] = [self createJSONFromCentral:request.central];
 
     // Loop through the characteristic's descriptors to check UUIDs
     for (CBDescriptor *descriptor in request.characteristic.descriptors) {
@@ -1257,6 +1306,9 @@ static bool _scanPendingPowerOn = false;
         params[@"service_uuid"] = characteristic.service.UUID.UUIDString;
         params[@"characteristic_uuid"] = characteristic.UUID.UUIDString;
         params[@"value"] = [values[i] base64EncodedStringWithOptions:0];
+        CBCentral *central = [groups objectForKey:characteristic].firstObject.central;
+        params[@"central"] = [self centralKey:central];
+        params[@"device"] = [self createJSONFromCentral:central];
 
         [self notifyOperation:@"bt_le_server_characteristic_write_request" extraParams:params];
     }
@@ -2378,7 +2430,27 @@ namespace
         Error le_descriptor_read(std::uint64_t op,std::uint64_t c,const std::string&s,const std::string&ch,const std::string&d,std::string&m) override { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return async_result([transport_ bt_le_descriptor_read:to_ns(id) service:to_ns(s) characteristic:to_ns(ch) descriptor:to_ns(d) opId:@(op)],"Descriptor read could not start",m); }
         Error le_descriptor_write(std::uint64_t op,std::uint64_t c,const std::string&s,const std::string&ch,const std::string&d,const std::string&v,std::string&m) override { auto id=id_for_connection(c); if(id.empty())return invalid_connection(m); return async_result([transport_ bt_le_descriptor_write:to_ns(id) service:to_ns(s) characteristic:to_ns(ch) descriptor:to_ns(d) value:to_ns(v) opId:@(op)],"Descriptor write could not start",m); }
 
-        Error le_advertise_start(std::uint64_t op,const std::string&s,const std::string&d,std::string&m) override { return async_result([transport_ bt_le_advertise_start:to_ns(s) data:to_ns(d) opId:@(op)],"BLE advertising could not start",m); }
+        // CoreBluetooth advertises the local name and service UUIDs only, and
+        // always connectable: anything else asked for is NotSupported here,
+        // before anything starts (R1-36).
+        Error le_advertise_start(std::uint64_t op,const LeAdvertiseSettings& settings,const LeAdvertiseData& data,std::string& m) override
+        {
+            const char* field = nullptr;
+            if (!settings.connectable) field = "connectable = false";
+            else if (settings.tx_power) field = "tx_power";
+            else if (data.include_tx_power) field = "include_tx_power";
+            else if (!data.service_data.empty()) field = "service_data";
+            else if (!data.manufacturer_data.empty()) field = "manufacturer_data";
+            if (field)
+            {
+                m = std::string("Apple cannot advertise ") + field + ": CoreBluetooth sends only the local name and service UUIDs";
+                return Error::NotSupported;
+            }
+
+            NSMutableArray<NSString*>* uuids = [NSMutableArray arrayWithCapacity:data.service_uuids.size()];
+            for (const auto& uuid : data.service_uuids) [uuids addObject:to_ns(uuid)];
+            return async_result([transport_ bt_le_advertise_start:data.include_name serviceUUIDs:uuids opId:@(op)],"BLE advertising could not start",m);
+        }
         Error le_advertise_stop(std::string&m) override { return async_result([transport_ bt_le_advertise_stop],"BLE advertising could not stop",m); }
         bool le_advertise_is_running() const override { return transport_ && [transport_ bt_le_advertise_is_active] > 0.5; }
         Error le_server_start(std::string&m) override { return async_result([transport_ bt_le_server_open],"GATT server could not start",m); }
@@ -2388,7 +2460,12 @@ namespace
         Error le_server_clear_services(std::string&m) override { return async_result([transport_ bt_le_server_clear_services],"GATT services could not be cleared",m); }
         Error le_server_respond_read(std::int32_t r,std::int32_t st,const std::string&v,std::string&m) override { double x=[transport_ bt_le_server_respond_read:r status:st value:to_ns(v)]; if(x>0){m.clear();return Error::Ok;}m="GATT read response failed";return Error::OperationFailed; }
         Error le_server_respond_write(std::int32_t r,std::int32_t st,std::string&m) override { double x=[transport_ bt_le_server_respond_write:r status:st]; if(x>0){m.clear();return Error::Ok;}m="GATT write response failed";return Error::OperationFailed; }
-        Error le_server_notify_value(const std::string&s,const std::string&ch,const std::string&v,std::string&m) override { return async_result([transport_ bt_le_server_notify_value:to_ns(s) characteristicUuid:to_ns(ch) value:to_ns(v)],"GATT notification could not start",m); }
+        Error le_server_notify_value(const std::string&s,const std::string&ch,const std::string&central,const std::string&v,std::string&m) override
+        {
+            const double r=[transport_ bt_le_server_notify_value:to_ns(s) characteristicUuid:to_ns(ch) central:to_ns(central) value:to_ns(v)];
+            if(r==-2){m="That central is not subscribed to the characteristic";return Error::NotFound;}
+            return async_result(r,"GATT notification could not start",m);
+        }
 
 #if TARGET_OS_OSX
 

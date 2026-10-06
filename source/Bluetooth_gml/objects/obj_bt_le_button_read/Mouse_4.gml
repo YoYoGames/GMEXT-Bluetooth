@@ -14,7 +14,7 @@ var _ctx = {
 
 var _r = bluetooth_le_characteristic_read(
     characteristic,
-    method(_ctx, function(_error_code, _message, _characteristic)
+    method(_ctx, function(_error_code, _message, _characteristic, _value, _size)
     {
         if (instance_exists(button_inst)) button_inst.locked = false;
         if (!instance_exists(conn)) return;
@@ -34,26 +34,21 @@ var _r = bluetooth_le_characteristic_read(
             return;
         }
 
-        var _buf = buffer_create(512, buffer_grow, 1);
-        var _n = bluetooth_le_characteristic_get_value(
-            _characteristic,
-            _buf,
-            0,
-            512
-        );
+        var _buf = buffer_create(max(_size, 1), buffer_fixed, 1);
+        var _copy = bluetooth_le_value_copy(_value, _buf, 0);
 
-        if (_n >= 0)
+        if (_copy == BluetoothError.Ok)
         {
-            var _text = ble_bytes_to_string(_buf, _n);
+            var _text = ble_bytes_to_string(_buf, _size);
 
             row_inst.value_text = _text;
-            row_inst.status_text = "Read OK (" + string(_n) + " bytes)";
+            row_inst.status_text = "Read OK (" + string(_size) + " bytes)";
             conn.log_msg("READ value: " + _text);
         }
         else
         {
-            row_inst.status_text = "Read OK, but no cached value";
-            conn.log_msg("READ completed but get_value returned " + string(_n));
+            row_inst.status_text = "Read OK, but the value could not be copied";
+            conn.log_msg("READ completed but value_copy returned " + string(_copy));
         }
 
         buffer_delete(_buf);

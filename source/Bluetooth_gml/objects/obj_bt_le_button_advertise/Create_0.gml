@@ -13,16 +13,17 @@ start_advertising = function()
 {
     if (starting || bluetooth_le_advertise_is_running()) return;
 
-    var _settings_json = json_stringify({
-        txPowerLevel: 0
-    });
+    // tx_power stays undefined (the platform default): Apple cannot set it
+    // and would answer NotSupported.
+    var _settings = new BluetoothLeAdvertiseSettings();
+    _settings.connectable = true;
 
-    var _data_json = json_stringify({
-        includeName: true,
-        services: [
-            {uuid: DEMO_SERVICE_UUID}
-        ]
-    });
+    var _data = new BluetoothLeAdvertiseData();
+    _data.include_name = true;
+    _data.include_tx_power = false;
+    _data.service_uuids = [DEMO_SERVICE_UUID];
+    _data.service_data = [];
+    _data.manufacturer_data = [];
 
     starting = true;
 
@@ -32,8 +33,8 @@ start_advertising = function()
     };
 
     var _r = bluetooth_le_advertise_start(
-        _settings_json,
-        _data_json,
+        _settings,
+        _data,
         method(_ctx, function(_error_code, _message)
         {
             if (instance_exists(button_inst)) button_inst.starting = false;

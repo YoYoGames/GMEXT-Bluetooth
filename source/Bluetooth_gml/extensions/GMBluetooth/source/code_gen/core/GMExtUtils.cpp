@@ -128,7 +128,7 @@ YYEXPORT void YYExtensionInitialise(const struct YYRunnerInterface* _pFunctions,
         return;
     }
 
-    // Initialize the GameMaker runner utility bridge.
+    // Wire your utilities (TODO body inside Init per your request)
     gm::ExtUtils::Init(*(gm::details::GMS2RunnerInterface*)_pFunctions);
 }
 
@@ -146,6 +146,6 @@ GMEXPORT void GMExtensionInitialise(const struct gm::details::GMRTRunnerInterfac
         return;
     }
 
-    // Initialize the GameMaker runner utility bridge.
+    // Wire your utilities (TODO body inside Init per your request)
     gm::ExtUtils::Init(*_pFunctions);
 }

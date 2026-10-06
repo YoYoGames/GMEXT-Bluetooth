@@ -17,7 +17,7 @@
 
 /**
  * @function_partial bluetooth_last_error_code
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
@@ -59,26 +59,26 @@
 
 /**
  * @function_partial bluetooth_permission_get_status
- * @returns {Real}
+ * @returns {Enum.BluetoothPermissionStatus}
  * @function_end
  */
 
 /**
  * @function_partial bluetooth_permission_request
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
 /**
  * @function_partial bluetooth_le_scan_start
  * @param {Bool} active
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
 /**
  * @function_partial bluetooth_le_scan_stop
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
@@ -90,13 +90,13 @@
 
 /**
  * @function_partial bluetooth_classic_scan_start
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
 /**
  * @function_partial bluetooth_classic_scan_stop
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
@@ -134,7 +134,7 @@
 /**
  * @function_partial bluetooth_device_get_transport
  * @param {Real} device
- * @returns {Real}
+ * @returns {Enum.BluetoothTransport}
  * @function_end
  */
 
@@ -199,7 +199,7 @@
 /**
  * @function_partial bluetooth_classic_disconnect
  * @param {Real} connection
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
@@ -237,7 +237,7 @@
  * @param {Buffer} data
  * @param {Real} offset
  * @param {Real} size
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
@@ -255,13 +255,13 @@
  * @function_partial bluetooth_classic_server_start
  * @param {String} name
  * @param {String} service_uuid
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
 /**
  * @function_partial bluetooth_classic_server_stop
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
@@ -274,13 +274,13 @@
 /**
  * @function_partial bluetooth_classic_discoverable_start
  * @param {Real} duration_seconds
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
 /**
  * @function_partial bluetooth_classic_discoverable_stop
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
@@ -301,7 +301,7 @@
  * @function_partial bluetooth_pair
  * @param {Real} device
  * @param {Function} callback
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
@@ -323,7 +323,7 @@
 /**
  * @function_partial bluetooth_le_disconnect
  * @param {Real} connection
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
@@ -352,7 +352,7 @@
  * @function_partial bluetooth_le_services_discover
  * @param {Real} connection
  * @param {Function} callback
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
@@ -382,7 +382,7 @@
  * @function_partial bluetooth_le_characteristics_discover
  * @param {Real} service
  * @param {Function} callback
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
@@ -419,7 +419,7 @@
  * @function_partial bluetooth_le_descriptors_discover
  * @param {Real} characteristic
  * @param {Function} callback
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
@@ -449,17 +449,7 @@
  * @function_partial bluetooth_le_characteristic_read
  * @param {Real} characteristic
  * @param {Function} callback
- * @returns {Real}
- * @function_end
- */
-
-/**
- * @function_partial bluetooth_le_characteristic_get_value
- * @param {Real} characteristic
- * @param {Buffer} out_data
- * @param {Real} offset
- * @param {Real} max_size
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
@@ -469,18 +459,18 @@
  * @param {Buffer} data
  * @param {Real} offset
  * @param {Real} size
- * @param {Real} write_type
+ * @param {Enum.BluetoothLeWriteType} write_type
  * @param {Function} callback
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
 /**
  * @function_partial bluetooth_le_characteristic_subscribe
  * @param {Real} characteristic
- * @param {Real} mode
+ * @param {Enum.BluetoothLeSubscribeMode} mode
  * @param {Function} callback
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
@@ -488,17 +478,7 @@
  * @function_partial bluetooth_le_descriptor_read
  * @param {Real} descriptor
  * @param {Function} callback
- * @returns {Real}
- * @function_end
- */
-
-/**
- * @function_partial bluetooth_le_descriptor_get_value
- * @param {Real} descriptor
- * @param {Buffer} out_data
- * @param {Real} offset
- * @param {Real} max_size
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
@@ -509,22 +489,38 @@
  * @param {Real} offset
  * @param {Real} size
  * @param {Function} callback
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
+ * @function_end
+ */
+
+/**
+ * @function_partial bluetooth_le_value_copy
+ * @param {Real} value
+ * @param {Buffer} out_data
+ * @param {Real} offset
+ * @returns {Enum.BluetoothError}
+ * @function_end
+ */
+
+/**
+ * @function_partial bluetooth_le_value_release
+ * @param {Real} value
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
 /**
  * @function_partial bluetooth_le_advertise_start
- * @param {String} settings_json
- * @param {String} data_json
+ * @param {Struct.BluetoothLeAdvertiseSettings} settings
+ * @param {Struct.BluetoothLeAdvertiseData} data
  * @param {Function} callback
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
 /**
  * @function_partial bluetooth_le_advertise_stop
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
@@ -536,13 +532,13 @@
 
 /**
  * @function_partial bluetooth_le_server_start
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
 /**
  * @function_partial bluetooth_le_server_stop
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
@@ -556,13 +552,13 @@
  * @function_partial bluetooth_le_server_add_service
  * @param {Struct.BluetoothLeServiceDefinition} service
  * @param {Function} callback
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
 /**
  * @function_partial bluetooth_le_server_clear_services
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
@@ -573,7 +569,7 @@
  * @param {Buffer} data
  * @param {Real} offset
  * @param {Real} size
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
@@ -581,7 +577,7 @@
  * @function_partial bluetooth_le_server_respond_write
  * @param {Real} request_id
  * @param {Real} error_code
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
@@ -603,7 +599,7 @@
  * @param {Buffer} data
  * @param {Real} offset
  * @param {Real} size
- * @returns {Real}
+ * @returns {Enum.BluetoothError}
  * @function_end
  */
 
@@ -757,12 +753,43 @@
  */
 
 /**
+ * @struct_partial BluetoothLeAdvertiseSettings
+ * @member {Bool} connectable
+ * @member {Enum.BluetoothLeAdvertiseTxPower} [tx_power]
+ * @struct_end
+ */
+
+/**
+ * @struct_partial BluetoothLeAdvertiseServiceData
+ * @member {String} uuid
+ * @member {Array[Real]} data
+ * @struct_end
+ */
+
+/**
+ * @struct_partial BluetoothLeAdvertiseManufacturerData
+ * @member {Real} company_id
+ * @member {Array[Real]} data
+ * @struct_end
+ */
+
+/**
  * @struct_partial BluetoothLeCharacteristicDefinition
  * @member {String} uuid
  * @member {Real} properties
  * @member {Real} permissions
  * @member {String} [value]
  * @member {Array[Struct.BluetoothLeDescriptorDefinition]} descriptors
+ * @struct_end
+ */
+
+/**
+ * @struct_partial BluetoothLeAdvertiseData
+ * @member {Bool} include_name
+ * @member {Bool} include_tx_power
+ * @member {Array[String]} service_uuids
+ * @member {Array[Struct.BluetoothLeAdvertiseServiceData]} service_data
+ * @member {Array[Struct.BluetoothLeAdvertiseManufacturerData]} manufacturer_data
  * @struct_end
  */
 
@@ -831,6 +858,22 @@
  */
 
 /**
+ * @enum_partial BluetoothLeWriteType
+ * @member WithResponse
+ * @member WithoutResponse
+ * @enum_end
+ */
+
+/**
+ * @enum_partial BluetoothLeAdvertiseTxPower
+ * @member UltraLow
+ * @member Low
+ * @member Medium
+ * @member High
+ * @enum_end
+ */
+
+/**
  * @enum_partial BluetoothState
  * @member Unknown
  * @member Resetting
@@ -839,10 +882,5 @@
  * @member PoweredOff
  * @member PoweredOn
  * @enum_end
- */
-
-/**
- * @const_partial macros
- * @const_end
  */
 

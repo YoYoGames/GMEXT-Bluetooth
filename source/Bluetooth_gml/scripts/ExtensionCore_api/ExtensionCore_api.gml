@@ -49,6 +49,24 @@ function __ext_core_buffer_unmarshal_value(_buff, _decoders)
 					_array[_i] = _decoders[_decoder_id](_buff, buffer_tell(_buff));
 				}
 			}
+			else if (_elem_type == buffer_string)
+			{
+				// Every string on the wire carries a u32 length prefix (see the
+				// buffer_string case below); buffer_read(buffer_string) does not
+				// consume it, so skip it per element like the generated struct
+				// decoders do.
+				for (var _i = 0 ; _i < _size ; _i++) {
+					buffer_read(_buff, buffer_u32);
+					_array[_i] = buffer_read(_buff, buffer_string);
+				}
+			}
+			else if (_elem_type == buffer_bool)
+			{
+				// buffer_read(buffer_bool) answers an int32, not a GML bool.
+				for (var _i = 0 ; _i < _size ; _i++) {
+					_array[_i] = bool(buffer_read(_buff, buffer_bool));
+				}
+			}
 			else 
 			{
 				for (var _i = 0 ; _i < _size ; _i++) {
@@ -78,6 +96,10 @@ function __ext_core_buffer_unmarshal_value(_buff, _decoders)
 		{
 			return undefined;
 		}
+		case buffer_bool:
+			// buffer_read(buffer_bool) answers an int32, not a GML bool; the typed wrappers
+			// gate bool parameters with is_bool, so a callback argument has to be one.
+			return bool(buffer_read(_buff, buffer_bool));
 		case buffer_string:
 			buffer_read(_buff, buffer_u32); // Fall to the default (this is the string size)
 		default:
@@ -253,7 +275,7 @@ function __GMNativeFunctionDispatcher(_handler, _decoders) constructor {
 	}, [], -1);
 	
 	/// @func dispatch(_amount)
-	/// @desc Increments the internal reference count and ensures the dispatcher�s time source is running.
+	/// @desc Increments the internal reference count and ensures the dispatcher's time source is running.
     /// Should be called whenever a new function is registered on the GML side.
     /// @param {Real} [_amount=1] The number of active references to add.
 	static dispatch = function(_amount = 1) {

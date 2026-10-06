@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -64,6 +65,46 @@ namespace gmbluetooth
         std::int32_t properties = 0;
     };
 
+    // BluetoothLeAdvertiseTxPower: Android's AdvertiseSettings levels.
+    enum class LeAdvertiseTxPower : std::int32_t
+    {
+        UltraLow = 0,
+        Low      = 1,
+        Medium   = 2,
+        High     = 3,
+    };
+
+    // The advertise structs as the core hands them on: checked, UUIDs in
+    // canonical form (lowercase 128-bit), every service_data UUID also in
+    // service_uuids, company ids in range. A field a backend cannot send is
+    // that backend's NotSupported, returned before anything starts.
+    struct LeAdvertiseSettings
+    {
+        bool connectable = true;
+        std::optional<LeAdvertiseTxPower> tx_power; // empty: the platform default
+    };
+
+    struct LeAdvertiseServiceData
+    {
+        std::string uuid;
+        std::vector<std::uint8_t> data;
+    };
+
+    struct LeAdvertiseManufacturerData
+    {
+        std::uint16_t company_id = 0;
+        std::vector<std::uint8_t> data;
+    };
+
+    struct LeAdvertiseData
+    {
+        bool include_name = false;
+        bool include_tx_power = false;
+        std::vector<std::string> service_uuids;
+        std::vector<LeAdvertiseServiceData> service_data;
+        std::vector<LeAdvertiseManufacturerData> manufacturer_data;
+    };
+
     // What an LE call returns besides its error. Discovery fills attributes;
     // a characteristic or descriptor read fills value; the rest leave both
     // empty.
@@ -108,7 +149,13 @@ namespace gmbluetooth
         std::string message;
 
         // BLE event stream. event_type is the normalized public event name and
-        // json preserves the old extension's proven payload schema.
+        // json preserves the old extension's proven payload schema. The GATT
+        // server events (bluetooth_le_server_connection_state_changed and the
+        // read and write requests) carry "central", a string naming the remote
+        // central for as long as it stays connected, which the core maps to a
+        // server connection handle; connection_state_changed with connected
+        // false is that central's disconnect. "address" or Apple's nested
+        // "device" names the device.
         std::string event_type;
         std::string json;
     };
@@ -479,13 +526,13 @@ namespace gmbluetooth
 
         virtual Error le_advertise_start(
             std::uint64_t op_id,
-            const std::string& settings_json,
-            const std::string& data_json,
+            const LeAdvertiseSettings& settings,
+            const LeAdvertiseData& data,
             std::string& message)
         {
             (void)op_id;
-            (void)settings_json;
-            (void)data_json;
+            (void)settings;
+            (void)data;
 
             message = "BLE advertising is not supported by this backend";
             return Error::NotSupported;
@@ -563,14 +610,19 @@ namespace gmbluetooth
             return Error::NotSupported;
         }
 
+        // central: empty broadcasts to every subscriber; otherwise the key a
+        // server event named the central by, and NotFound when that central is
+        // not subscribed to the characteristic.
         virtual Error le_server_notify_value(
             const std::string& service_uuid,
             const std::string& characteristic_uuid,
+            const std::string& central,
             const std::string& value_base64,
             std::string& message)
         {
             (void)service_uuid;
             (void)characteristic_uuid;
+            (void)central;
             (void)value_base64;
 
             message = "BLE peripheral/server mode is not supported by this backend";
