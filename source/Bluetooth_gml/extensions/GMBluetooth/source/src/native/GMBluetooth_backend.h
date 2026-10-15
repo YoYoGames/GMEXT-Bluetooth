@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -228,6 +229,10 @@ namespace gmbluetooth
         ClassicClientConnected,
         ClassicDataAvailable,
         ClassicDisconnected,
+        // A receive loop paused at k_classic_receive_budget, sent every
+        // k_classic_receive_paused_expiry_check while it stays paused, so the
+        // core expires values even when GML never fetches; connection names it.
+        ClassicReceivePaused,
         LeEvent,
         // The completion of an LE call that took an op id: op_id names the
         // call, error is Ok or its failure, message says why, and result holds
@@ -260,6 +265,11 @@ namespace gmbluetooth
         // DevicesQueried only.
         std::vector<DiscoveredDevice> devices;
 
+        // ClassicDataAvailable only: one chunk received on connection, copied
+        // off the receive buffer before the push. The backend counts it as
+        // outstanding until classic_receive_consumed gives it back.
+        std::vector<std::uint8_t> bytes;
+
         Error error = Error::Ok;
         std::int32_t value = 0;
 
@@ -271,7 +281,9 @@ namespace gmbluetooth
         // read and write requests) carry "central", a string naming the remote
         // central for as long as it stays connected, which the core maps to a
         // server connection handle; connection_state_changed with connected
-        // false is that central's disconnect. "address" or Apple's nested
+        // false is that central's disconnect. The read and write requests name
+        // their attribute by "characteristic_id" and, for a descriptor,
+        // "descriptor_id": the "id" the core gave it in the service JSON. "address" or Apple's nested
         // "device" names the device. bluetooth_le_characteristic_value_changed
         // names its characteristic by "service_instance" and
         // "characteristic_instance", the LeAttribute instances discovery
@@ -431,11 +443,25 @@ namespace gmbluetooth
             return false;
         }
 
-        virtual std::int32_t classic_receive_available(
-            std::uint64_t connection) const
+        // Received bytes reach the core as ClassicDataAvailable chunks. The
+        // backend counts the bytes it pushed for a connection as outstanding:
+        // while they exceed k_classic_receive_budget it stops reading (or, where
+        // a channel cannot pause, ends the connection with Disconnected "receive
+        // buffer full"). The core gives bytes back here as GML fetches or
+        // releases their values, or they expire; any thread, no core lock held.
+        static constexpr std::size_t k_classic_receive_budget = 1024 * 1024;
+
+        // Values expire only when one is stored, fetched or released, so a
+        // backend that pauses reading pushes ClassicReceivePaused this often
+        // while paused: an unfetched chunk then still ends its connection.
+        static constexpr auto k_classic_receive_paused_expiry_check = std::chrono::seconds(5);
+
+        virtual void classic_receive_consumed(
+            std::uint64_t connection,
+            std::size_t bytes)
         {
             (void)connection;
-            return 0;
+            (void)bytes;
         }
 
         virtual Error classic_send_bytes(
@@ -450,18 +476,6 @@ namespace gmbluetooth
 
             message = "Bluetooth Classic is not supported by this backend";
             return Error::NotSupported;
-        }
-
-        virtual std::size_t classic_receive_bytes(
-            std::uint64_t connection,
-            std::uint8_t* out,
-            std::size_t max_size)
-        {
-            (void)connection;
-            (void)out;
-            (void)max_size;
-
-            return 0;
         }
 
         virtual Error classic_server_start(
@@ -755,6 +769,10 @@ namespace gmbluetooth
             return false;
         }
 
+        // service_json gives the service, each characteristic and each
+        // descriptor an "id" (a number), which the backend keys the attribute
+        // by and reports on its requests. A 0x2902 descriptor never has one:
+        // the core leaves it out of the JSON.
         virtual Error le_server_add_service(
             std::uint64_t op_id,
             const std::string& service_json,
@@ -802,15 +820,15 @@ namespace gmbluetooth
         // central: empty broadcasts to every subscriber; otherwise the key a
         // server event named the central by, and NotFound when that central is
         // not subscribed to the characteristic.
+        // characteristic_id: the id the core gave the characteristic in its
+        // service JSON; NotFound when no live characteristic has it.
         virtual Error le_server_notify_value(
-            const std::string& service_uuid,
-            const std::string& characteristic_uuid,
+            std::uint64_t characteristic_id,
             const std::string& central,
             const std::string& value_base64,
             std::string& message)
         {
-            (void)service_uuid;
-            (void)characteristic_uuid;
+            (void)characteristic_id;
             (void)central;
             (void)value_base64;
 

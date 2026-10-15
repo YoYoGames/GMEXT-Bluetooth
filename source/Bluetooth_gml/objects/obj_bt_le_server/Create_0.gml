@@ -16,6 +16,11 @@ last_rx_text = "-";
 last_notify_text = "-";
 last_server_event = "-";
 
+// Server attribute handles, filled in by the add_service callback.
+server_service = 0;
+char_tx = 0;
+char_info = 0;
+
 if (!bt_ready)
 {
     show_debug_message("[GML] Bluetooth is not initialized");
@@ -69,8 +74,7 @@ send_demo_notification = function()
     var _size = buffer_tell(_buf);
 
     var _r = bluetooth_le_server_notify_value(
-        DEMO_SERVICE_UUID,
-        DEMO_CHAR_TX_UUID,
+        char_tx,
         0,
         _buf,
         0,
@@ -142,29 +146,25 @@ bluetooth_set_callback_le_server_write_request(
     function(
         _request_id,
         _connection,
-        _service_uuid,
-        _characteristic_uuid,
-        _descriptor_uuid,
+        _characteristic,
+        _descriptor,
         _offset,
-        _response_needed
+        _response_needed,
+        _value,
+        _size
     )
     {
         show_debug_message(
-            "[GML] LE WRITE request: service=" + _service_uuid
-            + " characteristic=" + _characteristic_uuid
-            + " descriptor=" + _descriptor_uuid
+            "[GML] LE WRITE request: characteristic=" + string(_characteristic)
+            + " descriptor=" + string(_descriptor)
             + " offset=" + string(_offset)
             + " response_needed=" + string(_response_needed)
+            + " size=" + string(_size)
         );
 
-        var _buf = buffer_create(512, buffer_grow, 1);
-
-        var _n = bluetooth_le_server_write_request_get_value(
-            _request_id,
-            _buf,
-            0,
-            512
-        );
+        // The value belongs to the request: fetch it before responding.
+        var _buf = buffer_create(max(_size, 1), buffer_fixed, 1);
+        var _n = bluetooth_value_fetch(_value, _buf, 0);
 
         show_debug_message("[GML] LE WRITE bytes received: " + string(_n));
 
@@ -176,7 +176,7 @@ bluetooth_set_callback_le_server_write_request(
             if (instance_exists(global.ble_server_conn_inst))
             {
                 global.ble_server_conn_inst.on_receive(
-                    _characteristic_uuid,
+                    _characteristic,
                     _buf,
                     _n
                 );
@@ -196,21 +196,19 @@ bluetooth_set_callback_le_server_read_request(
     function(
         _request_id,
         _connection,
-        _service_uuid,
-        _characteristic_uuid,
-        _descriptor_uuid,
+        _characteristic,
+        _descriptor,
         _offset
     )
     {
         show_debug_message(
-            "[GML] LE READ request: service=" + _service_uuid
-            + " characteristic=" + _characteristic_uuid
-            + " descriptor=" + _descriptor_uuid
+            "[GML] LE READ request: characteristic=" + string(_characteristic)
+            + " descriptor=" + string(_descriptor)
             + " offset=" + string(_offset)
         );
 
         // Only the INFO characteristic is readable in this demo profile.
-        if (string_lower(_characteristic_uuid) != string_lower(DEMO_CHAR_INFO_UUID))
+        if (_characteristic != char_info || _descriptor != 0)
         {
             var _empty = buffer_create(1, buffer_fixed, 1);
             bluetooth_le_server_respond_read(
@@ -347,7 +345,7 @@ start_le_server_demo = function()
 
     var _add_service = bluetooth_le_server_add_service(
         service_definition,
-        function(_error_code, _message)
+        function(_error_code, _message, _service)
         {
             show_debug_message(
                 "[GML] le_server_add_service "
@@ -357,6 +355,25 @@ start_le_server_demo = function()
             );
 
             if (_error_code != BluetoothError.Ok) return;
+
+            // The getters walk the service in definition order; match by UUID
+            // so the order of service_definition.characteristics can change.
+            server_service = _service;
+            var _count = bluetooth_le_characteristic_get_count(_service);
+            for (var _i = 0; _i < _count; _i++)
+            {
+                var _characteristic = bluetooth_le_characteristic_get_at(_service, _i);
+                var _uuid = string_lower(bluetooth_le_characteristic_get_uuid(_characteristic));
+
+                if (_uuid == string_lower(DEMO_CHAR_TX_UUID))
+                {
+                    char_tx = _characteristic;
+                }
+                else if (_uuid == string_lower(DEMO_CHAR_INFO_UUID))
+                {
+                    char_info = _characteristic;
+                }
+            }
 
             service_ready = true;
 

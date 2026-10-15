@@ -518,19 +518,18 @@ namespace gmbluetooth
             std::int32_t request_id,
             const std::string& central,
             const std::string& address,
-            const std::string& service_uuid,
-            const std::string& characteristic_uuid,
-            const std::string& descriptor_uuid,
+            std::uint64_t characteristic_id,
+            std::uint64_t descriptor_id,
             std::uint32_t offset,
             const std::vector<std::uint8_t>* value,
             bool response_needed = true)
         {
             std::string out = "{\"request_id\":" + std::to_string(request_id) +
                 "," + server_central_json(central, address) +
-                ",\"service_uuid\":\"" + json_escape(service_uuid) +
-                "\",\"characteristic_uuid\":\"" + json_escape(characteristic_uuid) +
-                "\",\"descriptor_uuid\":\"" + json_escape(descriptor_uuid) +
-                "\",\"offset\":" + std::to_string(offset);
+                ",\"characteristic_id\":" + std::to_string(characteristic_id);
+            if (descriptor_id != 0)
+                out += ",\"descriptor_id\":" + std::to_string(descriptor_id);
+            out += ",\"offset\":" + std::to_string(offset);
 
             // A write request always says whether it waits for an answer.
             if (value)
@@ -580,6 +579,7 @@ namespace gmbluetooth
 
         struct LocalGattDescriptorState
         {
+            std::uint64_t id = 0;
             WDBG::GattLocalDescriptor descriptor{nullptr};
             winrt::event_token read_token{};
             winrt::event_token write_token{};
@@ -587,8 +587,6 @@ namespace gmbluetooth
 
         struct LocalGattCharacteristicState
         {
-            std::string service_uuid;
-            std::string characteristic_uuid;
             WDBG::GattLocalCharacteristic characteristic{nullptr};
             winrt::event_token read_token{};
             winrt::event_token write_token{};
@@ -600,7 +598,8 @@ namespace gmbluetooth
         {
             std::string uuid;
             WDBG::GattServiceProvider provider{nullptr};
-            std::unordered_map<std::string, std::shared_ptr<LocalGattCharacteristicState>> characteristics;
+            // By the core's id: two characteristics may share a UUID.
+            std::unordered_map<std::uint64_t, std::shared_ptr<LocalGattCharacteristicState>> characteristics;
         };
 
         struct PendingGattRead
@@ -616,9 +615,6 @@ namespace gmbluetooth
             bool with_response = true;
         };
 
-        // At most this much received data waits for the game; past it the
-        // receive loop stops reading and RFCOMM flow control slows the peer.
-        constexpr std::size_t k_classic_receive_cap = 1024 * 1024;
         // At most this much accepted data waits to be sent.
         constexpr std::size_t k_classic_send_cap = 1024 * 1024;
         constexpr std::size_t k_classic_send_chunk = 64 * 1024;
@@ -657,17 +653,14 @@ namespace gmbluetooth
             std::atomic_bool closing{false};
 
             std::mutex receive_mutex;
-            // Signalled when the game reads (room again) and when the
-            // connection must stop.
+            // Signalled when the core gives bytes back (room again) and when
+            // the connection must stop.
             std::condition_variable receive_cv;
-            std::deque<std::uint8_t> received;
-            // A ClassicDataAvailable went out and the game has not read
-            // since; the next one waits for classic_receive_bytes.
-            bool data_pending = false;
-            // Set under receive_mutex when the receive loop has ended and the
-            // socket is closed. A finished state stays registered only while
-            // it holds bytes the game has not read.
-            bool finished = false;
+            // Bytes pushed as ClassicDataAvailable that the core has not
+            // given back through classic_receive_consumed. Past
+            // k_classic_receive_budget the receive loop stops reading and
+            // RFCOMM flow control slows the peer.
+            std::size_t outstanding = 0;
 
             // classic_send_bytes queues here; the writer thread is the only
             // caller of send() on the socket.
@@ -922,25 +915,13 @@ namespace gmbluetooth
             }
 
             connection_close(state);
-
-            // Bytes the game has not read yet outlive a remote hang-up:
-            // the state stays registered until classic_receive drains it,
-            // classic_disconnect drops it or the backend shuts down.
-            bool keep = false;
-            {
-                std::scoped_lock lock(state->receive_mutex);
-                state->finished = true;
-                keep = !state->closing.load() &&
-                       shared->alive->load() &&
-                       !state->received.empty();
-            }
-            if (!keep)
-                unregister_connection(shared, state->handle);
+            unregister_connection(shared, state->handle);
         }
 
-        // An open connection's receive side. It stops reading while
-        // k_classic_receive_cap bytes wait for the game, and announces data
-        // once until the game reads.
+        // An open connection's receive side. Each chunk read goes to the core
+        // as its own ClassicDataAvailable; reading stops while
+        // Backend::k_classic_receive_budget bytes are outstanding, and the
+        // paused loop sends ClassicReceivePaused on a timer.
         void run_receive_loop(
             const std::shared_ptr<SharedClassicState>& shared,
             const std::shared_ptr<ClassicConnectionState>& state)
@@ -958,12 +939,31 @@ namespace gmbluetooth
 
             for (;;)
             {
+                // The core expires values only as they come and go, so while
+                // paused the loop asks it to on a timer: a chunk GML never
+                // fetches still ends the connection.
+                for (;;)
                 {
-                    std::unique_lock lock(state->receive_mutex);
-                    state->receive_cv.wait(lock, [&state, &stopping]()
+                    bool paused = false;
                     {
-                        return state->received.size() < k_classic_receive_cap || stopping();
-                    });
+                        std::unique_lock lock(state->receive_mutex);
+                        paused = !state->receive_cv.wait_for(lock, Backend::k_classic_receive_paused_expiry_check,
+                            [&state, &stopping]()
+                            {
+                                return state->outstanding < Backend::k_classic_receive_budget || stopping();
+                            });
+                    }
+                    if (!paused)
+                        break;
+                    if (shared->alive->load() && shared->hooks.push_event)
+                    {
+                        BackendEvent event;
+                        event.type = BackendEventType::ClassicReceivePaused;
+                        event.transport = Transport::Classic;
+                        event.connection = state->handle;
+                        event.device = state->device;
+                        shared->hooks.push_event(std::move(event));
+                    }
                 }
                 if (stopping())
                     break;
@@ -976,27 +976,18 @@ namespace gmbluetooth
 
                 if (received > 0)
                 {
-                    std::int32_t available = 0;
-                    bool announce = false;
-                    {
-                        std::scoped_lock lock(state->receive_mutex);
-                        state->received.insert(
-                            state->received.end(),
-                            buffer.begin(),
-                            buffer.begin() + received);
-                        available = static_cast<std::int32_t>(state->received.size());
-                        announce = !state->data_pending;
-                        state->data_pending = true;
-                    }
-
-                    if (announce && shared->alive->load() && shared->hooks.push_event)
+                    if (shared->alive->load() && shared->hooks.push_event)
                     {
                         BackendEvent event;
                         event.type = BackendEventType::ClassicDataAvailable;
                         event.transport = Transport::Classic;
                         event.connection = state->handle;
                         event.device = state->device;
-                        event.value = available;
+                        event.bytes.assign(buffer.begin(), buffer.begin() + received);
+                        {
+                            std::scoped_lock lock(state->receive_mutex);
+                            state->outstanding += event.bytes.size();
+                        }
                         shared->hooks.push_event(std::move(event));
                     }
                     continue;
@@ -2668,12 +2659,14 @@ namespace gmbluetooth
     // thread, for the worker to create.
     struct LocalDescriptorDefinition
     {
+        std::uint64_t id = 0;
         winrt::guid guid{};
         std::string uuid;
     };
 
     struct LocalCharacteristicDefinition
     {
+        std::uint64_t id = 0;
         winrt::guid guid{};
         std::string uuid;
         std::int32_t properties = 0;
@@ -2684,6 +2677,7 @@ namespace gmbluetooth
 
     struct LocalServiceDefinition
     {
+        std::uint64_t id = 0;
         winrt::guid guid{};
         std::string uuid;
         std::vector<LocalCharacteristicDefinition> characteristics;
@@ -3406,12 +3400,11 @@ namespace gmbluetooth
     }
 
     // A read request on a local characteristic, or on one of its
-    // descriptors when descriptor_uuid is set; on a WinRT thread.
+    // descriptors when descriptor_id is non-zero; on a WinRT thread.
     void on_local_read_request(
         const std::shared_ptr<SharedLeState>& le,
-        const std::string& service_uuid,
-        const std::string& characteristic_uuid,
-        const std::string& descriptor_uuid,
+        std::uint64_t characteristic_id,
+        std::uint64_t descriptor_id,
         const WDBG::GattReadRequestedEventArgs& args)
     {
         const auto deferral = args.GetDeferral();
@@ -3443,16 +3436,15 @@ namespace gmbluetooth
             BackendEvent event;
             event.type = BackendEventType::LeEvent;
             event.transport = Transport::LowEnergy;
-            event.event_type = descriptor_uuid.empty()
+            event.event_type = descriptor_id == 0
                 ? "bluetooth_le_server_characteristic_read_request"
                 : "bluetooth_le_server_descriptor_read_request";
             event.json = make_server_request_json(
                 request_id,
                 central,
                 central_address,
-                service_uuid,
-                characteristic_uuid,
-                descriptor_uuid,
+                characteristic_id,
+                descriptor_id,
                 request.Offset(),
                 nullptr);
             push_le_event(le, std::move(event));
@@ -3464,12 +3456,11 @@ namespace gmbluetooth
     }
 
     // A write request on a local characteristic, or on one of its
-    // descriptors when descriptor_uuid is set; on a WinRT thread.
+    // descriptors when descriptor_id is non-zero; on a WinRT thread.
     void on_local_write_request(
         const std::shared_ptr<SharedLeState>& le,
-        const std::string& service_uuid,
-        const std::string& characteristic_uuid,
-        const std::string& descriptor_uuid,
+        std::uint64_t characteristic_id,
+        std::uint64_t descriptor_id,
         const WDBG::GattWriteRequestedEventArgs& args)
     {
         const auto deferral = args.GetDeferral();
@@ -3511,16 +3502,15 @@ namespace gmbluetooth
             BackendEvent event;
             event.type = BackendEventType::LeEvent;
             event.transport = Transport::LowEnergy;
-            event.event_type = descriptor_uuid.empty()
+            event.event_type = descriptor_id == 0
                 ? "bluetooth_le_server_characteristic_write_request"
                 : "bluetooth_le_server_descriptor_write_request";
             event.json = make_server_request_json(
                 request_id,
                 central,
                 central_address,
-                service_uuid,
-                characteristic_uuid,
-                descriptor_uuid,
+                characteristic_id,
+                descriptor_id,
                 request.Offset(),
                 &value,
                 with_response);
@@ -3585,6 +3575,13 @@ namespace gmbluetooth
         service.provider = nullptr;
     }
 
+    // The "id" the core gave a service JSON entry; 0 when it has none.
+    std::uint64_t local_attribute_id(const json::Value& entry)
+    {
+        const auto* id_field = entry.find("id");
+        return id_field ? id_field->as_uint64(0) : 0;
+    }
+
     // Everything le_server_add_service can refuse, checked on the game
     // thread before any WinRT call.
     Error parse_local_service(const std::string& service_json, LocalServiceDefinition& out, std::string& message)
@@ -3595,6 +3592,14 @@ namespace gmbluetooth
             message = "Invalid BLE service definition";
             return Error::InvalidArgument;
         }
+
+        out.id = local_attribute_id(*root);
+        if (out.id == 0)
+        {
+            message = "BLE service definition has no valid id";
+            return Error::InvalidArgument;
+        }
+        std::unordered_set<std::uint64_t> ids{out.id};
 
         const auto* uuid_field = root->find("uuid");
         if (!uuid_field || !uuid_field->is_string() || uuid_field->string_value.empty())
@@ -3641,6 +3646,13 @@ namespace gmbluetooth
             }
             characteristic.uuid = normalize_uuid(char_uuid_field->string_value);
 
+            characteristic.id = local_attribute_id(characteristic_value);
+            if (characteristic.id == 0 || !ids.insert(characteristic.id).second)
+            {
+                message = "BLE characteristic " + characteristic.uuid + " has no valid id";
+                return Error::InvalidArgument;
+            }
+
             const auto* properties_field = characteristic_value.find("properties");
             characteristic.properties = properties_field ? properties_field->as_int(0) : 0;
             characteristic.permissions = permissions;
@@ -3679,6 +3691,13 @@ namespace gmbluetooth
                     // descriptor automatically for Notify/Indicate characteristics.
                     if (descriptor.uuid == "00002902-0000-1000-8000-00805f9b34fb")
                         continue;
+
+                    descriptor.id = local_attribute_id(descriptor_value);
+                    if (descriptor.id == 0 || !ids.insert(descriptor.id).second)
+                    {
+                        message = "BLE descriptor " + descriptor.uuid + " has no valid id";
+                        return Error::InvalidArgument;
+                    }
 
                     characteristic.descriptors.push_back(std::move(descriptor));
                 }
@@ -3722,11 +3741,10 @@ namespace gmbluetooth
             service_state->provider = provider_result.ServiceProvider();
 
             const std::weak_ptr<SharedLeState> weak = le;
-            const std::string& service_uuid = definition.uuid;
 
             for (const auto& characteristic : definition.characteristics)
             {
-                const std::string& characteristic_uuid = characteristic.uuid;
+                const std::uint64_t characteristic_id = characteristic.id;
 
                 WDBG::GattLocalCharacteristicParameters parameters;
                 // Windows local GATT rejects Broadcast. All other raw
@@ -3748,12 +3766,10 @@ namespace gmbluetooth
                 }
 
                 auto characteristic_state = std::make_shared<LocalGattCharacteristicState>();
-                characteristic_state->service_uuid = service_uuid;
-                characteristic_state->characteristic_uuid = characteristic_uuid;
                 characteristic_state->characteristic = characteristic_result.Characteristic();
                 // In the map before any handler is registered, so a failure
                 // below revokes every one already in place.
-                service_state->characteristics[characteristic_uuid] = characteristic_state;
+                service_state->characteristics[characteristic_id] = characteristic_state;
 
                 characteristic_state->subscribed_token = characteristic_state->characteristic.SubscribedClientsChanged(
                     [weak](const WDBG::GattLocalCharacteristic& local, const WF::IInspectable&)
@@ -3779,24 +3795,24 @@ namespace gmbluetooth
                     });
 
                 characteristic_state->read_token = characteristic_state->characteristic.ReadRequested(
-                    [weak, service_uuid, characteristic_uuid](
+                    [weak, characteristic_id](
                         const WDBG::GattLocalCharacteristic&,
                         const WDBG::GattReadRequestedEventArgs& args)
                     {
-                        on_local_read_request(weak.lock(), service_uuid, characteristic_uuid, std::string(), args);
+                        on_local_read_request(weak.lock(), characteristic_id, 0, args);
                     });
 
                 characteristic_state->write_token = characteristic_state->characteristic.WriteRequested(
-                    [weak, service_uuid, characteristic_uuid](
+                    [weak, characteristic_id](
                         const WDBG::GattLocalCharacteristic&,
                         const WDBG::GattWriteRequestedEventArgs& args)
                     {
-                        on_local_write_request(weak.lock(), service_uuid, characteristic_uuid, std::string(), args);
+                        on_local_write_request(weak.lock(), characteristic_id, 0, args);
                     });
 
                 for (const auto& descriptor : characteristic.descriptors)
                 {
-                    const std::string& descriptor_uuid = descriptor.uuid;
+                    const std::uint64_t descriptor_id = descriptor.id;
 
                     WDBG::GattLocalDescriptorParameters descriptor_parameters;
                     descriptor_parameters.ReadProtectionLevel(WDBG::GattProtectionLevel::Plain);
@@ -3812,23 +3828,24 @@ namespace gmbluetooth
                     }
 
                     auto descriptor_state = std::make_shared<LocalGattDescriptorState>();
+                    descriptor_state->id = descriptor_id;
                     descriptor_state->descriptor = descriptor_result.Descriptor();
                     characteristic_state->descriptors.push_back(descriptor_state);
 
                     descriptor_state->read_token = descriptor_state->descriptor.ReadRequested(
-                        [weak, service_uuid, characteristic_uuid, descriptor_uuid](
+                        [weak, characteristic_id, descriptor_id](
                             const WDBG::GattLocalDescriptor&,
                             const WDBG::GattReadRequestedEventArgs& args)
                         {
-                            on_local_read_request(weak.lock(), service_uuid, characteristic_uuid, descriptor_uuid, args);
+                            on_local_read_request(weak.lock(), characteristic_id, descriptor_id, args);
                         });
 
                     descriptor_state->write_token = descriptor_state->descriptor.WriteRequested(
-                        [weak, service_uuid, characteristic_uuid, descriptor_uuid](
+                        [weak, characteristic_id, descriptor_id](
                             const WDBG::GattLocalDescriptor&,
                             const WDBG::GattWriteRequestedEventArgs& args)
                         {
-                            on_local_write_request(weak.lock(), service_uuid, characteristic_uuid, descriptor_uuid, args);
+                            on_local_write_request(weak.lock(), characteristic_id, descriptor_id, args);
                         });
                 }
             }
@@ -3960,23 +3977,8 @@ namespace gmbluetooth
             {
                 std::scoped_lock lock(classic_->connections_mutex);
                 classic_->alive->store(false);
-                for (auto it = classic_->connections.begin(); it != classic_->connections.end();)
-                {
-                    // A finished connection only kept its unread bytes; there
-                    // is no receive loop left to wait for.
-                    bool finished = false;
-                    {
-                        std::scoped_lock receive_lock(it->second->receive_mutex);
-                        finished = it->second->finished;
-                    }
-                    if (finished)
-                    {
-                        it = classic_->connections.erase(it);
-                        continue;
-                    }
-                    connections.push_back(it->second);
-                    ++it;
-                }
+                for (const auto& pair : classic_->connections)
+                    connections.push_back(pair.second);
             }
 
             std::vector<std::shared_ptr<RemoteGattConnectionState>> le_connections;
@@ -5866,8 +5868,7 @@ namespace gmbluetooth
         }
 
         Error le_server_notify_value(
-            const std::string& service_uuid,
-            const std::string& characteristic_uuid,
+            std::uint64_t characteristic_id,
             const std::string& central,
             const std::string& value_base64,
             std::string& message) override
@@ -5875,21 +5876,22 @@ namespace gmbluetooth
             WDBG::GattLocalCharacteristic characteristic{nullptr};
             {
                 std::scoped_lock lock(le_->services_mutex);
-                const auto service_it = le_->gatt_services.find(normalize_uuid(service_uuid));
-                if (service_it == le_->gatt_services.end() || !service_it->second)
+                for (const auto& [_, service] : le_->gatt_services)
                 {
-                    message = "BLE service not found";
-                    return Error::NotFound;
+                    if (!service)
+                        continue;
+                    const auto it = service->characteristics.find(characteristic_id);
+                    if (it != service->characteristics.end() && it->second && it->second->characteristic)
+                    {
+                        characteristic = it->second->characteristic;
+                        break;
+                    }
                 }
-
-                const auto characteristic_it = service_it->second->characteristics.find(normalize_uuid(characteristic_uuid));
-                if (characteristic_it == service_it->second->characteristics.end() ||
-                    !characteristic_it->second || !characteristic_it->second->characteristic)
-                {
-                    message = "BLE characteristic not found";
-                    return Error::NotFound;
-                }
-                characteristic = characteristic_it->second->characteristic;
+            }
+            if (!characteristic)
+            {
+                message = "No GATT server characteristic has this handle";
+                return Error::NotFound;
             }
 
             // A notify to one central goes to its subscription only (R1-48).
@@ -6222,19 +6224,6 @@ namespace gmbluetooth
                 return Error::InvalidHandle;
             }
 
-            bool finished = false;
-            {
-                std::scoped_lock lock(state->receive_mutex);
-                finished = state->finished;
-            }
-            if (finished)
-            {
-                // The peer already hung up; the game is done with its unread bytes.
-                unregister_connection(classic_, connection);
-                message.clear();
-                return Error::Ok;
-            }
-
             // Open or still connecting. A connect cancelled here reports
             // nothing (the core answers its callback); an open connection's
             // receive loop reports the disconnect once it has closed.
@@ -6250,14 +6239,17 @@ namespace gmbluetooth
             return state && state->connected.load();
         }
 
-        std::int32_t classic_receive_available(std::uint64_t connection) const override
+        void classic_receive_consumed(std::uint64_t connection, std::size_t bytes) override
         {
             auto state = find_connection(classic_, connection);
             if (!state)
-                return 0;
+                return;
 
-            std::scoped_lock lock(state->receive_mutex);
-            return static_cast<std::int32_t>(state->received.size());
+            {
+                std::scoped_lock lock(state->receive_mutex);
+                state->outstanding -= std::min(bytes, state->outstanding);
+            }
+            state->receive_cv.notify_all();
         }
 
         Error classic_send_bytes(
@@ -6305,40 +6297,6 @@ namespace gmbluetooth
 
             message.clear();
             return Error::Ok;
-        }
-
-        std::size_t classic_receive_bytes(
-            std::uint64_t connection,
-            std::uint8_t* out,
-            std::size_t max_size) override
-        {
-            auto state = find_connection(classic_, connection);
-            if (!state || !out || max_size == 0)
-                return 0;
-
-            std::size_t count = 0;
-            bool drained = false;
-            {
-                std::scoped_lock lock(state->receive_mutex);
-                count = std::min(max_size, state->received.size());
-                for (std::size_t i = 0; i < count; ++i)
-                {
-                    out[i] = state->received.front();
-                    state->received.pop_front();
-                }
-                drained = state->finished && state->received.empty();
-                // The next data to arrive is announced again.
-                state->data_pending = false;
-            }
-
-            // Room again for a receive loop held back by the cap.
-            state->receive_cv.notify_all();
-
-            // The last bytes of a connection the peer closed: nothing is left
-            // to keep it registered for.
-            if (drained)
-                unregister_connection(classic_, connection);
-            return count;
         }
 
         Error classic_server_start(

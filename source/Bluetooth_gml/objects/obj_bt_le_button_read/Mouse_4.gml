@@ -35,7 +35,7 @@ var _r = bluetooth_le_characteristic_read(
         }
 
         var _buf = buffer_create(max(_size, 1), buffer_fixed, 1);
-        var _copy = bluetooth_le_value_copy(_value, _buf, 0);
+        var _copy = bluetooth_value_fetch(_value, _buf, 0);
 
         if (_copy >= 0)
         {
@@ -48,7 +48,7 @@ var _r = bluetooth_le_characteristic_read(
         else
         {
             row_inst.status_text = "Read OK, but the value could not be copied";
-            conn.log_msg("READ completed but value_copy returned " + string(_copy));
+            conn.log_msg("READ completed but value_fetch returned " + string(_copy));
         }
 
         buffer_delete(_buf);

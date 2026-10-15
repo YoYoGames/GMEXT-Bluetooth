@@ -9,7 +9,7 @@ function log_msg(_s) {
 }
 
 // Forwarded from obj_bt_le_server's write-request callback.
-on_receive = function(_characteristic_uuid, _buf, _n) {
+on_receive = function(_characteristic, _buf, _n) {
     log_msg("RX write: " + ble_bytes_to_string(_buf, _n));
 };
 

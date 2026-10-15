@@ -270,29 +270,12 @@
  */
 
 /**
- * @function_partial bluetooth_classic_receive_available
- * @param {Real} connection
- * @returns {Real}
- * @function_end
- */
-
-/**
  * @function_partial bluetooth_classic_send
  * @param {Real} connection
  * @param {Buffer} data
  * @param {Real} offset
  * @param {Real} size
  * @returns {Enum.BluetoothError}
- * @function_end
- */
-
-/**
- * @function_partial bluetooth_classic_receive
- * @param {Real} connection
- * @param {Buffer} out_data
- * @param {Real} offset
- * @param {Real} max_size
- * @returns {Real}
  * @function_end
  */
 
@@ -571,7 +554,7 @@
  */
 
 /**
- * @function_partial bluetooth_le_value_copy
+ * @function_partial bluetooth_value_fetch
  * @param {Real} value
  * @param {Buffer} out_data
  * @param {Real} offset
@@ -580,7 +563,7 @@
  */
 
 /**
- * @function_partial bluetooth_le_value_release
+ * @function_partial bluetooth_value_release
  * @param {Real} value
  * @returns {Enum.BluetoothError}
  * @function_end
@@ -659,19 +642,8 @@
  */
 
 /**
- * @function_partial bluetooth_le_server_write_request_get_value
- * @param {Real} request_id
- * @param {Buffer} out_data
- * @param {Real} offset
- * @param {Real} max_size
- * @returns {Real}
- * @function_end
- */
-
-/**
  * @function_partial bluetooth_le_server_notify_value
- * @param {String} service_uuid
- * @param {String} characteristic_uuid
+ * @param {Real} characteristic
  * @param {Real} connection
  * @param {Buffer} data
  * @param {Real} offset

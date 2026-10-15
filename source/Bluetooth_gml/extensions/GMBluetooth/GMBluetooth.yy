@@ -747,24 +747,6 @@
         },
         {
           "$GMExtensionFunction": "",
-          "%Name": "__bluetooth_classic_receive_available",
-          "argCount": 2,
-          "args": [
-            1,
-            2
-          ],
-          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_classic_receive_available",
-          "help": "",
-          "hidden": true,
-          "kind": 4,
-          "name": "__bluetooth_classic_receive_available",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
           "%Name": "__bluetooth_classic_send",
           "argCount": 4,
           "args": [
@@ -779,24 +761,6 @@
           "hidden": true,
           "kind": 4,
           "name": "__bluetooth_classic_send",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
-          "%Name": "__bluetooth_classic_receive",
-          "argCount": 2,
-          "args": [
-            1,
-            2
-          ],
-          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_classic_receive",
-          "help": "",
-          "hidden": true,
-          "kind": 4,
-          "name": "__bluetooth_classic_receive",
           "resourceType": "GMExtensionFunction",
           "resourceVersion": "2.0",
           "returnType": 2
@@ -1484,25 +1448,25 @@
         },
         {
           "$GMExtensionFunction": "",
-          "%Name": "__bluetooth_le_value_copy",
+          "%Name": "__bluetooth_value_fetch",
           "argCount": 2,
           "args": [
             1,
             2
           ],
           "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_le_value_copy",
+          "externalName": "__EXT_NATIVE__bluetooth_value_fetch",
           "help": "",
           "hidden": true,
           "kind": 4,
-          "name": "__bluetooth_le_value_copy",
+          "name": "__bluetooth_value_fetch",
           "resourceType": "GMExtensionFunction",
           "resourceVersion": "2.0",
           "returnType": 2
         },
         {
           "$GMExtensionFunction": "",
-          "%Name": "__bluetooth_le_value_release",
+          "%Name": "__bluetooth_value_release",
           "argCount": 4,
           "args": [
             1,
@@ -1511,11 +1475,11 @@
             2
           ],
           "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_le_value_release",
+          "externalName": "__EXT_NATIVE__bluetooth_value_release",
           "help": "",
           "hidden": true,
           "kind": 4,
-          "name": "__bluetooth_le_value_release",
+          "name": "__bluetooth_value_release",
           "resourceType": "GMExtensionFunction",
           "resourceVersion": "2.0",
           "returnType": 2
@@ -1698,24 +1662,6 @@
           "hidden": true,
           "kind": 4,
           "name": "__bluetooth_le_server_respond_write",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
-          "%Name": "__bluetooth_le_server_write_request_get_value",
-          "argCount": 2,
-          "args": [
-            1,
-            2
-          ],
-          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_le_server_write_request_get_value",
-          "help": "",
-          "hidden": true,
-          "kind": 4,
-          "name": "__bluetooth_le_server_write_request_get_value",
           "resourceType": "GMExtensionFunction",
           "resourceVersion": "2.0",
           "returnType": 2

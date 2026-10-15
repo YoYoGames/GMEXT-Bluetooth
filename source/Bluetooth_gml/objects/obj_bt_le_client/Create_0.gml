@@ -148,7 +148,7 @@ bluetooth_set_callback_le_characteristic_value_changed(
         }
         else
         {
-            bluetooth_le_value_release(_value);
+            bluetooth_value_release(_value);
         }
     }
 );

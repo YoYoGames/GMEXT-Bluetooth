@@ -519,9 +519,7 @@ namespace gm::wire::details
 - (bool)bluetooth_classic_connection_is_valid:(std::uint64_t)connection;
 - (bool)bluetooth_classic_connection_is_connected:(std::uint64_t)connection;
 - (std::uint64_t)bluetooth_classic_connection_get_device:(std::uint64_t)connection;
-- (std::int32_t)bluetooth_classic_receive_available:(std::uint64_t)connection;
 - (gm_enums::BluetoothError)bluetooth_classic_send:(std::uint64_t)connection data:(gm::wire::GMBuffer)data offset:(std::uint32_t)offset size:(std::uint32_t)size;
-- (std::int32_t)bluetooth_classic_receive:(std::uint64_t)connection out_data:(gm::wire::GMBuffer)out_data offset:(std::uint32_t)offset max_size:(std::uint32_t)max_size;
 - (gm_enums::BluetoothError)bluetooth_classic_server_start:(std::string_view)name service_uuid:(std::string_view)service_uuid;
 - (gm_enums::BluetoothError)bluetooth_classic_server_stop;
 - (bool)bluetooth_classic_server_is_running;
@@ -558,8 +556,8 @@ namespace gm::wire::details
 - (gm_enums::BluetoothError)bluetooth_le_characteristic_subscribe:(std::uint64_t)characteristic mode:(gm_enums::BluetoothLeSubscribeMode)mode callback:(gm::wire::GMFunction)callback;
 - (gm_enums::BluetoothError)bluetooth_le_descriptor_read:(std::uint64_t)descriptor callback:(gm::wire::GMFunction)callback;
 - (gm_enums::BluetoothError)bluetooth_le_descriptor_write:(std::uint64_t)descriptor data:(gm::wire::GMBuffer)data offset:(std::uint32_t)offset size:(std::uint32_t)size callback:(gm::wire::GMFunction)callback;
-- (std::int32_t)bluetooth_le_value_copy:(std::uint64_t)value out_data:(gm::wire::GMBuffer)out_data offset:(std::uint32_t)offset;
-- (gm_enums::BluetoothError)bluetooth_le_value_release:(std::uint64_t)value;
+- (std::int32_t)bluetooth_value_fetch:(std::uint64_t)value out_data:(gm::wire::GMBuffer)out_data offset:(std::uint32_t)offset;
+- (gm_enums::BluetoothError)bluetooth_value_release:(std::uint64_t)value;
 - (gm_enums::BluetoothError)bluetooth_le_advertise_start:(const gm_structs::BluetoothLeAdvertiseSettings&)settings data:(const gm_structs::BluetoothLeAdvertiseData&)data callback:(gm::wire::GMFunction)callback;
 - (gm_enums::BluetoothError)bluetooth_le_advertise_stop;
 - (bool)bluetooth_le_advertise_is_running;
@@ -570,8 +568,7 @@ namespace gm::wire::details
 - (gm_enums::BluetoothError)bluetooth_le_server_clear_services;
 - (gm_enums::BluetoothError)bluetooth_le_server_respond_read:(std::int32_t)request_id error_code:(gm_enums::BluetoothAttError)error_code data:(gm::wire::GMBuffer)data offset:(std::uint32_t)offset size:(std::uint32_t)size;
 - (gm_enums::BluetoothError)bluetooth_le_server_respond_write:(std::int32_t)request_id error_code:(gm_enums::BluetoothAttError)error_code;
-- (std::int32_t)bluetooth_le_server_write_request_get_value:(std::int32_t)request_id out_data:(gm::wire::GMBuffer)out_data offset:(std::uint32_t)offset max_size:(std::uint32_t)max_size;
-- (gm_enums::BluetoothError)bluetooth_le_server_notify_value:(std::string_view)service_uuid characteristic_uuid:(std::string_view)characteristic_uuid connection:(std::uint64_t)connection data:(gm::wire::GMBuffer)data offset:(std::uint32_t)offset size:(std::uint32_t)size;
+- (gm_enums::BluetoothError)bluetooth_le_server_notify_value:(std::uint64_t)characteristic connection:(std::uint64_t)connection data:(gm::wire::GMBuffer)data offset:(std::uint32_t)offset size:(std::uint32_t)size;
 - (bool)bluetooth_set_callback_state_changed:(gm::wire::GMFunction)callback;
 - (bool)bluetooth_remove_callback_state_changed;
 - (bool)bluetooth_set_callback_device_found:(gm::wire::GMFunction)callback;
@@ -639,9 +636,7 @@ namespace gm::wire::details
 - (double)__EXT_NATIVE__bluetooth_classic_connection_is_valid:(char*)__arg_buffer arg1:(double)__arg_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_classic_connection_is_connected:(char*)__arg_buffer arg1:(double)__arg_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_classic_connection_get_device:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
-- (double)__EXT_NATIVE__bluetooth_classic_receive_available:(char*)__arg_buffer arg1:(double)__arg_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_classic_send:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
-- (double)__EXT_NATIVE__bluetooth_classic_receive:(char*)__arg_buffer arg1:(double)__arg_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_classic_server_start:(char*)name arg1:(char*)service_uuid arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_classic_server_stop:(char*)__ret_buffer arg1:(double)__ret_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_classic_server_is_running;
@@ -678,8 +673,8 @@ namespace gm::wire::details
 - (double)__EXT_NATIVE__bluetooth_le_characteristic_subscribe:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_le_descriptor_read:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_le_descriptor_write:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
-- (double)__EXT_NATIVE__bluetooth_le_value_copy:(char*)__arg_buffer arg1:(double)__arg_buffer_length;
-- (double)__EXT_NATIVE__bluetooth_le_value_release:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
+- (double)__EXT_NATIVE__bluetooth_value_fetch:(char*)__arg_buffer arg1:(double)__arg_buffer_length;
+- (double)__EXT_NATIVE__bluetooth_value_release:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_le_advertise_start:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_le_advertise_stop:(char*)__ret_buffer arg1:(double)__ret_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_le_advertise_is_running;
@@ -690,7 +685,6 @@ namespace gm::wire::details
 - (double)__EXT_NATIVE__bluetooth_le_server_clear_services:(char*)__ret_buffer arg1:(double)__ret_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_le_server_respond_read:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_le_server_respond_write:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
-- (double)__EXT_NATIVE__bluetooth_le_server_write_request_get_value:(char*)__arg_buffer arg1:(double)__arg_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_le_server_notify_value:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_set_callback_state_changed:(char*)__arg_buffer arg1:(double)__arg_buffer_length;
 - (double)__EXT_NATIVE__bluetooth_remove_callback_state_changed;

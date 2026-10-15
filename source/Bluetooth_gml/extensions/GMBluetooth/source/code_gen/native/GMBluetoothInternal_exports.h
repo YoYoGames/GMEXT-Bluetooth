@@ -50,9 +50,7 @@ GMEXPORT double __EXT_NATIVE__bluetooth_classic_disconnect(char* __arg_buffer, d
 GMEXPORT double __EXT_NATIVE__bluetooth_classic_connection_is_valid(char* __arg_buffer, double __arg_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_classic_connection_is_connected(char* __arg_buffer, double __arg_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_classic_connection_get_device(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length);
-GMEXPORT double __EXT_NATIVE__bluetooth_classic_receive_available(char* __arg_buffer, double __arg_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_classic_send(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length);
-GMEXPORT double __EXT_NATIVE__bluetooth_classic_receive(char* __arg_buffer, double __arg_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_classic_server_start(char* name, char* service_uuid, char* __ret_buffer, double __ret_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_classic_server_stop(char* __ret_buffer, double __ret_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_classic_server_is_running();
@@ -89,8 +87,8 @@ GMEXPORT double __EXT_NATIVE__bluetooth_le_characteristic_write(char* __arg_buff
 GMEXPORT double __EXT_NATIVE__bluetooth_le_characteristic_subscribe(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_le_descriptor_read(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_le_descriptor_write(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length);
-GMEXPORT double __EXT_NATIVE__bluetooth_le_value_copy(char* __arg_buffer, double __arg_buffer_length);
-GMEXPORT double __EXT_NATIVE__bluetooth_le_value_release(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length);
+GMEXPORT double __EXT_NATIVE__bluetooth_value_fetch(char* __arg_buffer, double __arg_buffer_length);
+GMEXPORT double __EXT_NATIVE__bluetooth_value_release(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_le_advertise_start(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_le_advertise_stop(char* __ret_buffer, double __ret_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_le_advertise_is_running();
@@ -101,7 +99,6 @@ GMEXPORT double __EXT_NATIVE__bluetooth_le_server_add_service(char* __arg_buffer
 GMEXPORT double __EXT_NATIVE__bluetooth_le_server_clear_services(char* __ret_buffer, double __ret_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_le_server_respond_read(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_le_server_respond_write(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length);
-GMEXPORT double __EXT_NATIVE__bluetooth_le_server_write_request_get_value(char* __arg_buffer, double __arg_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_le_server_notify_value(char* __arg_buffer, double __arg_buffer_length, char* __ret_buffer, double __ret_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_set_callback_state_changed(char* __arg_buffer, double __arg_buffer_length);
 GMEXPORT double __EXT_NATIVE__bluetooth_remove_callback_state_changed();

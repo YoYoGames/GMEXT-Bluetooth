@@ -30,7 +30,7 @@ on_receive = function(_buf, _n) {
         buffer_resize(recv_buffer, _needed);
     }
 
-    // _buf is populated by the native bluetooth_classic_receive call, which writes
+    // _buf is populated by the native bluetooth_value_fetch call, which writes
     // directly into the buffer's memory rather than through GML's own buffer_write/
     // buffer_poke API. That leaves the buffer's internal "written length" bookkeeping
     // at 0, and buffer_copy uses that bookkeeping (not the allocated capacity) to

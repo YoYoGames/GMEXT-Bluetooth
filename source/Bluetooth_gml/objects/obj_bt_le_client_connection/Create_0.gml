@@ -259,7 +259,7 @@ function discover_all()
 on_value_changed = function(_characteristic, _connection, _value, _size)
 {
     var _buf = buffer_create(max(_size, 1), buffer_fixed, 1);
-    var _copy = bluetooth_le_value_copy(_value, _buf, 0);
+    var _copy = bluetooth_value_fetch(_value, _buf, 0);
 
     if (_copy > 0)
     {

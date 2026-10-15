@@ -52,6 +52,8 @@
 // The server was stopped or cleared while CoreBluetooth was adding it:
 // didAddService fails its op and removes the service again.
 @property (nonatomic) BOOL abandoned;
+// The ids its characteristics go live under once didAddService succeeds.
+@property (nonatomic, strong) NSMapTable<CBMutableCharacteristic *, NSNumber *> *characteristicIds;
 
 - (instancetype)initWithOpId:(NSNumber *)opId service:(CBMutableService *)service;
 @end
@@ -207,6 +209,10 @@
 @property(nonatomic, strong) NSMutableDictionary <NSString *, CBPeripheral *> *openedPeripherals;
 @property(nonatomic, strong) NSMutableDictionary <NSString *, CBPeripheral *> *connectedPeripherals;
 
+// The didDisconnectPeripheral calls bt_le_peripheral_close still has coming,
+// by peripheral key, so a late one cannot end the link a reopen made.
+@property(nonatomic, strong) NSMutableDictionary <NSString *, NSNumber *> *owedDisconnects;
+
 // The services the scan asked CoreBluetooth to narrow to, nil for every
 // device. Kept so a scan deferred until PoweredOn starts with them.
 @property(nonatomic, strong) NSArray<CBUUID *> *scanServices;
@@ -219,6 +225,12 @@
 @property(nonatomic, strong) NSMutableArray <GMBTQueuedMutableDictionary *> *startAdvertisementQueue;
 
 @property(nonatomic, strong) NSMutableDictionary <NSString *, CBMutableService *> *addedServices;
+
+// The id the core gave each live characteristic in its service JSON, and the
+// characteristic each id names. Server requests, subscriptions and notify go
+// by these, so two characteristics sharing a UUID stay apart.
+@property(nonatomic, strong) NSMapTable <CBMutableCharacteristic *, NSNumber *> *serverCharacteristicIds;
+@property(nonatomic, strong) NSMutableDictionary <NSNumber *, CBMutableCharacteristic *> *serverCharacteristicsById;
 
 // Notifications updateValue refused, sent in order from
 // peripheralManagerIsReadyToUpdateSubscribers:.
@@ -233,10 +245,10 @@
 @property(nonatomic, strong) NSMutableDictionary <NSNumber *, GMBTWriteBatch *> *writeRequestsLookup;
 
 // What each remote central is subscribed to, keyed by its identifier: the
-// "service|characteristic" UUID strings, and the CBCentral a targeted notify
-// sends to. CoreBluetooth has no peripheral-side disconnect, so a central's
-// last unsubscribe is reported as its disconnect.
-@property(nonatomic, strong) NSMutableDictionary <NSString *, NSMutableSet<NSString *> *> *centralSubscriptions;
+// characteristic ids, and the CBCentral a targeted notify sends to.
+// CoreBluetooth has no peripheral-side disconnect, so a central's last
+// unsubscribe is reported as its disconnect.
+@property(nonatomic, strong) NSMutableDictionary <NSString *, NSMutableSet<NSNumber *> *> *centralSubscriptions;
 @property(nonatomic, strong) NSMutableDictionary <NSString *, CBCentral *> *subscribedCentrals;
 
 // The calls AppleBackend makes. Each returns Ok or why it failed, with
@@ -258,7 +270,7 @@
 - (gmbluetooth::Error) bt_le_server_clear_services:(std::string &)message;
 - (gmbluetooth::Error) bt_le_server_respond_read:(double)requestId status:(double)status value:(NSString *)value message:(std::string &)message;
 - (gmbluetooth::Error) bt_le_server_respond_write:(double)requestId status:(double)status message:(std::string &)message;
-- (gmbluetooth::Error) bt_le_server_notify_value:(NSString *)serviceUuid characteristicUuid:(NSString *)characteristicUuid central:(NSString *)centralKey value:(NSString *)value message:(std::string &)message;
+- (gmbluetooth::Error) bt_le_server_notify_value:(std::uint64_t)characteristicId central:(NSString *)centralKey value:(NSString *)value message:(std::string &)message;
 
 - (gmbluetooth::Error) bt_le_peripheral_open:(NSString *)peripheralUuid message:(std::string &)message;
 - (gmbluetooth::Error) bt_le_peripheral_close:(NSString *)peripheralUuid message:(std::string &)message;
@@ -467,6 +479,13 @@ static gmbluetooth::Error gmbt_fail(std::string &message, gmbluetooth::Error err
 static gmbluetooth::Error gmbt_ok(std::string &message) {
     message.clear();
     return gmbluetooth::Error::Ok;
+}
+
+// The "id" the core gave an entry of a service definition; 0 when it has none.
+static std::uint64_t gmbt_definition_id(NSDictionary *entry) {
+    id value = entry[@"id"];
+    if (![value isKindOfClass:[NSNumber class]] || [(NSNumber *)value longLongValue] <= 0) return 0;
+    return [(NSNumber *)value unsignedLongLongValue];
 }
 
 // Queued notifications and writes without response wait at most this many
@@ -760,8 +779,12 @@ static gmbluetooth::Error gmbt_error_from_nserror(NSError *error, std::string &m
         _discoveredOrder = [NSMutableOrderedSet new];
         _openedPeripherals = [NSMutableDictionary new];
         _connectedPeripherals = [NSMutableDictionary new];
+        _owedDisconnects = [NSMutableDictionary new];
 
         _addedServices = [NSMutableDictionary new];
+        _serverCharacteristicIds = [NSMapTable mapTableWithKeyOptions:NSPointerFunctionsStrongMemory | NSPointerFunctionsObjectPointerPersonality
+                                                         valueOptions:NSPointerFunctionsStrongMemory];
+        _serverCharacteristicsById = [NSMutableDictionary new];
         _notifyQueue = [NSMutableArray new];
         _initialValues = [NSMapTable mapTableWithKeyOptions:NSPointerFunctionsStrongMemory | NSPointerFunctionsObjectPointerPersonality
                                                valueOptions:NSPointerFunctionsStrongMemory];
@@ -820,6 +843,8 @@ static bool _scanPendingPowerOn = false;
     [_startAdvertisementQueue removeAllObjects];
     [_addServiceQueue removeAllObjects];
     [_addedServices removeAllObjects];
+    [_serverCharacteristicIds removeAllObjects];
+    [_serverCharacteristicsById removeAllObjects];
     [_notifyQueue removeAllObjects];
     [_initialValues removeAllObjects];
     [_readRequestsLookup removeAllObjects];
@@ -828,6 +853,7 @@ static bool _scanPendingPowerOn = false;
     [_subscribedCentrals removeAllObjects];
     [_openedPeripherals removeAllObjects];
     [_connectedPeripherals removeAllObjects];
+    [_owedDisconnects removeAllObjects];
     [_discoveredPeripherals removeAllObjects];
     [_discoveredOrder removeAllObjects];
 
@@ -1175,6 +1201,8 @@ static bool _scanPendingPowerOn = false;
 
     if (_peripheralManager.state == CBManagerStatePoweredOn) [_peripheralManager removeAllServices];
     [_addedServices removeAllObjects];
+    [_serverCharacteristicIds removeAllObjects];
+    [_serverCharacteristicsById removeAllObjects];
     [_initialValues removeAllObjects];
     [_notifyQueue removeAllObjects];
     // The core answered the requests these held before asking.
@@ -1211,6 +1239,8 @@ static bool _scanPendingPowerOn = false;
     NSString *serviceUuidString = serviceData[@"uuid"];
     if (![serviceUuidString isKindOfClass:[NSString class]] || serviceUuidString.length == 0)
         return gmbt_fail(message, gmbluetooth::Error::InvalidArgument, "The GATT service has no UUID");
+    if (gmbt_definition_id(serviceData) == 0)
+        return gmbt_fail(message, gmbluetooth::Error::InvalidArgument, "The GATT service has no id");
 
     CBUUID *serviceUUID = [CBUUID UUIDWithString:serviceUuidString];
     CBMutableService *service = [[CBMutableService alloc] initWithType:serviceUUID primary:YES];
@@ -1224,6 +1254,11 @@ static bool _scanPendingPowerOn = false;
     NSMapTable<CBMutableCharacteristic *, NSData *> *pendingInitialValues =
         [NSMapTable mapTableWithKeyOptions:NSPointerFunctionsStrongMemory | NSPointerFunctionsObjectPointerPersonality
                               valueOptions:NSPointerFunctionsStrongMemory];
+    // These reach the registry only once didAddService succeeds.
+    NSMapTable<CBMutableCharacteristic *, NSNumber *> *characteristicIds =
+        [NSMapTable mapTableWithKeyOptions:NSPointerFunctionsStrongMemory | NSPointerFunctionsObjectPointerPersonality
+                              valueOptions:NSPointerFunctionsStrongMemory];
+    NSMutableSet<NSNumber *> *seenIds = [NSMutableSet set];
     id characteristicsValue = serviceData[@"characteristics"];
     if ([characteristicsValue isKindOfClass:[NSArray class]]) {
         for (id charValue in (NSArray *)characteristicsValue) {
@@ -1233,6 +1268,13 @@ static bool _scanPendingPowerOn = false;
             NSString *charUuidString = charDict[@"uuid"];
             if (![charUuidString isKindOfClass:[NSString class]] || charUuidString.length == 0)
                 continue;
+
+            const std::uint64_t charId = gmbt_definition_id(charDict);
+            if (charId == 0)
+                return gmbt_fail(message, gmbluetooth::Error::InvalidArgument, "Characteristic " + gmbt_string(charUuidString) + " has no id");
+            if ([seenIds containsObject:@(charId)] || _serverCharacteristicsById[@(charId)])
+                return gmbt_fail(message, gmbluetooth::Error::InvalidArgument, "Characteristic " + gmbt_string(charUuidString) + " repeats an id");
+            [seenIds addObject:@(charId)];
 
             CBUUID *charUUID = [CBUUID UUIDWithString:charUuidString];
             NSUInteger rawProperties = [charDict[@"properties"] unsignedIntegerValue];
@@ -1284,6 +1326,7 @@ static bool _scanPendingPowerOn = false;
                                                   permissions:charPermissions];
             if (initialValue && !readOnly)
                 [pendingInitialValues setObject:initialValue forKey:characteristic];
+            [characteristicIds setObject:@(charId) forKey:characteristic];
 
             NSMutableArray<CBMutableDescriptor *> *descriptorsArray = [NSMutableArray array];
             id descriptorsValue = charDict[@"descriptors"];
@@ -1298,6 +1341,8 @@ static bool _scanPendingPowerOn = false;
                     // CoreBluetooth owns the CCCD for Notify/Indicate characteristics.
                     if ([descUUID isEqual:cccdUUID])
                         continue;
+                    if (gmbt_definition_id((NSDictionary *)descValue) == 0)
+                        return gmbt_fail(message, gmbluetooth::Error::InvalidArgument, "Descriptor " + gmbt_string(descUuidString) + " has no id");
 
                     // CBMutableDescriptor takes only the User Description, whose
                     // value must be a string, and the Presentation Format, whose
@@ -1325,6 +1370,7 @@ static bool _scanPendingPowerOn = false;
         [_initialValues setObject:[pendingInitialValues objectForKey:characteristic] forKey:characteristic];
 
     GMBTQueuedMutableService *queueService = [[GMBTQueuedMutableService alloc] initWithOpId:opId service:service];
+    queueService.characteristicIds = characteristicIds;
     [_addServiceQueue addObject:queueService];
     [self handleAddServiceQueue];
     return gmbt_ok(message);
@@ -1405,8 +1451,9 @@ static bool _scanPendingPowerOn = false;
 }
 
 - (BOOL) central:(NSString *)centralKey isSubscribedTo:(CBCharacteristic *)characteristic {
-    return _subscribedCentrals[centralKey] != nil &&
-           [_centralSubscriptions[centralKey] containsObject:[self subscriptionKey:characteristic]];
+    NSNumber *characteristicId = [self subscriptionKey:characteristic];
+    return characteristicId != nil && _subscribedCentrals[centralKey] != nil &&
+           [_centralSubscriptions[centralKey] containsObject:characteristicId];
 }
 
 // Sends queued notifications in order until CoreBluetooth's transmit queue is
@@ -1427,9 +1474,10 @@ static bool _scanPendingPowerOn = false;
 
 // central: empty broadcasts to every subscriber; otherwise the key a server
 // event named the central by, NotFound when that central is not subscribed
-// to the characteristic. A value CoreBluetooth cannot take now waits, in
-// order, behind any already waiting.
-- (gmbluetooth::Error) bt_le_server_notify_value:(NSString*) serviceUuid characteristicUuid:(NSString*) characteristicUuid central:(NSString*) centralKey value:(NSString*) value message:(std::string &)message {
+// to the characteristic. characteristicId is the id the core gave it in its
+// service JSON. A value CoreBluetooth cannot take now waits, in order, behind
+// any already waiting.
+- (gmbluetooth::Error) bt_le_server_notify_value:(std::uint64_t) characteristicId central:(NSString*) centralKey value:(NSString*) value message:(std::string &)message {
     const gmbluetooth::Error stateError = gmbt_require_powered_on(_peripheralManager.state, message);
     if (stateError != gmbluetooth::Error::Ok) return stateError;
     if (!_isServerOpen) return gmbt_fail(message, gmbluetooth::Error::OperationFailed, "The GATT server is not running");
@@ -1437,21 +1485,9 @@ static bool _scanPendingPowerOn = false;
     NSData *dataValue = [[NSData alloc] initWithBase64EncodedString:(value ? value : @"") options:0];
     if (!dataValue) return gmbt_fail(message, gmbluetooth::Error::InvalidArgument, "The value is not valid base64");
 
-    NSString *canonicalServiceUuid = [CBUUID UUIDWithString:serviceUuid].UUIDString;
-    NSString *canonicalCharacteristicUuid = [CBUUID UUIDWithString:characteristicUuid].UUIDString;
-
-    CBMutableService *service = _addedServices[canonicalServiceUuid];
-    if (!service) return gmbt_fail(message, gmbluetooth::Error::NotFound, "Service " + gmbt_string(serviceUuid) + " not found");
-
-    CBMutableCharacteristic *characteristic = nil;
-    for (CBMutableCharacteristic *charac in service.characteristics) {
-        if ([charac.UUID.UUIDString isEqualToString:canonicalCharacteristicUuid]) {
-            characteristic = charac;
-            break;
-        }
-    }
+    CBMutableCharacteristic *characteristic = _serverCharacteristicsById[@(characteristicId)];
     if (!characteristic)
-        return gmbt_fail(message, gmbluetooth::Error::NotFound, "Characteristic " + gmbt_string(characteristicUuid) + " not found");
+        return gmbt_fail(message, gmbluetooth::Error::NotFound, "The characteristic is not in a service the server has added");
 
     NSArray<CBCentral *> *centrals = nil;
     if (centralKey.length > 0) {
@@ -1493,8 +1529,14 @@ static bool _scanPendingPowerOn = false;
         return;
     }
 
-    if (!error) _addedServices[[service.UUID UUIDString]] = queuedService.service;
-    else {
+    if (!error) {
+        _addedServices[[service.UUID UUIDString]] = queuedService.service;
+        for (CBMutableCharacteristic *characteristic in queuedService.characteristicIds) {
+            NSNumber *characteristicId = [queuedService.characteristicIds objectForKey:characteristic];
+            [_serverCharacteristicIds setObject:characteristicId forKey:characteristic];
+            _serverCharacteristicsById[characteristicId] = characteristic;
+        }
+    } else {
         for (CBMutableCharacteristic *characteristic in queuedService.service.characteristics)
             [_initialValues removeObjectForKey:characteristic];
     }
@@ -1599,8 +1641,9 @@ static bool _scanPendingPowerOn = false;
     return key != nil ? key : @"";
 }
 
-- (NSString *) subscriptionKey:(CBCharacteristic *)characteristic {
-    return [NSString stringWithFormat:@"%@|%@", characteristic.service.UUID.UUIDString, characteristic.UUID.UUIDString];
+// The characteristic's id, nil for one no live service holds.
+- (NSNumber *) subscriptionKey:(CBCharacteristic *)characteristic {
+    return [_serverCharacteristicIds objectForKey:(CBMutableCharacteristic *)characteristic];
 }
 
 - (void) notifyServerCentral:(CBCentral *)central connected:(BOOL)connected {
@@ -1615,13 +1658,16 @@ static bool _scanPendingPowerOn = false;
 // The core reports a central connected on the first event naming it, so a
 // repeated connected:true is harmless.
 - (void) peripheralManager:(CBPeripheralManager *)peripheral central:(CBCentral *)central didSubscribeToCharacteristic:(CBCharacteristic *)characteristic {
+    NSNumber *characteristicId = [self subscriptionKey:characteristic];
+    if (!characteristicId) return;
+
     NSString *key = [self centralKey:central];
-    NSMutableSet<NSString *> *subscriptions = _centralSubscriptions[key];
+    NSMutableSet<NSNumber *> *subscriptions = _centralSubscriptions[key];
     if (!subscriptions) {
         subscriptions = [NSMutableSet set];
         _centralSubscriptions[key] = subscriptions;
     }
-    [subscriptions addObject:[self subscriptionKey:characteristic]];
+    [subscriptions addObject:characteristicId];
     _subscribedCentrals[key] = central;
 
     [self notifyServerCentral:central connected:YES];
@@ -1631,10 +1677,11 @@ static bool _scanPendingPowerOn = false;
 // leaving: it unsubscribes from everything when its link drops.
 - (void) peripheralManager:(CBPeripheralManager *)peripheral central:(CBCentral *)central didUnsubscribeFromCharacteristic:(CBCharacteristic *)characteristic {
     NSString *key = [self centralKey:central];
-    NSMutableSet<NSString *> *subscriptions = _centralSubscriptions[key];
-    if (!subscriptions) return;
+    NSMutableSet<NSNumber *> *subscriptions = _centralSubscriptions[key];
+    NSNumber *characteristicId = [self subscriptionKey:characteristic];
+    if (!subscriptions || !characteristicId) return;
 
-    [subscriptions removeObject:[self subscriptionKey:characteristic]];
+    [subscriptions removeObject:characteristicId];
     if (subscriptions.count > 0) return;
 
     [_centralSubscriptions removeObjectForKey:key];
@@ -1656,17 +1703,22 @@ static bool _scanPendingPowerOn = false;
         return;
     }
 
+    NSNumber *characteristicId = [_serverCharacteristicIds objectForKey:(CBMutableCharacteristic *)request.characteristic];
+    if (!characteristicId) {
+        [peripheral respondToRequest:request withResult:CBATTErrorAttributeNotFound];
+        return;
+    }
+
     NSMutableDictionary *params = [NSMutableDictionary dictionary];
 
     int requestId = [self generateRequestId];
-    
+
     // Storing the CBATTRequest object with the requestId for future use
     _readRequestsLookup[@(requestId)] = request;
-    
+
     // Creating params dictionary
     params[@"request_id"] = @(requestId);
-    params[@"service_uuid"] = request.characteristic.service.UUID.UUIDString;
-    params[@"characteristic_uuid"] = request.characteristic.UUID.UUIDString;
+    params[@"characteristic_id"] = characteristicId;
     // A Read Blob continues a long value; GML answers from this offset on.
     params[@"offset"] = @(request.offset);
     params[@"central"] = [self centralKey:request.central];
@@ -1702,7 +1754,15 @@ static bool _scanPendingPowerOn = false;
     // GML gets as the write's offset.
     NSMutableArray<NSData *> *values = [NSMutableArray array];
     NSMutableArray<NSNumber *> *offsets = [NSMutableArray array];
+    NSMutableArray<NSNumber *> *characteristicIds = [NSMutableArray array];
     for (CBCharacteristic *characteristic in order) {
+        NSNumber *characteristicId = [_serverCharacteristicIds objectForKey:(CBMutableCharacteristic *)characteristic];
+        if (!characteristicId) {
+            [peripheral respondToRequest:requests.firstObject withResult:CBATTErrorAttributeNotFound];
+            return;
+        }
+        [characteristicIds addObject:characteristicId];
+
         NSArray<CBATTRequest *> *group = [groups objectForKey:characteristic];
         NSUInteger start = NSUIntegerMax;
         NSUInteger end = 0;
@@ -1737,8 +1797,7 @@ static bool _scanPendingPowerOn = false;
 
         NSMutableDictionary *params = [NSMutableDictionary dictionary];
         params[@"request_id"] = @(requestId);
-        params[@"service_uuid"] = characteristic.service.UUID.UUIDString;
-        params[@"characteristic_uuid"] = characteristic.UUID.UUIDString;
+        params[@"characteristic_id"] = characteristicIds[i];
         params[@"value"] = [values[i] base64EncodedStringWithOptions:0];
         params[@"offset"] = offsets[i];
         // CBATTRequest does not say whether the central asked for a response,
@@ -2017,6 +2076,7 @@ static gmbluetooth::Error gmbt_bad_base64(std::string &message) {
         [_openedPeripherals removeObjectForKey:key];
         [_connectedPeripherals removeObjectForKey:key];
         [self dropQueuesForPeripheral:peripheral];
+        _owedDisconnects[key] = @(_owedDisconnects[key].integerValue + 1);
         [_centralManager cancelPeripheralConnection:peripheral];
         return gmbt_ok(message);
     }
@@ -2296,6 +2356,15 @@ static gmbluetooth::Error gmbt_bad_base64(std::string &message) {
 
 - (void) centralManager:(CBCentralManager *)central didDisconnectPeripheral:(CBPeripheral *)peripheral error:(NSError *)error {
     NSString *key = [self peripheralKey:peripheral];
+
+    // Owed to a bt_le_peripheral_close; it may land after a reopen connected.
+    const NSInteger owed = key.length > 0 ? _owedDisconnects[key].integerValue : 0;
+    if (owed > 0) {
+        if (owed == 1) [_owedDisconnects removeObjectForKey:key];
+        else _owedDisconnects[key] = @(owed - 1);
+        return;
+    }
+
     [self dropQueuesForPeripheral:peripheral];
 
     // Not open any more: the game closed it (bt_le_peripheral_close), the
@@ -2497,6 +2566,9 @@ static gmbluetooth::Error gmbt_bad_base64(std::string &message) {
 
         // The peripherals a scan found are not valid across a power cycle.
         [self forgetDiscoveredPeripherals];
+
+        // The links went with the radio; a disconnect owed for one may never come.
+        [_owedDisconnects removeAllObjects];
 
         if (_openedPeripherals.count > 0) {
             // Every link is gone, and CoreBluetooth does not promise a
@@ -3197,10 +3269,10 @@ namespace
             if (const Error e = require_managers(m); e != Error::Ok) return e;
             return [transport_ bt_le_server_respond_write:r status:st message:m];
         }
-        Error le_server_notify_value(const std::string&s,const std::string&ch,const std::string&central,const std::string&v,std::string&m) override
+        Error le_server_notify_value(std::uint64_t ch,const std::string&central,const std::string&v,std::string&m) override
         {
             if (const Error e = require_managers(m); e != Error::Ok) return e;
-            return [transport_ bt_le_server_notify_value:gmbt_ns(s) characteristicUuid:gmbt_ns(ch) central:gmbt_ns(central) value:gmbt_ns(v) message:m];
+            return [transport_ bt_le_server_notify_value:ch central:gmbt_ns(central) value:gmbt_ns(v) message:m];
         }
 
 #if TARGET_OS_OSX
@@ -3349,9 +3421,9 @@ namespace
 
                 // The game is done with the handle, so its record goes now and
                 // the channel is detached before it closes: a late SDP, open,
-                // data or close callback finds nothing and reports nothing,
-                // and unread bytes go with it. A connect still in SDP or
-                // opening is cancelled; the core fires its callback once.
+                // data or close callback finds nothing and reports nothing.
+                // A connect still in SDP or opening is cancelled; the core
+                // fires its callback once.
                 classic_connections_.erase(it);
                 state->connected = false;
                 auto pending = classic_pending_sdp_.find(connection);
@@ -3380,12 +3452,13 @@ namespace
             return it != classic_connections_.end() && it->second->connected;
         }
 
-        std::int32_t classic_receive_available(std::uint64_t connection) const override
+        // Nothing to resume: a channel that went past the budget was ended.
+        void classic_receive_consumed(std::uint64_t connection, std::size_t bytes) override
         {
             auto state = find_classic_connection(connection);
-            if (!state) return 0;
+            if (!state) return;
             std::scoped_lock lock(state->receive_mutex);
-            return static_cast<std::int32_t>(state->received.size());
+            state->receive_outstanding -= std::min(bytes, state->receive_outstanding);
         }
 
         Error classic_send_bytes(std::uint64_t connection, const std::uint8_t* data, std::size_t size, std::string& message) override
@@ -3421,32 +3494,6 @@ namespace
             }
             message.clear();
             return Error::Ok;
-        }
-
-        std::size_t classic_receive_bytes(std::uint64_t connection, std::uint8_t* out, std::size_t max_size) override
-        {
-            auto state = find_classic_connection(connection);
-            if (!state) return 0;
-            std::size_t n = 0;
-            bool drained = false;
-            {
-                std::scoped_lock lock(state->receive_mutex);
-                n = std::min(max_size, state->received.size());
-                std::copy(state->received.begin(), state->received.begin() + n, out);
-                state->received.erase(state->received.begin(), state->received.begin() + n);
-                // The next data to arrive is announced again.
-                state->data_pending = false;
-                drained = state->finished && state->received.empty();
-            }
-            // The last bytes of a connection that has ended: nothing is left
-            // to keep it registered for.
-            if (drained)
-            {
-                std::scoped_lock lock(classic_mutex_);
-                auto it = classic_connections_.find(connection);
-                if (it != classic_connections_.end() && it->second == state) classic_connections_.erase(it);
-            }
-            return n;
         }
 
         Error classic_server_start(const std::string& name, const std::string& service_uuid, std::string& message) override
@@ -3645,9 +3692,7 @@ namespace
         Error classic_connect(std::uint64_t,const DiscoveredDevice&,const std::string&,std::string&m) override {m="Bluetooth Classic is not supported on this platform";return Error::NotSupported;}
         Error classic_disconnect(std::uint64_t,std::string&m) override {m="Bluetooth Classic is not supported on this platform";return Error::NotSupported;}
         bool classic_connection_is_connected(std::uint64_t) const override {return false;}
-        std::int32_t classic_receive_available(std::uint64_t) const override {return 0;}
         Error classic_send_bytes(std::uint64_t,const std::uint8_t*,std::size_t,std::string&m) override {m="Bluetooth Classic is not supported on this platform";return Error::NotSupported;}
-        std::size_t classic_receive_bytes(std::uint64_t,std::uint8_t*,std::size_t) override {return 0;}
         Error classic_server_start(const std::string&,const std::string&,std::string&m) override {m="Bluetooth Classic server is not supported on this platform";return Error::NotSupported;}
         Error classic_server_stop(std::string&m) override {m.clear();return Error::Ok;}
         bool classic_server_is_running() const override {return false;}
@@ -3780,14 +3825,9 @@ namespace
             IOBluetoothRFCOMMChannel* channel = nil;
             GMBTClassicChannelDelegate* delegate = nil;
             std::mutex receive_mutex;
-            std::deque<std::uint8_t> received;
-            // Under receive_mutex. A ClassicDataAvailable went out and the
-            // game has not read since; the next one waits for
-            // classic_receive_bytes.
-            bool data_pending = false;
-            // Under receive_mutex. The channel is gone; the state stays
-            // registered only while it holds bytes the game has not read.
-            bool finished = false;
+            // Under receive_mutex. Bytes pushed to the core and not yet given
+            // back through classic_receive_consumed.
+            std::size_t receive_outstanding = 0;
             std::atomic_bool connected{false};
 
             // classic_send_bytes queues here; the main queue writes it out.
@@ -3802,10 +3842,8 @@ namespace
             NSMutableData* in_flight = nil;
         };
 
-        // Bytes a connection may hold waiting to be sent, and waiting to be
-        // read by the game.
+        // Bytes a connection may hold waiting to be sent.
         static constexpr std::size_t kClassicSendCap = 1024 * 1024;
-        static constexpr std::size_t kClassicReceiveCap = 1024 * 1024;
 
         mutable std::mutex classic_mutex_;
         std::unordered_map<std::uint64_t, std::shared_ptr<ClassicConnectionState>> classic_connections_;
@@ -4188,37 +4226,32 @@ namespace
             hooks_.push_event(std::move(ev));
         }
 
-        // Data is announced once, and again only after the game has read. A
-        // channel cannot be paused, so bytes that would take the queue past
-        // 1 MiB end the connection instead; what fit stays readable.
+        // Every chunk goes to the core as it arrives. A channel cannot be
+        // paused, so a chunk that would take the bytes the game has not
+        // fetched past the budget ends the connection instead, after the part
+        // that fit.
         void handle_classic_channel_data(std::uint64_t connection, NSData* data)
         {
             auto state = find_classic_connection(connection);
             if (!state || !state->connected) return;
-            std::int32_t available = 0;
-            bool announce = false;
-            bool full = false;
+            const std::uint8_t* bytes = static_cast<const std::uint8_t*>(data.bytes);
+            std::size_t taken = 0;
             {
                 std::scoped_lock lock(state->receive_mutex);
-                const std::uint8_t* bytes = static_cast<const std::uint8_t*>(data.bytes);
-                const std::size_t room = kClassicReceiveCap - std::min(kClassicReceiveCap, state->received.size());
-                const std::size_t taken = std::min<std::size_t>(room, data.length);
-                if (bytes && taken > 0) state->received.insert(state->received.end(), bytes, bytes + taken);
-                full = taken < data.length;
-                available = static_cast<std::int32_t>(state->received.size());
-                announce = taken > 0 && !state->data_pending;
-                if (announce) state->data_pending = true;
+                const std::size_t room = k_classic_receive_budget - std::min(k_classic_receive_budget, state->receive_outstanding);
+                taken = bytes ? std::min<std::size_t>(room, data.length) : 0;
+                state->receive_outstanding += taken;
             }
-            if (announce)
+            if (taken > 0)
             {
                 BackendEvent ev;
                 ev.type = BackendEventType::ClassicDataAvailable;
                 ev.transport = Transport::Classic;
                 ev.connection = connection;
-                ev.value = available;
+                ev.bytes.assign(bytes, bytes + taken);
                 hooks_.push_event(std::move(ev));
             }
-            if (full) classic_end_connection(connection, Error::Disconnected, "receive buffer full", true);
+            if (taken < data.length) classic_end_connection(connection, Error::Disconnected, "receive buffer full", true);
         }
 
         void handle_classic_channel_closed(std::uint64_t connection)
@@ -4228,8 +4261,7 @@ namespace
 
         // Ends a connection and reports it once. close_channel is for an end
         // this backend decides; a channel IOBluetooth closed itself is only
-        // let go. The state stays registered while it holds bytes the game has
-        // not read, and classic_receive_bytes removes it once they are.
+        // let go. Every byte received was already pushed, so the record goes.
         void classic_end_connection(std::uint64_t connection, Error error, const std::string& message, bool close_channel)
         {
             std::shared_ptr<ClassicConnectionState> state;
@@ -4246,14 +4278,7 @@ namespace
                 delegate = state->delegate;
                 state->channel = nil;
                 state->delegate = nil;
-                bool keep = false;
-                if (wasConnected)
-                {
-                    std::scoped_lock receive_lock(state->receive_mutex);
-                    state->finished = true;
-                    keep = !state->received.empty();
-                }
-                if (!keep) classic_connections_.erase(it);
+                classic_connections_.erase(it);
             }
             classic_drop_writes(*state);
             if (close_channel)

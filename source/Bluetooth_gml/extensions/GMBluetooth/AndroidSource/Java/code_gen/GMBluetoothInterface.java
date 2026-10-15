@@ -51,9 +51,7 @@ public interface GMBluetoothInterface {
     public boolean bluetooth_classic_connection_is_valid(long connection);
     public boolean bluetooth_classic_connection_is_connected(long connection);
     public long bluetooth_classic_connection_get_device(long connection);
-    public int bluetooth_classic_receive_available(long connection);
     public BluetoothError bluetooth_classic_send(long connection, java.nio.ByteBuffer data, int offset, int size);
-    public int bluetooth_classic_receive(long connection, java.nio.ByteBuffer out_data, int offset, int max_size);
     public BluetoothError bluetooth_classic_server_start(String name, String service_uuid);
     public BluetoothError bluetooth_classic_server_stop();
     public boolean bluetooth_classic_server_is_running();
@@ -90,8 +88,8 @@ public interface GMBluetoothInterface {
     public BluetoothError bluetooth_le_characteristic_subscribe(long characteristic, BluetoothLeSubscribeMode mode, GMFunction callback);
     public BluetoothError bluetooth_le_descriptor_read(long descriptor, GMFunction callback);
     public BluetoothError bluetooth_le_descriptor_write(long descriptor, java.nio.ByteBuffer data, int offset, int size, GMFunction callback);
-    public int bluetooth_le_value_copy(long value, java.nio.ByteBuffer out_data, int offset);
-    public BluetoothError bluetooth_le_value_release(long value);
+    public int bluetooth_value_fetch(long value, java.nio.ByteBuffer out_data, int offset);
+    public BluetoothError bluetooth_value_release(long value);
     public BluetoothError bluetooth_le_advertise_start(BluetoothLeAdvertiseSettings settings, BluetoothLeAdvertiseData data, GMFunction callback);
     public BluetoothError bluetooth_le_advertise_stop();
     public boolean bluetooth_le_advertise_is_running();
@@ -102,8 +100,7 @@ public interface GMBluetoothInterface {
     public BluetoothError bluetooth_le_server_clear_services();
     public BluetoothError bluetooth_le_server_respond_read(int request_id, BluetoothAttError error_code, java.nio.ByteBuffer data, int offset, int size);
     public BluetoothError bluetooth_le_server_respond_write(int request_id, BluetoothAttError error_code);
-    public int bluetooth_le_server_write_request_get_value(int request_id, java.nio.ByteBuffer out_data, int offset, int max_size);
-    public BluetoothError bluetooth_le_server_notify_value(String service_uuid, String characteristic_uuid, long connection, java.nio.ByteBuffer data, int offset, int size);
+    public BluetoothError bluetooth_le_server_notify_value(long characteristic, long connection, java.nio.ByteBuffer data, int offset, int size);
     public boolean bluetooth_set_callback_state_changed(GMFunction callback);
     public boolean bluetooth_remove_callback_state_changed();
     public boolean bluetooth_set_callback_device_found(GMFunction callback);

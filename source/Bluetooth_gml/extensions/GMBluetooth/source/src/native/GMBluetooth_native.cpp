@@ -260,6 +260,9 @@ namespace
         LeService         = 4,
         LeCharacteristic  = 5,
         LeDescriptor      = 6,
+        LeServerService        = 7,
+        LeServerCharacteristic = 8,
+        LeServerDescriptor     = 9,
     };
 
     constexpr std::uint64_t make_handle(HandleKind kind, std::uint64_t id)
@@ -459,28 +462,14 @@ namespace
         {
             std::scoped_lock lock(mutex_);
             const std::uint64_t handle = make_handle(HandleKind::ClassicConnection, next_handle_++);
-            connections_[handle] = Record{ device, false };
+            connections_[handle] = Record{ device };
             return handle;
         }
 
-        void remove_connection(std::uint64_t handle)
+        bool remove_connection(std::uint64_t handle)
         {
             std::scoped_lock lock(mutex_);
-            connections_.erase(handle);
-        }
-
-        void mark_closed(std::uint64_t handle)
-        {
-            std::scoped_lock lock(mutex_);
-            if (const auto it = connections_.find(handle); it != connections_.end())
-                it->second.closed = true;
-        }
-
-        bool is_closed(std::uint64_t handle) const
-        {
-            std::scoped_lock lock(mutex_);
-            const auto it = connections_.find(handle);
-            return it != connections_.end() && it->second.closed;
+            return connections_.erase(handle) != 0;
         }
 
         // next_handle_ keeps counting, so a handle from before the clear
@@ -508,7 +497,6 @@ namespace
         struct Record
         {
             std::uint64_t device = 0;
-            bool closed = false;
         };
 
         mutable std::mutex mutex_;
@@ -931,44 +919,70 @@ namespace
         return ref;
     }
 
-    // The bytes a read or a notification delivered, held under a value id until
-    // GML copies or releases them (R1-11): each event carries its own value, so
-    // a burst no longer collapses to the last one. Ids count up and are never
-    // reused. A value outlives its link, since its callback may still be queued
-    // behind the disconnect; the cap bounds what a game that never copies leaves
-    // behind, and shutdown frees the rest.
+    // The bytes a callback delivered - an LE read or notification, a server
+    // write request, a Classic chunk - held under a value id until GML fetches
+    // or releases them (R1-11, R1-245). Ids count up and are never reused. A
+    // value outlives its link, since its callback may still be queued behind
+    // the disconnect. Every value expires 30 s after it was stored; LE values
+    // are also capped, a server write value goes with its request, and a
+    // Classic chunk counts toward its connection's receive budget until it
+    // leaves.
+    enum class ValueOwner : std::uint8_t
+    {
+        Le,
+        ServerWrite,
+        Classic,
+    };
+
+    // A value that left the store, for its owner to hear about.
+    struct LeftValue
+    {
+        ValueOwner owner = ValueOwner::Le;
+        std::uint64_t connection = 0;
+        std::size_t size = 0;
+        bool expired = false;
+    };
+
     class ValueStore
     {
     public:
-        static constexpr std::size_t k_max_values = 256;
+        static constexpr std::size_t k_max_le_values = 256;
+        static constexpr auto k_ttl = std::chrono::seconds(30);
 
-        std::uint64_t add(std::vector<std::uint8_t> bytes)
+        std::uint64_t add(std::vector<std::uint8_t> bytes, ValueOwner owner, std::uint64_t connection, std::vector<LeftValue>& left)
         {
             std::scoped_lock lock(mutex_);
+            expire_locked(left);
+
             const std::uint64_t id = next_id_++;
-            values_.emplace(id, std::move(bytes));
-            if (values_.size() > k_max_values)
+            values_.emplace(id, Held{ std::move(bytes), owner, connection, std::chrono::steady_clock::now() });
+            if (owner == ValueOwner::Le && ++le_values_ > k_max_le_values)
             {
-                GMBT_LOG("value store full, dropping value %llu",
-                    static_cast<unsigned long long>(values_.begin()->first));
-                values_.erase(values_.begin());
+                const auto oldest = std::find_if(values_.begin(), values_.end(),
+                    [](const auto& entry) { return entry.second.owner == ValueOwner::Le; });
+                GMBT_LOG("value store holds %zu LE values, dropping value %llu", k_max_le_values,
+                    static_cast<unsigned long long>(oldest->first));
+                erase_locked(oldest);
             }
             return id;
         }
 
         // Copies the whole value to out at offset and frees it. Too small a
         // buffer copies nothing and keeps the value, so the call can be retried.
-        Error copy(std::uint64_t id, const GMBuffer& out, unsigned int offset, std::size_t& copied, std::string& message)
+        Error fetch(std::uint64_t id, const GMBuffer& out, unsigned int offset, std::size_t& copied, std::string& message,
+            std::vector<LeftValue>& left)
         {
             std::scoped_lock lock(mutex_);
+            expire_locked(left);
+
             const auto it = values_.find(id);
             if (it == values_.end())
             {
-                message = "Unknown or already copied value " + std::to_string(id);
+                message = "Unknown, fetched, released or expired value " + std::to_string(id);
                 return Error::InvalidHandle;
             }
 
-            const auto& bytes = it->second;
+            const auto& bytes = it->second.bytes;
             if (static_cast<std::uint64_t>(offset) + bytes.size() > out.length())
             {
                 message = "Buffer too small for value " + std::to_string(id) + ": it needs " +
@@ -979,29 +993,151 @@ namespace
             if (!bytes.empty())
                 std::memcpy(static_cast<std::uint8_t*>(out.data()) + offset, bytes.data(), bytes.size());
             copied = bytes.size();
-            values_.erase(it);
+            left.push_back(LeftValue{ it->second.owner, it->second.connection, bytes.size(), false });
+            erase_locked(it);
             return Error::Ok;
         }
 
-        bool release(std::uint64_t id)
+        bool release(std::uint64_t id, std::vector<LeftValue>& left)
         {
             std::scoped_lock lock(mutex_);
-            return values_.erase(id) != 0;
+            expire_locked(left);
+
+            const auto it = values_.find(id);
+            if (it == values_.end())
+                return false;
+            left.push_back(LeftValue{ it->second.owner, it->second.connection, it->second.bytes.size(), false });
+            erase_locked(it);
+            return true;
+        }
+
+        void expire(std::vector<LeftValue>& left)
+        {
+            std::scoped_lock lock(mutex_);
+            expire_locked(left);
         }
 
         void clear()
         {
             std::scoped_lock lock(mutex_);
             values_.clear();
+            le_values_ = 0;
         }
 
     private:
+        struct Held
+        {
+            std::vector<std::uint8_t> bytes;
+            ValueOwner owner = ValueOwner::Le;
+            std::uint64_t connection = 0;
+            std::chrono::steady_clock::time_point stored_at;
+        };
+
+        using Values = std::map<std::uint64_t, Held>;
+
+        void erase_locked(Values::iterator it)
+        {
+            if (it->second.owner == ValueOwner::Le)
+                --le_values_;
+            values_.erase(it);
+        }
+
+        // Ids and store times rise together, so the expired values are a
+        // prefix of the map.
+        void expire_locked(std::vector<LeftValue>& left)
+        {
+            const auto now = std::chrono::steady_clock::now();
+            while (!values_.empty() && now - values_.begin()->second.stored_at >= k_ttl)
+            {
+                const auto it = values_.begin();
+                GMBT_LOG("value %llu expired unfetched", static_cast<unsigned long long>(it->first));
+                left.push_back(LeftValue{ it->second.owner, it->second.connection, it->second.bytes.size(), true });
+                erase_locked(it);
+            }
+        }
+
         std::mutex mutex_;
-        std::map<std::uint64_t, std::vector<std::uint8_t>> values_;
+        Values values_;
+        std::size_t le_values_ = 0;
         std::uint64_t next_id_ = 1;
     };
 
     ValueStore g_values;
+
+    // A Classic connection whose data expired unfetched ends rather than leave
+    // a gap in its stream, as macOS ends one at the byte budget.
+    void end_classic_connection_on_expiry(std::uint64_t connection)
+    {
+        if (!g_classic_connection_manager.remove_connection(connection))
+            return;
+
+        GMBT_LOG("classic connection %llu: receive data expired, ending it", static_cast<unsigned long long>(connection));
+        if (g_backend)
+        {
+            std::string message;
+            g_backend->classic_disconnect(connection, message);
+        }
+
+        GMFunction callback;
+        { std::scoped_lock lock(g_callback_mutex); callback = g_callback_classic_disconnected; }
+        if (!callback)
+            return;
+        try
+        {
+            // callback(error_code, message, connection)
+            callback.call(static_cast<double>(Error::Disconnected), std::string("receive data expired"), static_cast<double>(connection));
+        }
+        catch (const std::exception& e)
+        {
+            GMBT_LOG("Error dispatching classic_disconnected callback: %s", e.what());
+        }
+    }
+
+    // Tells the owners about values that left the store: a Classic chunk's
+    // bytes go back to its connection's receive budget. Called with no lock held.
+    void settle_left_values(const std::vector<LeftValue>& left)
+    {
+        std::vector<std::uint64_t> expired_connections;
+        for (const auto& value : left)
+        {
+            if (value.owner != ValueOwner::Classic)
+                continue;
+            if (g_backend)
+                g_backend->classic_receive_consumed(value.connection, value.size);
+            if (value.expired &&
+                std::find(expired_connections.begin(), expired_connections.end(), value.connection) == expired_connections.end())
+                expired_connections.push_back(value.connection);
+        }
+
+        for (const std::uint64_t connection : expired_connections)
+            end_classic_connection_on_expiry(connection);
+    }
+
+    std::uint64_t store_value(std::vector<std::uint8_t> bytes, ValueOwner owner, std::uint64_t connection = 0)
+    {
+        std::vector<LeftValue> left;
+        const std::uint64_t id = g_values.add(std::move(bytes), owner, connection, left);
+        settle_left_values(left);
+        return id;
+    }
+
+    void release_value(std::uint64_t id)
+    {
+        if (id == 0)
+            return;
+        std::vector<LeftValue> left;
+        g_values.release(id, left);
+        settle_left_values(left);
+    }
+
+    // Expiry otherwise runs only as values come and go; a Classic receive
+    // loop paused at its budget asks for it on a timer (ClassicReceivePaused).
+    void expire_values()
+    {
+        std::vector<LeftValue> left;
+        g_values.expire(left);
+        settle_left_values(left);
+    }
 
     // Drops what discovery cached for one LE connection: its services, their
     // characteristics and those characteristics' descriptors.
@@ -1156,9 +1292,13 @@ namespace
             switch (op.kind)
             {
                 case LeOpKind::AdvertiseStart:
-                case LeOpKind::ServerAddService:
                     // callback(error_code, message)
                     op.callback.call(static_cast<double>(error), message);
+                    break;
+                case LeOpKind::ServerAddService:
+                    // callback(error_code, message, service)
+                    op.callback.call(static_cast<double>(error), message,
+                        static_cast<double>(error == Error::Ok ? op.context : 0));
                     break;
                 case LeOpKind::CharacteristicRead:
                 case LeOpKind::DescriptorRead:
@@ -1188,18 +1328,52 @@ namespace
     // callback. An id
     // the registry no longer holds - its op was purged on disconnect or
     // shutdown - is logged and dropped.
-    // The service UUIDs the LE server holds or is adding, so the same condition
-    // fails the same way everywhere: a second add of one is Busy (R1-223). An
-    // add that fails gives its UUID back; clear, stop and shutdown empty it.
+    // The LE server's services, characteristics and descriptors under the
+    // handles add_service mints, which the backends key them by (R1-241): a
+    // UUID can repeat in a service, a handle cannot. The service UUIDs are kept
+    // too, so a second add of one is Busy everywhere (R1-223). An add that
+    // fails gives its handles and UUID back; clear, stop and shutdown empty
+    // both. Ids keep counting, so a handle is never reused.
+    struct LeServerAttribute
+    {
+        HandleKind kind = HandleKind::LeServerService;
+        std::uint64_t parent = 0;
+        std::string uuid;
+        std::int32_t properties = 0;
+        std::vector<std::uint64_t> children;
+    };
+
     std::mutex g_le_server_services_mutex;
     std::unordered_set<std::string> g_le_server_services;
-    std::unordered_map<std::uint64_t, std::string> g_le_server_service_ops;
+    std::unordered_map<std::uint64_t, std::uint64_t> g_le_server_service_ops;
+    std::unordered_map<std::uint64_t, LeServerAttribute> g_le_server_attributes;
+    std::uint64_t g_next_le_server_attribute_id = 1;
 
     void forget_le_server_services()
     {
         std::scoped_lock lock(g_le_server_services_mutex);
         g_le_server_services.clear();
         g_le_server_service_ops.clear();
+        g_le_server_attributes.clear();
+    }
+
+    void erase_le_server_service_locked(std::uint64_t service)
+    {
+        const auto it = g_le_server_attributes.find(service);
+        if (it == g_le_server_attributes.end())
+            return;
+
+        for (const std::uint64_t characteristic : it->second.children)
+        {
+            if (const auto c = g_le_server_attributes.find(characteristic); c != g_le_server_attributes.end())
+            {
+                for (const std::uint64_t descriptor : c->second.children)
+                    g_le_server_attributes.erase(descriptor);
+                g_le_server_attributes.erase(c);
+            }
+        }
+        g_le_server_services.erase(it->second.uuid);
+        g_le_server_attributes.erase(it);
     }
 
     void settle_le_server_service_op(std::uint64_t op_id, bool added)
@@ -1209,8 +1383,34 @@ namespace
         if (it == g_le_server_service_ops.end())
             return;
         if (!added)
-            g_le_server_services.erase(it->second);
+            erase_le_server_service_locked(it->second);
         g_le_server_service_ops.erase(it);
+    }
+
+    std::uint64_t mint_le_server_attribute_locked(HandleKind kind, std::uint64_t parent, std::string uuid, std::int32_t properties = 0)
+    {
+        const std::uint64_t handle = make_handle(kind, g_next_le_server_attribute_id++);
+        g_le_server_attributes.emplace(handle, LeServerAttribute{ kind, parent, std::move(uuid), properties, {} });
+        if (parent != 0)
+            g_le_server_attributes[parent].children.push_back(handle);
+        return handle;
+    }
+
+    std::optional<LeServerAttribute> find_le_server_attribute(std::uint64_t handle, HandleKind kind)
+    {
+        std::scoped_lock lock(g_le_server_services_mutex);
+        const auto it = g_le_server_attributes.find(handle);
+        if (it == g_le_server_attributes.end() || it->second.kind != kind)
+            return std::nullopt;
+        return it->second;
+    }
+
+    std::uint64_t le_server_child_at(std::uint64_t parent, HandleKind kind, std::int32_t index)
+    {
+        const auto attribute = find_le_server_attribute(parent, kind);
+        if (!attribute || index < 0 || static_cast<std::size_t>(index) >= attribute->children.size())
+            return 0;
+        return attribute->children[static_cast<std::size_t>(index)];
     }
 
     void complete_le_op(const BackendEvent& event)
@@ -1255,7 +1455,7 @@ namespace
                     if (op->callback)
                     {
                         size = result.value.size();
-                        value = g_values.add(result.value);
+                        value = store_value(result.value, ValueOwner::Le);
                     }
                     break;
                 case LeOpKind::RssiRead:
@@ -1301,14 +1501,12 @@ namespace
     struct PendingLeServerRequest
     {
         std::uint64_t connection = 0;
-        std::string service_uuid;
-        std::string characteristic_uuid;
-        std::string descriptor_uuid;
         bool is_write = false;
         // False only for a write without response, which the backend has
-        // already completed; the entry is kept for GML to read its value.
+        // already completed; the entry is kept for GML to fetch its value.
         bool response_needed = true;
-        std::vector<std::uint8_t> write_value;
+        // A write's value id: the value goes with the request.
+        std::uint64_t value = 0;
         std::chrono::steady_clock::time_point received_at = std::chrono::steady_clock::now();
     };
 
@@ -1317,6 +1515,7 @@ namespace
 
     // ATT error codes the core answers with when GML does not.
     constexpr std::int32_t k_att_request_not_supported = 0x06;
+    constexpr std::int32_t k_att_attribute_not_found = 0x0A;
     constexpr std::int32_t k_att_unlikely_error = 0x0E;
 
     // The ATT transaction timeout is 30 s: a request still waiting after that
@@ -1347,6 +1546,7 @@ namespace
     {
         const auto now = std::chrono::steady_clock::now();
         std::vector<std::pair<std::int32_t, bool>> to_answer;
+        std::vector<std::uint64_t> values;
         {
             std::scoped_lock lock(g_pending_le_server_requests_mutex);
             for (auto it = g_pending_le_server_requests.begin(); it != g_pending_le_server_requests.end();)
@@ -1360,9 +1560,13 @@ namespace
                 }
                 if (request.response_needed)
                     to_answer.emplace_back(it->first, request.is_write);
+                values.push_back(request.value);
                 it = g_pending_le_server_requests.erase(it);
             }
         }
+
+        for (const std::uint64_t value : values)
+            release_value(value);
 
         for (const auto& [request_id, is_write] : to_answer)
         {
@@ -1383,6 +1587,7 @@ namespace
 
         for (const auto& [request_id, request] : pending)
         {
+            release_value(request.value);
             if (request.response_needed)
                 answer_le_server_request(request_id, request.is_write, k_att_unlikely_error);
         }
@@ -1439,6 +1644,27 @@ namespace
         PendingLeServerRequest request = std::move(it->second);
         g_pending_le_server_requests.erase(it);
         return request;
+    }
+
+    // A server request event's attribute: the characteristic named by
+    // "characteristic_id" and, for a descriptor request, the descriptor named
+    // by "descriptor_id" under it. False for an id the server does not hold.
+    bool le_server_request_attribute(const json::Value& root, std::uint64_t& characteristic, std::uint64_t& descriptor)
+    {
+        const auto id_of = [&root](const char* name) -> std::uint64_t {
+            const auto* field = root.find(name);
+            return field ? field->as_uint64(0) : 0;
+        };
+        characteristic = id_of("characteristic_id");
+        descriptor = id_of("descriptor_id");
+
+        const auto c = find_le_server_attribute(characteristic, HandleKind::LeServerCharacteristic);
+        if (!c)
+            return false;
+        if (descriptor == 0)
+            return true;
+        const auto d = find_le_server_attribute(descriptor, HandleKind::LeServerDescriptor);
+        return d && d->parent == characteristic;
     }
 
     // A remote central using our GATT server, under the key its backend names
@@ -1661,11 +1887,19 @@ namespace
         out.push_back('"');
     }
 
-    std::string serialize_le_service_definition(const BluetoothLeServiceDefinition& service)
+    constexpr std::string_view k_cccd_uuid = "00002902-0000-1000-8000-00805f9b34fb";
+
+    // Mints the service's handles in definition order and writes each as the
+    // "id" its backend keys the attribute by. The CCCD belongs to the platform:
+    // it gets no handle and stays out of the JSON, as every backend skips it.
+    std::string register_le_server_service_locked(const BluetoothLeServiceDefinition& service, std::uint64_t& service_handle)
     {
+        const std::string service_uuid = canonical_uuid(service.uuid);
+        service_handle = mint_le_server_attribute_locked(HandleKind::LeServerService, 0, service_uuid);
+
         std::string out;
         out.reserve(256);
-        out += "{\"uuid\":";
+        out += "{\"id\":" + std::to_string(service_handle) + ",\"uuid\":";
         append_json_string(out, service.uuid);
         out += ",\"characteristics\":[";
 
@@ -1675,7 +1909,10 @@ namespace
                 out.push_back(',');
 
             const auto& characteristic = service.characteristics[i];
-            out += "{\"uuid\":";
+            const std::uint64_t characteristic_handle = mint_le_server_attribute_locked(HandleKind::LeServerCharacteristic,
+                service_handle, canonical_uuid(characteristic.uuid), characteristic.properties & 0xFF);
+
+            out += "{\"id\":" + std::to_string(characteristic_handle) + ",\"uuid\":";
             append_json_string(out, characteristic.uuid);
             out += ",\"properties\":" + std::to_string(characteristic.properties);
             out += ",\"permissions\":" + std::to_string(characteristic.permissions);
@@ -1687,12 +1924,20 @@ namespace
             }
 
             out += ",\"descriptors\":[";
-            for (std::size_t d = 0; d < characteristic.descriptors.size(); ++d)
+            bool first = true;
+            for (const auto& descriptor : characteristic.descriptors)
             {
-                if (d != 0)
+                const std::string descriptor_uuid = canonical_uuid(descriptor.uuid);
+                if (descriptor_uuid == k_cccd_uuid)
+                    continue;
+
+                const std::uint64_t descriptor_handle = mint_le_server_attribute_locked(HandleKind::LeServerDescriptor,
+                    characteristic_handle, descriptor_uuid);
+                if (!first)
                     out.push_back(',');
-                out += "{\"uuid\":";
-                append_json_string(out, characteristic.descriptors[d].uuid);
+                first = false;
+                out += "{\"id\":" + std::to_string(descriptor_handle) + ",\"uuid\":";
+                append_json_string(out, descriptor.uuid);
                 out.push_back('}');
             }
             out += "]}";
@@ -1900,7 +2145,7 @@ namespace
                 bytes = std::move(*decoded);
             }
             const std::size_t size = bytes.size();
-            const std::uint64_t value = g_values.add(std::move(bytes));
+            const std::uint64_t value = store_value(std::move(bytes), ValueOwner::Le);
 
             try
             {
@@ -1932,9 +2177,15 @@ namespace
         {
             const auto* request_id_field = root.find("request_id");
             const std::int32_t request_id = request_id_field ? request_id_field->as_int(0) : 0;
-            const std::string service_uuid = canonical_uuid(le_event_string(root, "service_uuid"));
-            const std::string characteristic_uuid = canonical_uuid(le_event_string(root, "characteristic_uuid"));
-            const std::string descriptor_uuid = canonical_uuid(le_event_string(root, "descriptor_uuid"));
+            std::uint64_t characteristic = 0;
+            std::uint64_t descriptor = 0;
+            if (!le_server_request_attribute(root, characteristic, descriptor))
+            {
+                GMBT_LOG("LE server read request %d names no attribute the server holds, answering it", request_id);
+                answer_le_server_request(request_id, false, k_att_attribute_not_found);
+                g_dropped_events++;
+                return;
+            }
             const auto* offset_field = root.find("offset");
             const std::int32_t offset = offset_field ? offset_field->as_int(0) : 0;
             const std::uint64_t connection = note_server_central(le_event_string(root, "central"), le_server_event_device(root));
@@ -1955,19 +2206,16 @@ namespace
                 std::scoped_lock lock(g_pending_le_server_requests_mutex);
                 PendingLeServerRequest request;
                 request.connection = connection;
-                request.service_uuid = service_uuid;
-                request.characteristic_uuid = characteristic_uuid;
-                request.descriptor_uuid = descriptor_uuid;
                 request.is_write = false;
                 g_pending_le_server_requests[request_id] = std::move(request);
             }
 
             try
             {
-                // callback(request_id, connection, service_uuid, characteristic_uuid, descriptor_uuid_or_empty, offset)
+                // callback(request_id, connection, characteristic, descriptor_or_0, offset)
                 // GML answers with the value's bytes from offset on, as on Android.
-                callback.call(static_cast<double>(request_id), static_cast<double>(connection), service_uuid, characteristic_uuid,
-                    descriptor_uuid, static_cast<double>(offset));
+                callback.call(static_cast<double>(request_id), static_cast<double>(connection), static_cast<double>(characteristic),
+                    static_cast<double>(descriptor), static_cast<double>(offset));
             }
             catch (const std::exception& e)
             {
@@ -1979,11 +2227,18 @@ namespace
         {
             const auto* request_id_field = root.find("request_id");
             const std::int32_t request_id = request_id_field ? request_id_field->as_int(0) : 0;
-            const std::string service_uuid = canonical_uuid(le_event_string(root, "service_uuid"));
-            const std::string characteristic_uuid = canonical_uuid(le_event_string(root, "characteristic_uuid"));
-            const std::string descriptor_uuid = canonical_uuid(le_event_string(root, "descriptor_uuid"));
             const auto* response_needed_field = root.find("response_needed");
             const bool response_needed = !response_needed_field || response_needed_field->as_bool(true);
+            std::uint64_t characteristic = 0;
+            std::uint64_t descriptor = 0;
+            if (!le_server_request_attribute(root, characteristic, descriptor))
+            {
+                GMBT_LOG("LE server write request %d names no attribute the server holds, answering it", request_id);
+                if (response_needed)
+                    answer_le_server_request(request_id, true, k_att_attribute_not_found);
+                g_dropped_events++;
+                return;
+            }
             const auto* offset_field = root.find("offset");
             const std::int32_t offset = offset_field ? offset_field->as_int(0) : 0;
             const std::uint64_t connection = note_server_central(le_event_string(root, "central"), le_server_event_device(root));
@@ -2015,25 +2270,24 @@ namespace
             }
 
             expire_le_server_requests();
+            const std::size_t size = value.size();
+            const std::uint64_t value_id = store_value(std::move(value), ValueOwner::ServerWrite);
             {
                 std::scoped_lock lock(g_pending_le_server_requests_mutex);
                 PendingLeServerRequest request;
                 request.connection = connection;
-                request.service_uuid = service_uuid;
-                request.characteristic_uuid = characteristic_uuid;
-                request.descriptor_uuid = descriptor_uuid;
                 request.is_write = true;
                 request.response_needed = response_needed;
-                request.write_value = std::move(value);
+                request.value = value_id;
                 g_pending_le_server_requests[request_id] = std::move(request);
             }
 
             try
             {
-                // callback(request_id, connection, service_uuid, characteristic_uuid, descriptor_uuid_or_empty,
-                //          offset, response_needed)
-                callback.call(static_cast<double>(request_id), static_cast<double>(connection), service_uuid, characteristic_uuid,
-                    descriptor_uuid, static_cast<double>(offset), response_needed);
+                // callback(request_id, connection, characteristic, descriptor_or_0, offset, response_needed, value, size)
+                callback.call(static_cast<double>(request_id), static_cast<double>(connection), static_cast<double>(characteristic),
+                    static_cast<double>(descriptor), static_cast<double>(offset), response_needed,
+                    static_cast<double>(value_id), static_cast<double>(size));
             }
             catch (const std::exception& e)
             {
@@ -2256,20 +2510,28 @@ namespace
                 return;
             }
 
+            if (event.type == BackendEventType::ClassicReceivePaused)
+            {
+                expire_values();
+                return;
+            }
+
             // A handle bluetooth_classic_disconnect already retired has had its
             // end: the backend's late report of that close fires nothing, the
             // same as for LE (R1-77).
             if ((event.type == BackendEventType::ClassicDisconnected || event.type == BackendEventType::ClassicDataAvailable)
                 && !g_classic_connection_manager.is_valid(event.connection))
             {
+                if (event.type == BackendEventType::ClassicDataAvailable && g_backend)
+                    g_backend->classic_receive_consumed(event.connection, event.bytes.size());
                 g_dropped_events++;
                 return;
             }
 
-            // Retired by the game-thread calls once the backend holds no unread
-            // bytes for it; nothing is asked of the backend from its own thread.
+            // Every byte reached GML as a value before this, so the handle is
+            // retired here, as an LE link is (R1-245).
             if (event.type == BackendEventType::ClassicDisconnected)
-                g_classic_connection_manager.mark_closed(event.connection);
+                g_classic_connection_manager.remove_connection(event.connection);
 
             GMFunction callback;
 
@@ -2294,6 +2556,9 @@ namespace
                 }
             }
 
+            if (!callback && event.type == BackendEventType::ClassicDataAvailable && g_backend)
+                g_backend->classic_receive_consumed(event.connection, event.bytes.size());
+
             // Dispatch callback if found, using the signature spec.gmidl documents
             // for this event type - these differ per callback, they are not
             // interchangeable.
@@ -2308,9 +2573,13 @@ namespace
                         callback.call(static_cast<double>(event.error), event.message, static_cast<double>(event.transport));
                         break;
                     case BackendEventType::ClassicDataAvailable:
-                        // callback(connection, available_bytes)
-                        callback.call(static_cast<double>(event.connection), static_cast<double>(event.value));
+                    {
+                        // callback(connection, value, size)
+                        const std::size_t size = event.bytes.size();
+                        const std::uint64_t value = store_value(event.bytes, ValueOwner::Classic, event.connection);
+                        callback.call(static_cast<double>(event.connection), static_cast<double>(value), static_cast<double>(size));
                         break;
+                    }
                     case BackendEventType::ClassicClientConnected:
                         // callback(connection, device)
                         callback.call(static_cast<double>(event.connection), static_cast<double>(event.device));
@@ -3082,18 +3351,8 @@ BluetoothError bluetooth_classic_disconnect(std::uint64_t connection)
         return to_gm(Error::InvalidHandle);
     }
 
-    const bool remote_closed = g_classic_connection_manager.is_closed(connection);
-
     std::string message;
-    Error error = g_backend->classic_disconnect(connection, message);
-
-    // The peer already hung up and the backend dropped its side: the game
-    // releasing the handle is still a success.
-    if (remote_closed && error == Error::InvalidHandle)
-    {
-        error = Error::Ok;
-        message.clear();
-    }
+    const Error error = g_backend->classic_disconnect(connection, message);
     set_last_error(error, message);
 
     // A connect still in flight is cancelled, not completed: its callback
@@ -3126,23 +3385,8 @@ BluetoothError bluetooth_classic_disconnect(std::uint64_t connection)
     return to_gm(error);
 }
 
-namespace
-{
-    // A handle whose peer hung up stays valid while the backend still holds
-    // bytes for it, and is retired by the first call that finds none.
-    void retire_classic_connection_if_drained(std::uint64_t connection)
-    {
-        if (!g_classic_connection_manager.is_closed(connection))
-            return;
-        if (g_backend && g_backend->classic_receive_available(connection) > 0)
-            return;
-        g_classic_connection_manager.remove_connection(connection);
-    }
-}
-
 bool bluetooth_classic_connection_is_valid(std::uint64_t connection)
 {
-    retire_classic_connection_if_drained(connection);
     return g_classic_connection_manager.is_valid(connection);
 }
 
@@ -3153,22 +3397,7 @@ bool bluetooth_classic_connection_is_connected(std::uint64_t connection)
 
 std::uint64_t bluetooth_classic_connection_get_device(std::uint64_t connection)
 {
-    retire_classic_connection_if_drained(connection);
     return g_classic_connection_manager.get_device(connection);
-}
-
-std::int32_t bluetooth_classic_receive_available(std::uint64_t connection)
-{
-    if (!g_backend)
-    {
-        g_last_error = Error::NotInitialized;
-        g_last_error_message = "Bluetooth backend is not initialized";
-        return 0;
-    }
-    const std::int32_t available = g_backend->classic_receive_available(connection);
-    if (available == 0)
-        retire_classic_connection_if_drained(connection);
-    return available;
 }
 
 BluetoothError bluetooth_classic_send(std::uint64_t connection, struct gm::wire::GMBuffer data, unsigned int offset, unsigned int size)
@@ -3190,31 +3419,6 @@ BluetoothError bluetooth_classic_send(std::uint64_t connection, struct gm::wire:
     return to_gm(error);
 }
 
-// The bytes copied, or -1 on error (R1-214): 0 means only that none are waiting.
-std::int32_t bluetooth_classic_receive(std::uint64_t connection, struct gm::wire::GMBuffer data, unsigned int offset, unsigned int max_size)
-{
-    if (!g_backend)
-    {
-        g_last_error = Error::NotInitialized;
-        g_last_error_message = "Bluetooth backend is not initialized";
-        return -1;
-    }
-
-    if (!g_classic_connection_manager.is_valid(connection))
-    {
-        g_last_error = Error::InvalidHandle;
-        g_last_error_message = "Invalid Classic connection handle";
-        return -1;
-    }
-
-    if (!buffer_range_valid(data, offset, max_size, "bluetooth_classic_receive"))
-        return -1;
-
-    std::uint8_t* buffer = static_cast<std::uint8_t*>(data.data()) + offset;
-    const std::size_t received = g_backend->classic_receive_bytes(connection, buffer, max_size);
-    retire_classic_connection_if_drained(connection);
-    return static_cast<std::int32_t>(received);
-}
 
 BluetoothError bluetooth_classic_server_start(std::string_view name, std::string_view service_uuid)
 {
@@ -3706,6 +3910,8 @@ std::uint64_t bluetooth_le_service_get_at(std::uint64_t connection, std::int32_t
 
 std::string bluetooth_le_service_get_uuid(std::uint64_t service)
 {
+    if (const auto server = find_le_server_attribute(service, HandleKind::LeServerService))
+        return server->uuid;
     return g_service_cache.get_uuid(service);
 }
 
@@ -3740,23 +3946,33 @@ BluetoothError bluetooth_le_characteristics_discover(std::uint64_t service, cons
     return to_gm(error);
 }
 
+// The getters walk a server service the same way, through the handles
+// add_service minted (R1-241).
 std::int32_t bluetooth_le_characteristic_get_count(std::uint64_t service)
 {
+    if (const auto server = find_le_server_attribute(service, HandleKind::LeServerService))
+        return static_cast<std::int32_t>(server->children.size());
     return g_characteristic_cache.get_count(service);
 }
 
 std::uint64_t bluetooth_le_characteristic_get_at(std::uint64_t service, std::int32_t index)
 {
+    if (find_le_server_attribute(service, HandleKind::LeServerService))
+        return le_server_child_at(service, HandleKind::LeServerService, index);
     return g_characteristic_cache.get_at(service, index);
 }
 
 std::string bluetooth_le_characteristic_get_uuid(std::uint64_t characteristic)
 {
+    if (const auto server = find_le_server_attribute(characteristic, HandleKind::LeServerCharacteristic))
+        return server->uuid;
     return g_characteristic_cache.get_uuid(characteristic);
 }
 
 std::int32_t bluetooth_le_characteristic_get_properties(std::uint64_t characteristic)
 {
+    if (const auto server = find_le_server_attribute(characteristic, HandleKind::LeServerCharacteristic))
+        return server->properties;
     return g_characteristic_cache.get_properties(characteristic);
 }
 
@@ -3794,16 +4010,22 @@ BluetoothError bluetooth_le_descriptors_discover(std::uint64_t characteristic, c
 
 std::int32_t bluetooth_le_descriptor_get_count(std::uint64_t characteristic)
 {
+    if (const auto server = find_le_server_attribute(characteristic, HandleKind::LeServerCharacteristic))
+        return static_cast<std::int32_t>(server->children.size());
     return g_descriptor_cache.get_count(characteristic);
 }
 
 std::uint64_t bluetooth_le_descriptor_get_at(std::uint64_t characteristic, std::int32_t index)
 {
+    if (find_le_server_attribute(characteristic, HandleKind::LeServerCharacteristic))
+        return le_server_child_at(characteristic, HandleKind::LeServerCharacteristic, index);
     return g_descriptor_cache.get_at(characteristic, index);
 }
 
 std::string bluetooth_le_descriptor_get_uuid(std::uint64_t descriptor)
 {
+    if (const auto server = find_le_server_attribute(descriptor, HandleKind::LeServerDescriptor))
+        return server->uuid;
     return g_descriptor_cache.get_uuid(descriptor);
 }
 
@@ -4010,25 +4232,30 @@ BluetoothError bluetooth_le_descriptor_write(std::uint64_t descriptor, struct gm
     return to_gm(error);
 }
 
-// --- BLE values ---
+// --- Values ---
 
 // The bytes copied, or -1 on error (R1-214).
-std::int32_t bluetooth_le_value_copy(std::uint64_t value, struct gm::wire::GMBuffer out_data, unsigned int offset)
+std::int32_t bluetooth_value_fetch(std::uint64_t value, struct gm::wire::GMBuffer out_data, unsigned int offset)
 {
     std::string message;
     std::size_t copied = 0;
-    const Error error = g_values.copy(value, out_data, offset, copied, message);
+    std::vector<LeftValue> left;
+    const Error error = g_values.fetch(value, out_data, offset, copied, message, left);
     set_last_error(error, message);
+    settle_left_values(left);
     return error == Error::Ok ? static_cast<std::int32_t>(copied) : -1;
 }
 
-BluetoothError bluetooth_le_value_release(std::uint64_t value)
+BluetoothError bluetooth_value_release(std::uint64_t value)
 {
-    if (g_values.release(value))
+    std::vector<LeftValue> left;
+    const bool released = g_values.release(value, left);
+    settle_left_values(left);
+    if (released)
         return to_gm(Error::Ok);
 
     g_last_error = Error::InvalidHandle;
-    g_last_error_message = "Unknown or already copied value " + std::to_string(value);
+    g_last_error_message = "Unknown, fetched, released or expired value " + std::to_string(value);
     return to_gm(Error::InvalidHandle);
 }
 
@@ -4249,20 +4476,25 @@ BluetoothError bluetooth_le_server_add_service(const BluetoothLeServiceDefinitio
     }
 
     const std::string service_uuid = canonical_uuid(service.uuid);
-    const auto op_id = g_le_ops.add(LeOpKind::ServerAddService, callback, 0, 0);
+    std::uint64_t service_handle = 0;
+    std::string service_json;
     {
         std::scoped_lock lock(g_le_server_services_mutex);
         if (!g_le_server_services.insert(service_uuid).second)
         {
-            g_le_ops.erase(op_id);
             g_last_error = Error::Busy;
             g_last_error_message = "Service " + service_uuid + " has already been added";
             return to_gm(Error::Busy);
         }
-        g_le_server_service_ops[op_id] = service_uuid;
+        service_json = register_le_server_service_locked(service, service_handle);
     }
 
-    const std::string service_json = serialize_le_service_definition(service);
+    const auto op_id = g_le_ops.add(LeOpKind::ServerAddService, callback, service_handle, 0);
+    {
+        std::scoped_lock lock(g_le_server_services_mutex);
+        g_le_server_service_ops[op_id] = service_handle;
+    }
+
     std::string message;
     const Error error = g_backend->le_server_add_service(op_id, service_json, message);
     set_last_error(error, message);
@@ -4353,6 +4585,7 @@ BluetoothError bluetooth_le_server_respond_write(std::int32_t request_id, Blueto
     const auto request = take_le_server_request(request_id);
     if (!request)
         return to_gm(g_last_error);
+    release_value(request->value);
 
     // A write without response was completed when it arrived; answering it is
     // allowed everywhere and changes nothing (R1-15).
@@ -4367,38 +4600,7 @@ BluetoothError bluetooth_le_server_respond_write(std::int32_t request_id, Blueto
     return to_gm(error);
 }
 
-// The bytes copied, or -1 on error (R1-214).
-std::int32_t bluetooth_le_server_write_request_get_value(std::int32_t request_id, struct gm::wire::GMBuffer out_data, unsigned int offset, unsigned int max_size)
-{
-    if (!buffer_range_valid(out_data, offset, max_size, "bluetooth_le_server_write_request_get_value"))
-        return -1;
-
-    std::scoped_lock lock(g_pending_le_server_requests_mutex);
-    const auto it = g_pending_le_server_requests.find(request_id);
-    if (it == g_pending_le_server_requests.end())
-    {
-        g_last_error = Error::InvalidHandle;
-        g_last_error_message = "Unknown or expired LE server request id " + std::to_string(request_id);
-        return -1;
-    }
-    if (!it->second.is_write)
-    {
-        g_last_error = Error::InvalidArgument;
-        g_last_error_message = "LE server request " + std::to_string(request_id) + " is a read request; it has no written value";
-        return -1;
-    }
-
-    const auto& value = it->second.write_value;
-    const std::size_t n = std::min(static_cast<std::size_t>(max_size), value.size());
-    if (n > 0)
-    {
-        std::uint8_t* buffer = static_cast<std::uint8_t*>(out_data.data()) + offset;
-        std::memcpy(buffer, value.data(), n);
-    }
-    return static_cast<std::int32_t>(n);
-}
-
-BluetoothError bluetooth_le_server_notify_value(std::string_view service_uuid, std::string_view characteristic_uuid, std::uint64_t connection, struct gm::wire::GMBuffer data, unsigned int offset, unsigned int size)
+BluetoothError bluetooth_le_server_notify_value(std::uint64_t characteristic, std::uint64_t connection, struct gm::wire::GMBuffer data, unsigned int offset, unsigned int size)
 {
     if (!g_backend)
     {
@@ -4407,8 +4609,12 @@ BluetoothError bluetooth_le_server_notify_value(std::string_view service_uuid, s
         return to_gm(Error::NotInitialized);
     }
 
-    if (!check_uuid(service_uuid) || !check_uuid(characteristic_uuid))
-        return to_gm(Error::InvalidArgument);
+    if (!find_le_server_attribute(characteristic, HandleKind::LeServerCharacteristic))
+    {
+        g_last_error = Error::InvalidHandle;
+        g_last_error_message = "Not a server characteristic handle: " + std::to_string(characteristic);
+        return to_gm(Error::InvalidHandle);
+    }
 
     // 0 broadcasts; a server connection names one central (R1-48).
     std::string central;
@@ -4430,8 +4636,7 @@ BluetoothError bluetooth_le_server_notify_value(std::string_view service_uuid, s
     const std::string value_base64 = json::base64_encode(buffer, size);
 
     std::string message;
-    const Error error = g_backend->le_server_notify_value(canonical_uuid(service_uuid), canonical_uuid(characteristic_uuid), central,
-        value_base64, message);
+    const Error error = g_backend->le_server_notify_value(characteristic, central, value_base64, message);
     set_last_error(error, message);
     return to_gm(error);
 }

@@ -414,7 +414,9 @@ function bluetooth_classic_server_is_supported(): bool;
 function bluetooth_feature_is_supported([type_hint=`BluetoothFeature`] feature: gmval): bool;
 
 /// Windows returns Granted. Android checks the runtime Bluetooth/location
-/// permission set required by the current Android version.
+/// permission set required by the current Android version. Apple reports the
+/// app's Bluetooth authorization: Unknown until bluetooth_permission_request has
+/// been answered, Denied when refused or restricted.
 [global, bind = typed_gml, type_hint=`BluetoothPermissionStatus`]
 function bluetooth_permission_get_status(): gmval;
 
@@ -442,7 +444,8 @@ function bluetooth_request_enable(callback: func): gmval;
 // =============================================================================
 
 /// active=true requests scan-response packets; active=false scans passively only
-/// where LePassiveScan is supported (Windows) and is ignored elsewhere. filters is an
+/// where LePassiveScan is supported (Windows) and is ignored elsewhere: Apple and
+/// Android always scan actively. filters is an
 /// array of BluetoothLeScanFilter: empty reports every device, otherwise a device
 /// enters the cache, firing device_found, once its advertisement matches any one of
 /// them. A bad filter (no field set, a malformed UUID, a company_id outside 0-65535)
@@ -507,6 +510,8 @@ function bluetooth_device_get_id([type_hint=`uint64`] device: gmval): string;
 [global, bind = typed_gml]
 function bluetooth_device_get_name([type_hint=`uint64`] device: gmval): string;
 
+/// Apple never exposes an LE device's address: false for every LE device there, and
+/// true for a macOS Classic device.
 [global, bind = typed_gml]
 function bluetooth_device_has_address([type_hint=`uint64`] device: gmval): bool;
 
@@ -598,12 +603,6 @@ function bluetooth_classic_connection_get_device(
     [type_hint=`uint64`] connection: gmval
 ): gmval;
 
-/// Number of native bytes waiting to be copied into GML.
-[global, bind = typed_gml]
-function bluetooth_classic_receive_available(
-    [type_hint=`uint64`] connection: gmval
-): int32;
-
 /// Queues bytes from a GameMaker buffer to be sent over the RFCOMM connection and
 /// returns without waiting for them to go out. Busy when the bytes would take the
 /// connection's queue past 1 MiB, so send more than that in parts.
@@ -616,20 +615,6 @@ function bluetooth_classic_send(
     offset: uint32,
     size: uint32
 ): gmval;
-
-/// Copies up to max_size available RFCOMM bytes into out_data at offset and returns
-/// how many it copied (0 when none are waiting), or -1 on error with the reason in
-/// bluetooth_last_error_code() / bluetooth_last_error_message(). The bytes are
-/// written straight into the buffer's memory, so its used size does not change: use
-/// the returned count, and buffer_set_used_size() before buffer_copy() or
-/// buffer_save().
-[global, bind = typed_gml]
-function bluetooth_classic_receive(
-    [type_hint=`uint64`] connection: gmval,
-    [type_hint=buffer] out_data: gmval,
-    offset: uint32,
-    max_size: uint32
-): int32;
 
 // =============================================================================
 // Bluetooth Classic RFCOMM server
@@ -879,8 +864,8 @@ function bluetooth_le_descriptor_get_uuid(
 
 /// Starts an asynchronous characteristic read.
 /// callback(error_code, message, characteristic, value, size). value is a value
-/// handle holding the bytes read (0, with size 0, on failure); copy them with
-/// bluetooth_le_value_copy(). Apple reports reads and notifications through one
+/// handle holding the bytes read (0, with size 0, on failure); fetch them with
+/// bluetooth_value_fetch(). Apple reports reads and notifications through one
 /// delegate call, so on a subscribed characteristic a notification arriving while
 /// the read is in flight can be what the read returns.
 [global, bind = typed_gml, type_hint=`BluetoothError`]
@@ -919,6 +904,9 @@ function bluetooth_le_descriptor_read(
     callback: func
 ): gmval;
 
+/// callback(error_code, message, descriptor). The Client Characteristic
+/// Configuration descriptor (0x2902) is InvalidArgument: subscribe with
+/// bluetooth_le_characteristic_subscribe().
 [global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_le_descriptor_write(
     [type_hint=`uint64`] descriptor: gmval,
@@ -929,28 +917,33 @@ function bluetooth_le_descriptor_write(
 ): gmval;
 
 // =============================================================================
-// BLE values
+// Values
 // =============================================================================
 
-/// Copies a value delivered by a read or a notification callback into out_data at
-/// offset - all size bytes the callback reported - frees the value, and returns how
-/// many bytes it copied. -1 on error, with the reason in bluetooth_last_error_code()
-/// / bluetooth_last_error_message(): InvalidHandle for an unknown or already copied
-/// value, InvalidArgument for a buffer too small for it, which keeps the value. The
-/// bytes are written straight into the buffer's memory, so its used size does not
-/// change: use the returned count, and buffer_set_used_size() before buffer_copy()
-/// or buffer_save(). At most 256 values are held; past that the oldest is dropped,
-/// and shutdown frees them all.
+/// Copies a value a callback delivered - an LE read or notification, a server write
+/// request, a Classic chunk - into out_data at offset: all size bytes the callback
+/// reported. Frees the value and returns how many bytes it copied. -1 on error, with
+/// the reason in bluetooth_last_error_code() / bluetooth_last_error_message():
+/// InvalidHandle for an unknown, fetched, released or expired value, InvalidArgument
+/// for a buffer too small for it, which keeps the value. The bytes are written
+/// straight into the buffer's memory, so its used size does not change: use the
+/// returned count, and buffer_set_used_size() before buffer_copy() or buffer_save().
+/// A value expires 30 seconds after its callback was queued. At most 256 LE read and
+/// notification values are held, past that the oldest is dropped; a server write
+/// value is freed with its request (see bluetooth_le_server_respond_write); a
+/// Classic value counts toward its connection's 1 MiB (see classic_data). Shutdown
+/// frees every value.
 [global, bind = typed_gml]
-function bluetooth_le_value_copy(
+function bluetooth_value_fetch(
     [type_hint=`uint64`] value: gmval,
     [type_hint=buffer] out_data: gmval,
     offset: uint32
 ): int32;
 
-/// Frees a value without copying it.
+/// Frees a value without copying it. InvalidHandle for an unknown, fetched,
+/// released or expired value.
 [global, bind = typed_gml, type_hint=`BluetoothError`]
-function bluetooth_le_value_release(
+function bluetooth_value_release(
     [type_hint=`uint64`] value: gmval
 ): gmval;
 
@@ -996,7 +989,14 @@ function bluetooth_le_server_is_running(): bool;
 /// Adds a typed primary GATT service definition to the local peripheral/server.
 /// OperationFailed while the server is not running; Busy for a service UUID already
 /// added.
-/// callback(error_code, message)
+/// callback(error_code, message, service), service the server service handle (0 on
+/// failure). Walk it with bluetooth_le_characteristic_get_count/get_at and
+/// bluetooth_le_descriptor_get_count/get_at: they list its characteristics and
+/// descriptors in definition order, a Client Characteristic Configuration descriptor
+/// (0x2902) left out, so two attributes with one UUID get their own handles. The
+/// handles live until bluetooth_le_server_clear_services, bluetooth_le_server_stop
+/// or bluetooth_shutdown; a client call (read, write, subscribe, discover) given one
+/// is InvalidHandle.
 [global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_le_server_add_service(
     [type_hint=`BluetoothLeServiceDefinition`] service: gmval,
@@ -1019,34 +1019,22 @@ function bluetooth_le_server_respond_read(
 
 /// Answers a write request. Call it for every write request, including one whose
 /// response_needed was false: nothing is sent then, and the request is released.
+/// The request's value is freed with it, so fetch the value first.
 [global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_le_server_respond_write(
     request_id: int32,
     [type_hint=`BluetoothAttError`] error_code: gmval
 ): gmval;
 
-/// Copies up to max_size bytes a remote central wrote in a pending write request into
-/// out_data at offset and returns how many it copied, or -1 on error with the reason
-/// in bluetooth_last_error_code() / bluetooth_last_error_message(). The bytes are
-/// written straight into the buffer's memory, so its used size does not change: use
-/// the returned count, and buffer_set_used_size() before buffer_copy() or
-/// buffer_save().
-[global, bind = typed_gml]
-function bluetooth_le_server_write_request_get_value(
-    request_id: int32,
-    [type_hint=buffer] out_data: gmval,
-    offset: uint32,
-    max_size: uint32
-): int32;
-
-/// Pushes an updated value to subscribed centrals. connection=0 broadcasts to all
+/// Pushes an updated value of a server characteristic (a handle from the
+/// add_service callback's service) to subscribed centrals. InvalidHandle for a
+/// handle that is not a live server characteristic. connection=0 broadcasts to all
 /// subscribers; a server connection handle sends to that central only, and is
 /// NotFound when it is not subscribed to the characteristic. The value is queued and
 /// sent as the link allows; Busy while 64 values wait to be sent.
 [global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_le_server_notify_value(
-    service_uuid: string,
-    characteristic_uuid: string,
+    [type_hint=`uint64`] characteristic: gmval,
     [type_hint=`uint64`] connection: gmval,
     [type_hint=buffer] data: gmval,
     offset: uint32,
@@ -1093,13 +1081,15 @@ function bluetooth_set_callback_classic_client_connected(callback: func): bool;
 [global, bind = typed_gml]
 function bluetooth_remove_callback_classic_client_connected(): bool;
 
-/// callback(connection, available_bytes)
-/// Bytes remain in a native queue until bluetooth_classic_receive() copies them.
-/// Fired once when bytes arrive and again only after bluetooth_classic_receive()
-/// has been called, so read with bluetooth_classic_receive_available(). On Windows
-/// and Android the connection stops reading from the peer while 1 MiB is waiting;
-/// macOS cannot pause a channel, so it closes the connection with Disconnected
-/// ("receive buffer full") when 1 MiB is waiting.
+/// callback(connection, value, size)
+/// Fired for every chunk of bytes the connection receives, in order. value is a
+/// value handle holding size bytes; fetch them with bluetooth_value_fetch(). While
+/// the connection's unfetched values hold more than 1 MiB, Windows and Android stop
+/// reading from the peer until some are fetched or released; macOS cannot pause a
+/// channel, so it ends the connection with Disconnected ("receive buffer full"). A
+/// value left unfetched for 30 seconds ends its connection with Disconnected
+/// ("receive data expired") rather than leave a gap in the stream. For a connection
+/// the peer ends, classic_disconnected fires after its last classic_data.
 [global, bind = typed_gml]
 function bluetooth_set_callback_classic_data(callback: func): bool;
 
@@ -1127,7 +1117,7 @@ function bluetooth_remove_callback_le_disconnected(): bool;
 
 /// callback(characteristic, connection, value, size)
 /// Fired for every notify/indicate value update. value is a value handle holding
-/// the bytes; copy them with bluetooth_le_value_copy().
+/// the bytes; fetch them with bluetooth_value_fetch().
 [global, bind = typed_gml]
 function bluetooth_set_callback_le_characteristic_value_changed(callback: func): bool;
 
@@ -1147,23 +1137,30 @@ function bluetooth_set_callback_le_server_connection_state_changed(callback: fun
 [global, bind = typed_gml]
 function bluetooth_remove_callback_le_server_connection_state_changed(): bool;
 
-/// callback(request_id, connection, service_uuid, characteristic_uuid, descriptor_uuid, offset)
-/// descriptor_uuid is an empty string for a characteristic-level read request.
-/// Respond with bluetooth_le_server_respond_read().
+/// callback(request_id, connection, characteristic, descriptor, offset)
+/// characteristic is the server characteristic read, or the one descriptor belongs
+/// to; descriptor is 0 for a characteristic-level read request. offset is where in
+/// the value the central reads from (a long read asks again at later offsets); answer
+/// with the bytes from there on. A characteristic defined with an initial value is
+/// read without reaching this callback, on every platform; Apple never reports a
+/// descriptor read. Respond with
+/// bluetooth_le_server_respond_read().
 [global, bind = typed_gml]
 function bluetooth_set_callback_le_server_read_request(callback: func): bool;
 
 [global, bind = typed_gml]
 function bluetooth_remove_callback_le_server_read_request(): bool;
 
-/// callback(request_id, connection, service_uuid, characteristic_uuid, descriptor_uuid,
-///          offset, response_needed)
-/// descriptor_uuid is an empty string for a characteristic-level write request.
+/// callback(request_id, connection, characteristic, descriptor, offset,
+///          response_needed, value, size)
+/// characteristic and descriptor as for the read request; descriptor is 0 for a
+/// characteristic-level write request, and Apple never reports a descriptor write.
 /// offset is where the bytes go in the attribute's value; a long write split by the
 /// central arrives assembled, at the offset of its first part. response_needed is
 /// false for a write without response; Apple does not say, and reports true.
-/// Use bluetooth_le_server_write_request_get_value() to read the written bytes,
-/// then respond with bluetooth_le_server_respond_write().
+/// value is a value handle holding the size bytes written: fetch them with
+/// bluetooth_value_fetch(), then respond with bluetooth_le_server_respond_write(),
+/// which frees the value.
 [global, bind = typed_gml]
 function bluetooth_set_callback_le_server_write_request(callback: func): bool;
 
