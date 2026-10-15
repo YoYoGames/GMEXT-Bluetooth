@@ -19,7 +19,7 @@
       "mode": "java"
     },
     "ios":{
-      "mode": "objc"
+      "mode": "native"
     }
   },
   "extras": {
