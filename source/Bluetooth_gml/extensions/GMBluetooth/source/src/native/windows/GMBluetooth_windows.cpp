@@ -197,6 +197,19 @@ namespace gmbluetooth
             }
         }
 
+        // Windows can report a failure with BluetoothError::Success.
+        Error map_bluetooth_failure(WDB::BluetoothError error)
+        {
+            const auto mapped = map_bluetooth_error(error);
+            return mapped == Error::Ok ? Error::OperationFailed : mapped;
+        }
+
+        std::string bluetooth_failure_message(WDB::BluetoothError error)
+        {
+            auto message = bluetooth_error_message(error);
+            return message.empty() ? "Windows gave no reason" : message;
+        }
+
         bool advertisement_is_connectable(WDBA::BluetoothLEAdvertisementType type)
         {
             return type == WDBA::BluetoothLEAdvertisementType::ConnectableUndirected ||
@@ -3735,7 +3748,7 @@ namespace gmbluetooth
             const auto provider_result = WDBG::GattServiceProvider::CreateAsync(definition.guid).get();
             if (provider_result.Error() != WDB::BluetoothError::Success || !provider_result.ServiceProvider())
             {
-                fail(map_bluetooth_error(provider_result.Error()), bluetooth_error_message(provider_result.Error()));
+                fail(map_bluetooth_failure(provider_result.Error()), bluetooth_failure_message(provider_result.Error()));
                 return;
             }
             service_state->provider = provider_result.ServiceProvider();
@@ -3761,7 +3774,7 @@ namespace gmbluetooth
                 if (characteristic_result.Error() != WDB::BluetoothError::Success || !characteristic_result.Characteristic())
                 {
                     release_local_service_noexcept(*service_state);
-                    fail(map_bluetooth_error(characteristic_result.Error()), bluetooth_error_message(characteristic_result.Error()));
+                    fail(map_bluetooth_failure(characteristic_result.Error()), bluetooth_failure_message(characteristic_result.Error()));
                     return;
                 }
 
@@ -3823,7 +3836,7 @@ namespace gmbluetooth
                     if (descriptor_result.Error() != WDB::BluetoothError::Success || !descriptor_result.Descriptor())
                     {
                         release_local_service_noexcept(*service_state);
-                        fail(map_bluetooth_error(descriptor_result.Error()), bluetooth_error_message(descriptor_result.Error()));
+                        fail(map_bluetooth_failure(descriptor_result.Error()), bluetooth_failure_message(descriptor_result.Error()));
                         return;
                     }
 
@@ -5491,8 +5504,8 @@ namespace gmbluetooth
                             advertise_start_failed(
                                 le,
                                 tracker,
-                                map_bluetooth_error(args.Error()),
-                                "Windows aborted the BLE advertisement: " + bluetooth_error_message(args.Error()));
+                                map_bluetooth_failure(args.Error()),
+                                "Windows aborted the BLE advertisement: " + bluetooth_failure_message(args.Error()));
                         }
                         else if (status == WDBA::BluetoothLEAdvertisementPublisherStatus::Stopped)
                         {
@@ -5538,8 +5551,8 @@ namespace gmbluetooth
                                     advertise_start_failed(
                                         le,
                                         tracker,
-                                        map_bluetooth_error(args.Error()),
-                                        "Windows aborted GATT service advertising: " + bluetooth_error_message(args.Error()));
+                                        map_bluetooth_failure(args.Error()),
+                                        "Windows aborted GATT service advertising: " + bluetooth_failure_message(args.Error()));
                                     break;
                                 case WDBG::GattServiceProviderAdvertisementStatus::Stopped:
                                     advertise_start_failed(
