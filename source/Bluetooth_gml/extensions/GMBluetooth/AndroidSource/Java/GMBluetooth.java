@@ -594,6 +594,7 @@ public class GMBluetooth extends GMBluetoothInternal
         GMFunction callback;
         long targetHandle;
         int subscribeMode;
+        boolean withoutResponse;
         GattOpStart start;
         String startFailureMessage = "";
 
@@ -613,6 +614,8 @@ public class GMBluetooth extends GMBluetoothInternal
     // The ATT transaction timeout: an op the stack has not completed by then
     // has stalled the link, which takes no other op until it does.
     private static final long GATT_OP_TIMEOUT_MS = 30_000;
+
+    private static final int MAX_PENDING_WRITES_WITHOUT_RESPONSE = 64;
 
     private static final class LeConnectionEntry
     {
@@ -2443,6 +2446,26 @@ public class GMBluetooth extends GMBluetoothInternal
 
         if (startNow)
             runNextGattOp(connection);
+    }
+
+
+    private int pendingWritesWithoutResponse(LeConnectionEntry connection)
+    {
+        synchronized (connection.opLock)
+        {
+            int count = 0;
+
+            if (connection.currentOp != null && connection.currentOp.withoutResponse)
+                count++;
+
+            for (LePendingOp op : connection.opQueue)
+            {
+                if (op.withoutResponse)
+                    count++;
+            }
+
+            return count;
+        }
     }
 
 
@@ -4827,24 +4850,37 @@ public class GMBluetooth extends GMBluetoothInternal
         if (!initialized)
             return result(NOT_INITIALIZED, "Bluetooth is not initialized");
 
-        if (write_type != BluetoothLeWriteType.WithResponse &&
-            write_type != BluetoothLeWriteType.WithoutResponse)
-            return result(INVALID_ARGUMENT, "Invalid BluetoothLeWriteType value");
-
         LeCharacteristicEntry charEntry = getLeCharacteristic(characteristic);
 
         if (charEntry == null)
             return invalidAttribute(characteristic, "Invalid BLE characteristic handle");
 
-        LeConnectionEntry connEntry = getLeConnection(charEntry.connection);
-
-        if (connEntry == null || connEntry.gatt == null || !connEntry.connected)
-            return result(DISCONNECTED, "BLE connection is not connected");
+        if (write_type != BluetoothLeWriteType.WithResponse &&
+            write_type != BluetoothLeWriteType.WithoutResponse)
+            return result(INVALID_ARGUMENT, "Invalid BluetoothLeWriteType value");
 
         if (bufferRangeInvalid(data, offset, size))
             return result(
                 INVALID_ARGUMENT,
                 "Invalid buffer offset/size for bluetooth_le_characteristic_write");
+
+        final boolean withoutResponse = write_type == BluetoothLeWriteType.WithoutResponse;
+
+        LeConnectionEntry connEntry = getLeConnection(charEntry.connection);
+
+        if (withoutResponse)
+        {
+            if ((charEntry.gattCharacteristic.getProperties() &
+                 BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) == 0)
+                return result(NOT_SUPPORTED, "The characteristic does not take writes without response");
+
+            if (connEntry != null &&
+                pendingWritesWithoutResponse(connEntry) >= MAX_PENDING_WRITES_WITHOUT_RESPONSE)
+                return result(BUSY, "Too many writes without response are waiting to be sent");
+        }
+
+        if (connEntry == null || connEntry.gatt == null || !connEntry.connected)
+            return result(DISCONNECTED, "BLE connection is not connected");
 
         final byte[] payload = new byte[size];
 
@@ -4858,7 +4894,7 @@ public class GMBluetooth extends GMBluetoothInternal
         final BluetoothGatt gatt = connEntry.gatt;
         final BluetoothGattCharacteristic gattCharacteristic =
             charEntry.gattCharacteristic;
-        final int androidWriteType = write_type == BluetoothLeWriteType.WithoutResponse
+        final int androidWriteType = withoutResponse
             ? BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
             : BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT;
 
@@ -4866,6 +4902,7 @@ public class GMBluetooth extends GMBluetoothInternal
         op.kind = LePendingOp.KIND_WRITE_CHARACTERISTIC;
         op.callback = callback;
         op.targetHandle = characteristic;
+        op.withoutResponse = withoutResponse;
         op.startFailureMessage = "writeCharacteristic() failed to start";
         op.start = () ->
         {
@@ -4900,22 +4937,16 @@ public class GMBluetooth extends GMBluetoothInternal
         if (!initialized)
             return result(NOT_INITIALIZED, "Bluetooth is not initialized");
 
-        if (mode != SUBSCRIBE_MODE_UNSUBSCRIBE &&
-            mode != SUBSCRIBE_MODE_NOTIFY &&
-            mode != SUBSCRIBE_MODE_INDICATE)
-            return result(INVALID_ARGUMENT, "Invalid BluetoothLeSubscribeMode value");
-
         final LeCharacteristicEntry charEntry = getLeCharacteristic(characteristic);
 
         if (charEntry == null)
             return invalidAttribute(characteristic, "Invalid BLE characteristic handle");
 
-        LeConnectionEntry connEntry = getLeConnection(charEntry.connection);
+        if (mode != SUBSCRIBE_MODE_UNSUBSCRIBE &&
+            mode != SUBSCRIBE_MODE_NOTIFY &&
+            mode != SUBSCRIBE_MODE_INDICATE)
+            return result(INVALID_ARGUMENT, "Invalid BluetoothLeSubscribeMode value");
 
-        if (connEntry == null || connEntry.gatt == null || !connEntry.connected)
-            return result(DISCONNECTED, "BLE connection is not connected");
-
-        final BluetoothGatt gatt = connEntry.gatt;
         final BluetoothGattCharacteristic gattCharacteristic =
             charEntry.gattCharacteristic;
 
@@ -4928,6 +4959,13 @@ public class GMBluetooth extends GMBluetoothInternal
         if (mode == SUBSCRIBE_MODE_INDICATE &&
             (properties & BluetoothGattCharacteristic.PROPERTY_INDICATE) == 0)
             return result(NOT_SUPPORTED, "The characteristic does not support indications");
+
+        LeConnectionEntry connEntry = getLeConnection(charEntry.connection);
+
+        if (connEntry == null || connEntry.gatt == null || !connEntry.connected)
+            return result(DISCONNECTED, "BLE connection is not connected");
+
+        final BluetoothGatt gatt = connEntry.gatt;
 
         final BluetoothGattDescriptor cccd =
             gattCharacteristic.getDescriptor(CCCD_UUID);

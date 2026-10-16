@@ -698,9 +698,9 @@
  *
  * A write without response carries at most `mtu - 3` bytes, where `mtu` is the value of ${function.bluetooth_le_connection_get_mtu}, so you should keep such writes within that length on every platform.
  *
- * If the write cannot start, the function returns a ${constant.BluetoothError} other than `Ok`: NotInitialized, InvalidHandle for a handle that is not a discovered characteristic, InvalidArgument for a `write_type` that is not a ${constant.BluetoothLeWriteType} or an `offset` and `size` outside the buffer, or Disconnected while the connection is not connected (OperationFailed on Apple). The callback is then never called, and the reason is in ${function.bluetooth_last_error_message}. A device that refuses the write reports NotPermitted, or InsufficientSecurity when it needs pairing or encryption first, through the callback.
+ * If the write cannot start, the function returns a ${constant.BluetoothError} other than `Ok`: NotInitialized, InvalidHandle for a handle that is not a discovered characteristic, InvalidArgument for a `write_type` that is not a ${constant.BluetoothLeWriteType} or an `offset` and `size` outside the buffer, NotSupported for a write without response on a characteristic without the WriteWithoutResponse property, Busy while 64 writes without response wait to be sent on the connection, or Disconnected while the connection is not connected (OperationFailed on Apple). The callback is then never called, and the reason is in ${function.bluetooth_last_error_message}. A device that refuses the write reports NotPermitted, or InsufficientSecurity when it needs pairing or encryption first, through the callback.
  *
- * [[Note: On Apple a write without response is NotSupported on a characteristic without the WriteWithoutResponse property, InvalidArgument past the link's maximum write length, and Busy while 64 of them wait to be sent.]]
+ * [[Note: On Apple a write without response is also InvalidArgument past the link's maximum write length.]]
  * @param {Real} characteristic The characteristic handle.
  * @param {Buffer} data The buffer holding the bytes to write.
  * @param {Real} offset The position in the buffer of the first byte to write (in bytes).
@@ -743,11 +743,11 @@
  * @function bluetooth_le_characteristic_subscribe
  * @desc This function subscribes to or unsubscribes from the value updates of the given characteristic, by writing its Client Characteristic Configuration descriptor (0x2902) on the device. The callback is called once when the device has accepted or refused the change. While subscribed, every notification or indication is delivered to the callback set with ${function.bluetooth_set_callback_le_characteristic_value_changed}.
  *
- * If the change cannot start, the function returns a ${constant.BluetoothError} other than `Ok`: NotInitialized, InvalidHandle for a handle that is not a discovered characteristic, InvalidArgument for a `mode` that is not a ${constant.BluetoothLeSubscribeMode}, or Disconnected while the connection is not connected (OperationFailed on Apple). The callback is then never called, and the reason is in ${function.bluetooth_last_error_message}.
+ * If the change cannot start, the function returns a ${constant.BluetoothError} other than `Ok`: NotInitialized, InvalidHandle for a handle that is not a discovered characteristic, InvalidArgument for a `mode` that is not a ${constant.BluetoothLeSubscribeMode}, NotSupported for Notify on a characteristic without the Notify property or Indicate on one without the Indicate property, or Disconnected while the connection is not connected (OperationFailed on Apple). The callback is then never called, and the reason is in ${function.bluetooth_last_error_message}.
  *
- * [[Note: On Android, Notify on a characteristic without the Notify property, Indicate on one without the Indicate property, or a characteristic with no Client Characteristic Configuration descriptor is NotSupported from the call itself. Windows and Apple send the request to the device, and the callback reports the failure.]]
+ * [[Note: On Android a characteristic with no Client Characteristic Configuration descriptor is NotSupported from the call itself. Windows and Apple send the request to the device, and the callback reports the failure.]]
  *
- * [[Note: Apple turns on whichever of notifications or indications the characteristic supports, so Notify and Indicate behave the same there.]]
+ * [[Note: On a characteristic with both the Notify and Indicate properties, Apple turns on notifications for either mode.]]
  * @param {Real} characteristic The characteristic handle.
  * @param {Enum.BluetoothLeSubscribeMode} mode Whether to unsubscribe, or subscribe to notifications or indications.
  * @param {Function} callback The function to call once the change completes or fails.

@@ -488,8 +488,8 @@ static std::uint64_t gmbt_definition_id(NSDictionary *entry) {
     return [(NSNumber *)value unsignedLongLongValue];
 }
 
-// Queued notifications and writes without response wait at most this many
-// deep; past it the call is Busy.
+// Queued notifications wait at most this many deep; past it the call is
+// Busy. The core caps writes without response the same way.
 static const NSUInteger kGMBTMaxQueuedSends = 64;
 
 // Scan results kept for bt_le_peripheral_open, least recently seen evicted
@@ -2218,9 +2218,6 @@ static gmbluetooth::Error gmbt_bad_base64(std::string &message) {
     if (!characteristic) return error;
     CBPeripheral *peripheral = characteristic.service.peripheral;
 
-    if (!(characteristic.properties & CBCharacteristicPropertyWriteWithoutResponse))
-        return gmbt_fail(message, gmbluetooth::Error::NotSupported, "The characteristic does not take writes without response");
-
     NSData *data = [self dataFromBase64:value];
     if (!data) return gmbt_bad_base64(message);
 
@@ -2233,9 +2230,6 @@ static gmbluetooth::Error gmbt_bad_base64(std::string &message) {
     }
 
     NSMutableArray *queue = [self queuesForPeripheral:peripheral create:YES].writeWithoutResponse;
-    if (queue.count >= kGMBTMaxQueuedSends)
-        return gmbt_fail(message, gmbluetooth::Error::Busy, "Too many writes without response are waiting to be sent");
-
     GMBTQueuedCharacteristicWithData *queued = [[GMBTQueuedCharacteristicWithData alloc] initWithOpId:opId peripheral:peripheral characteristic:characteristic data:data];
     [queue addObject:queued];
     [self sendWritesWithoutResponse:peripheral];

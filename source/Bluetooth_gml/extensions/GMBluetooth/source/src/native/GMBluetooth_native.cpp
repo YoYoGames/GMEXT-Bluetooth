@@ -1158,6 +1158,7 @@ namespace
         DescriptorsDiscover,
         CharacteristicRead,
         CharacteristicWrite,
+        CharacteristicWriteWithoutResponse,
         CharacteristicSubscribe,
         DescriptorRead,
         DescriptorWrite,
@@ -1174,7 +1175,9 @@ namespace
             case LeOpKind::CharacteristicsDiscover: return "le_characteristics_discover";
             case LeOpKind::DescriptorsDiscover:     return "le_descriptors_discover";
             case LeOpKind::CharacteristicRead:      return "le_characteristic_read";
-            case LeOpKind::CharacteristicWrite:     return "le_characteristic_write";
+            case LeOpKind::CharacteristicWrite:
+            case LeOpKind::CharacteristicWriteWithoutResponse:
+                return "le_characteristic_write";
             case LeOpKind::CharacteristicSubscribe: return "le_characteristic_subscribe";
             case LeOpKind::DescriptorRead:          return "le_descriptor_read";
             case LeOpKind::DescriptorWrite:         return "le_descriptor_write";
@@ -1255,6 +1258,19 @@ namespace
             return out;
         }
 
+        std::size_t count(LeOpKind kind, std::uint64_t connection)
+        {
+            std::scoped_lock lock(mutex_);
+            std::size_t n = 0;
+            for (const auto& [op_id, op] : ops_)
+            {
+                (void)op_id;
+                if (op.kind == kind && op.connection == connection)
+                    ++n;
+            }
+            return n;
+        }
+
         std::vector<PendingLeOp> take_all()
         {
             std::vector<PendingLeOp> out;
@@ -1276,6 +1292,13 @@ namespace
     };
 
     PendingLeOps g_le_ops;
+
+    constexpr std::size_t k_max_pending_writes_without_response = 64;
+
+    bool characteristic_has_property(std::uint64_t characteristic, BluetoothLeCharacteristicProperty property)
+    {
+        return (g_characteristic_cache.get_properties(characteristic) & static_cast<std::int32_t>(property)) != 0;
+    }
 
     // Fires a taken op's callback with its usual arguments. Called with no lock
     // held, after the op has left the registry. value and size are the read's
@@ -4094,11 +4117,30 @@ BluetoothError bluetooth_le_characteristic_write(std::uint64_t characteristic, s
     if (!buffer_range_valid(data, offset, size, "bluetooth_le_characteristic_write"))
         return to_gm(Error::InvalidArgument);
 
+    const bool with_response = (write_type == BluetoothLeWriteType::WithResponse);
+    const LeOpKind kind = with_response ? LeOpKind::CharacteristicWrite : LeOpKind::CharacteristicWriteWithoutResponse;
+
+    if (!with_response)
+    {
+        if (!characteristic_has_property(characteristic, BluetoothLeCharacteristicProperty::WriteWithoutResponse))
+        {
+            g_last_error = Error::NotSupported;
+            g_last_error_message = "The characteristic does not take writes without response";
+            return to_gm(Error::NotSupported);
+        }
+
+        if (g_le_ops.count(kind, connection) >= k_max_pending_writes_without_response)
+        {
+            g_last_error = Error::Busy;
+            g_last_error_message = "Too many writes without response are waiting to be sent";
+            return to_gm(Error::Busy);
+        }
+    }
+
     const std::uint8_t* buffer = static_cast<const std::uint8_t*>(data.data()) + offset;
     const std::string value_base64 = json::base64_encode(buffer, size);
-    const bool with_response = (write_type == BluetoothLeWriteType::WithResponse);
 
-    const auto op_id = g_le_ops.add(LeOpKind::CharacteristicWrite, callback, characteristic, connection);
+    const auto op_id = g_le_ops.add(kind, callback, characteristic, connection);
 
     std::string message;
     const Error error = g_backend->le_characteristic_write(op_id, connection, ref, value_base64, with_response, message);
@@ -4132,6 +4174,22 @@ BluetoothError bluetooth_le_characteristic_subscribe(std::uint64_t characteristi
         g_last_error = Error::InvalidArgument;
         g_last_error_message = "mode must be a BluetoothLeSubscribeMode";
         return to_gm(Error::InvalidArgument);
+    }
+
+    if (mode == BluetoothLeSubscribeMode::Notify &&
+        !characteristic_has_property(characteristic, BluetoothLeCharacteristicProperty::Notify))
+    {
+        g_last_error = Error::NotSupported;
+        g_last_error_message = "The characteristic does not support notifications";
+        return to_gm(Error::NotSupported);
+    }
+
+    if (mode == BluetoothLeSubscribeMode::Indicate &&
+        !characteristic_has_property(characteristic, BluetoothLeCharacteristicProperty::Indicate))
+    {
+        g_last_error = Error::NotSupported;
+        g_last_error_message = "The characteristic does not support indications";
+        return to_gm(Error::NotSupported);
     }
 
     const std::uint64_t service = g_characteristic_cache.get_parent(characteristic);

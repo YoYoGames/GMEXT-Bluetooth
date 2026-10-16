@@ -875,7 +875,8 @@ function bluetooth_le_characteristic_read(
 ): gmval;
 
 /// callback(error_code, message, characteristic). A write without response completes
-/// when the platform has taken the bytes; it is InvalidArgument past the link's
+/// when the platform has taken the bytes; it is NotSupported on a characteristic
+/// without the WriteWithoutResponse property, InvalidArgument past the link's
 /// maximum write length (Apple) and Busy while 64 of them wait to be sent.
 [global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_le_characteristic_write(
