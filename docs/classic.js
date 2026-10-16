@@ -175,9 +175,13 @@
  * The call itself returns 0 with NotFound when macOS cannot resolve the device's address, and with
  * PermissionDenied until ${function.bluetooth_permission_request} has been called.]]
  *
- * [[Note: On Android the connection is a secure (authenticated) RFCOMM link, so an unpaired device
- * may show a pairing prompt; on Windows and macOS the system's own security settings decide whether
- * pairing is needed. Android also cancels a running Classic scan before it connects.]]
+ * [[Note: The connection is a secure (authenticated and encrypted) RFCOMM link, so an unpaired device
+ * may show a pairing prompt. On Windows the pairing counts toward the 15 seconds. On macOS the
+ * authenticated link is opened before the SDP lookup and fails with
+ * ${constant.BluetoothError}.Timeout when it is not open after 15 seconds; a link to the device that
+ * is already open is used as it is.]]
+ *
+ * [[Note: On Android a running Classic scan is cancelled before the connect.]]
  * @param {Real} device The handle of the Classic device to connect to.
  * @param {String} service_uuid The UUID of the RFCOMM service to connect to.
  * @param {Function} callback The function to call once the connection is made or fails.
@@ -389,9 +393,10 @@
  * the Classic server is not available, or OperationFailed when the system refused to publish the
  * service.
  *
- * [[Note: On Windows and Android an empty name is published as "GMBluetooth RFCOMM". On Android the
- * permission is the Bluetooth connect permission, and incoming links are secure (authenticated)
- * RFCOMM links. On macOS it returns PermissionDenied until ${function.bluetooth_permission_request}
+ * [[Note: On Windows and Android an empty name is published as "GMBluetooth RFCOMM", and incoming
+ * links are secure (authenticated and encrypted) RFCOMM links. On Android the permission is the
+ * Bluetooth connect permission. macOS has no API to require a secure link, so incoming links there
+ * use the system's default security, and it returns PermissionDenied until ${function.bluetooth_permission_request}
  * has been called.]]
  * @param {String} name The name of the service, as other devices see it.
  * @param {String} service_uuid The UUID of the service, in the full 36-character form or as 4 or 8

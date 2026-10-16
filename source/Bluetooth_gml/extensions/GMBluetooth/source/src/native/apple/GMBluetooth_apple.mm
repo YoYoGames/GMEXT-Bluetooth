@@ -2776,6 +2776,19 @@ static void gmbt_unpark(id object)
 }
 @end
 
+// openConnection:withPageTimeout:authenticationRequired: also calls back on
+// its target, through -connectionComplete:status:.
+@interface GMBTBasebandOpenHandler : NSObject
+@property (nonatomic, copy) void (^onComplete)(IOBluetoothDevice *device, IOReturn status);
+@end
+
+@implementation GMBTBasebandOpenHandler
+- (void)connectionComplete:(IOBluetoothDevice *)device status:(IOReturn)status {
+    if (self.onComplete) self.onComplete(device, status);
+    gmbt_unpark(self);
+}
+@end
+
 // registerForChannelOpenNotifications:selector:withChannelID:direction: is
 // likewise a plain target+selector callback, not a delegate protocol.
 @interface GMBTClassicServerHub : NSObject
@@ -3350,6 +3363,58 @@ namespace
                 classic_connections_[connection] = state;
             }
 
+            // The baseband link opens authenticated first, as Android's secure
+            // RFCOMM does (R1-254); a link already open is used as it is.
+            if ([btDevice isConnected])
+                return classic_connect_after_open(connection, btDevice, service_uuid, message);
+
+            GMBTBasebandOpenHandler* openHandler = [GMBTBasebandOpenHandler new];
+            AppleBackend* self = this;
+            std::weak_ptr<int> alive = lifetime_;
+            const std::string uuidCopy = service_uuid;
+            openHandler.onComplete = ^(IOBluetoothDevice* d, IOReturn status) {
+                if (alive.expired()) return;
+                self->handle_classic_open_complete(connection, d, status, uuidCopy);
+            };
+            {
+                std::scoped_lock lock(classic_mutex_);
+                classic_pending_open_[connection] = openHandler;
+            }
+
+            const IOReturn status = [btDevice openConnection:openHandler
+                                             withPageTimeout:kDefaultPageTimeout
+                                      authenticationRequired:YES];
+            GMBT_LOG("Classic connect: authenticated baseband open -> IOReturn=0x%08x", status);
+            if (status == kIOReturnSuccess)
+            {
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kClassicSdpTimeoutSeconds * NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), ^{
+                    if (alive.expired()) return;
+                    self->handle_classic_open_timeout(connection);
+                });
+                message.clear();
+                return Error::Ok;
+            }
+
+            {
+                std::scoped_lock lock(classic_mutex_);
+                classic_pending_open_.erase(connection);
+            }
+            if (status == kBluetoothHCIErrorACLConnectionAlreadyExists)
+                return classic_connect_after_open(connection, btDevice, service_uuid, message);
+
+            {
+                std::scoped_lock lock(classic_mutex_);
+                classic_connections_.erase(connection);
+            }
+            message = "Classic connection could not start";
+            return Error::OperationFailed;
+        }
+
+        // Past the authenticated open: the RFCOMM channel from the cached SDP
+        // record, or from a fresh query.
+        Error classic_connect_after_open(std::uint64_t connection, IOBluetoothDevice* btDevice, const std::string& service_uuid, std::string& message)
+        {
             // Paired devices keep the SDP records from pairing (or the last
             // query) cached on the IOBluetoothDevice. Use them directly when
             // they already hold the requested service: a fresh SDP query can
@@ -3407,6 +3472,7 @@ namespace
         {
             std::shared_ptr<ClassicConnectionState> state;
             GMBTSDPQueryHandler* sdp = nil;
+            GMBTBasebandOpenHandler* open = nil;
             {
                 std::scoped_lock lock(classic_mutex_);
                 auto it = classic_connections_.find(connection);
@@ -3426,12 +3492,23 @@ namespace
                     sdp = pending->second;
                     classic_pending_sdp_.erase(pending);
                 }
+                auto pending_open = classic_pending_open_.find(connection);
+                if (pending_open != classic_pending_open_.end())
+                {
+                    open = pending_open->second;
+                    classic_pending_open_.erase(pending_open);
+                }
             }
 
             if (sdp)
             {
                 sdp.onComplete = nil;
                 gmbt_park(sdp);
+            }
+            if (open)
+            {
+                open.onComplete = nil;
+                gmbt_park(open);
             }
             classic_drop_writes(*state);
             classic_detach_channel(state->channel, state->delegate);
@@ -3843,6 +3920,7 @@ namespace
         std::unordered_map<std::uint64_t, std::shared_ptr<ClassicConnectionState>> classic_connections_;
         std::unordered_map<std::string, IOBluetoothDevice*> classic_devices_by_address_;
         std::unordered_map<std::uint64_t, GMBTSDPQueryHandler*> classic_pending_sdp_;
+        std::unordered_map<std::uint64_t, GMBTBasebandOpenHandler*> classic_pending_open_;
 
         IOBluetoothDeviceInquiry* classic_inquiry_ = nil;
         GMBTClassicInquiryDelegate* classic_inquiry_delegate_ = nil;
@@ -3974,6 +4052,52 @@ namespace
             if (!uuid) return false;
             IOBluetoothSDPServiceRecord* record = [device getServiceRecordForUUID:uuid];
             return record && [record getRFCOMMChannelID:&channelID] == kIOReturnSuccess;
+        }
+
+        void handle_classic_open_timeout(std::uint64_t connection)
+        {
+            {
+                std::scoped_lock lock(classic_mutex_);
+                auto open = classic_pending_open_.find(connection);
+                if (open == classic_pending_open_.end()) return; // already completed
+                // IOBluetooth may still deliver connectionComplete: to it.
+                open->second.onComplete = nil;
+                gmbt_park(open->second);
+                classic_pending_open_.erase(open);
+            }
+            GMBT_LOG("Classic baseband open timed out after %.0fs (connection %llu)",
+                kClassicSdpTimeoutSeconds, static_cast<unsigned long long>(connection));
+            complete_classic_connect(connection, Error::Timeout, "The authenticated Classic link did not open in time");
+        }
+
+        void handle_classic_open_complete(std::uint64_t connection, IOBluetoothDevice* device, IOReturn status, const std::string& service_uuid)
+        {
+            GMBT_LOG("Classic baseband open complete: status=0x%08x", status);
+            {
+                std::scoped_lock lock(classic_mutex_);
+                auto open = classic_pending_open_.find(connection);
+                if (open == classic_pending_open_.end()) return; // timed out meanwhile
+                gmbt_release_after_callback(open->second);
+                classic_pending_open_.erase(open);
+                if (classic_connections_.find(connection) == classic_connections_.end()) return; // disconnected/cancelled meanwhile
+            }
+            if (status == kBluetoothHCIErrorPageTimeout)
+            {
+                complete_classic_connect(connection, Error::Timeout, "The device did not answer");
+                return;
+            }
+            if (status != kIOReturnSuccess && status != kBluetoothHCIErrorACLConnectionAlreadyExists)
+            {
+                char text[96];
+                std::snprintf(text, sizeof(text), "The authenticated Classic link could not be opened (status 0x%08x)", status);
+                complete_classic_connect(connection, Error::ConnectionFailed, text);
+                return;
+            }
+
+            std::string message;
+            const Error error = classic_connect_after_open(connection, device, service_uuid, message);
+            if (error != Error::Ok)
+                complete_classic_connect(connection, error, message);
         }
 
         void handle_classic_sdp_timeout(std::uint64_t connection)
@@ -4432,10 +4556,12 @@ namespace
 
             std::unordered_map<std::uint64_t, std::shared_ptr<ClassicConnectionState>> connections;
             std::unordered_map<std::uint64_t, GMBTSDPQueryHandler*> pending_sdp;
+            std::unordered_map<std::uint64_t, GMBTBasebandOpenHandler*> pending_open;
             {
                 std::scoped_lock lock(classic_mutex_);
                 connections.swap(classic_connections_);
                 pending_sdp.swap(classic_pending_sdp_);
+                pending_open.swap(classic_pending_open_);
                 classic_devices_by_address_.clear();
             }
             for (auto& [connection, state] : connections)
@@ -4445,6 +4571,12 @@ namespace
                 classic_detach_channel(state->channel, state->delegate);
             }
             for (auto& [connection, handler] : pending_sdp)
+            {
+                (void)connection;
+                handler.onComplete = nil;
+                gmbt_park(handler);
+            }
+            for (auto& [connection, handler] : pending_open)
             {
                 (void)connection;
                 handler.onComplete = nil;

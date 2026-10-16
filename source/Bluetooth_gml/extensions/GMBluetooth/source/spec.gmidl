@@ -573,8 +573,8 @@ function bluetooth_paired_devices_query(callback: func): gmval;
 /// reason then in bluetooth_last_error_code(). bluetooth_classic_disconnect on the
 /// handle cancels a connect still in progress, which then fires the callback once
 /// with ConnectionFailed. A connect that has not completed after 15 seconds fails
-/// with Timeout on Windows. The link is authenticated (secure RFCOMM), so an
-/// unpaired peer may see a pairing prompt.
+/// with Timeout on Windows. The link is authenticated and encrypted (secure RFCOMM),
+/// so an unpaired peer may see a pairing prompt.
 /// callback(error_code, message, connection, device)
 [global, bind = typed_gml, type_hint=`uint64`]
 function bluetooth_classic_connect(
@@ -622,7 +622,8 @@ function bluetooth_classic_send(
 
 /// Starts an RFCOMM service using the supplied UUID. Busy while a server is already
 /// running: stop it first to change its name or UUID. Incoming links are
-/// authenticated (secure RFCOMM).
+/// authenticated and encrypted (secure RFCOMM), except on macOS, which has no API
+/// to require it and uses the system's default security.
 [global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_classic_server_start(
     name: string,

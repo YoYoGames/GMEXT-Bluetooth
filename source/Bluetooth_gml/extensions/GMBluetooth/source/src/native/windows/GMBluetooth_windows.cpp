@@ -216,6 +216,26 @@ namespace gmbluetooth
                    type == WDBA::BluetoothLEAdvertisementType::ConnectableDirected;
         }
 
+        // Authenticated and encrypted, as Android's secure RFCOMM is: 0, or
+        // the WSA error of the option that was refused.
+        int request_secure_link(SOCKET socket_handle)
+        {
+            const ULONG enabled = TRUE;
+            const auto set = [&](unsigned long option)
+            {
+                return setsockopt(
+                    socket_handle,
+                    SOL_RFCOMM,
+                    static_cast<int>(option),
+                    reinterpret_cast<const char*>(&enabled),
+                    sizeof(enabled)) == SOCKET_ERROR ? WSAGetLastError() : 0;
+            };
+
+            if (const int error = set(SO_BTH_AUTHENTICATE); error != 0)
+                return error;
+            return set(SO_BTH_ENCRYPT);
+        }
+
         Error map_wsa_error(int error)
         {
             switch (error)
@@ -1099,6 +1119,12 @@ namespace gmbluetooth
             {
                 std::scoped_lock lock(state->socket_mutex);
                 state->socket = socket_handle;
+            }
+
+            if (const int error = request_secure_link(socket_handle); error != 0)
+            {
+                fail_wsa("setsockopt", error);
+                return;
             }
 
             u_long non_blocking = 1;
@@ -6335,6 +6361,13 @@ namespace gmbluetooth
             {
                 const int error = WSAGetLastError();
                 message = wsa_message("socket", error);
+                return map_wsa_error(error);
+            }
+
+            if (const int error = request_secure_link(listener); error != 0)
+            {
+                closesocket(listener);
+                message = wsa_message("setsockopt", error);
                 return map_wsa_error(error);
             }
 
