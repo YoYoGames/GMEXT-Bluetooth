@@ -355,11 +355,11 @@
  * @function bluetooth_set_callback_state_changed
  * @desc This function sets the function to call when the state of the local Bluetooth adapter changes, for example when the user turns Bluetooth on or off. It replaces the callback set by an earlier call.
  *
- * The callback is called once with the current state when you set it, and then whenever the state changes. Before ${function.bluetooth_initialize} the current state is ${constant.BluetoothState}.Unknown, so you should set the callback after initialising the extension. The callback stays set across ${function.bluetooth_shutdown} and the next ${function.bluetooth_initialize}, until you remove it with ${function.bluetooth_remove_callback_state_changed}.
+ * The callback is called with the current state when you set it, again when ${function.bluetooth_initialize} succeeds, and then whenever the state changes. Before ${function.bluetooth_initialize} the current state is ${constant.BluetoothState}.Unknown. The callback stays set across ${function.bluetooth_shutdown} and the next ${function.bluetooth_initialize}, until you remove it with ${function.bluetooth_remove_callback_state_changed}.
  *
  * The function always returns `true`.
  *
- * [[Note: On Android the callback is also called when ${function.bluetooth_initialize} runs and after the user answers ${function.bluetooth_permission_request}. From Android 12, a radio that is on reports ${constant.BluetoothState}.Unauthorized while the game does not have the `BLUETOOTH_SCAN` and `BLUETOOTH_CONNECT` permissions.]]
+ * [[Note: On Android the callback is also called after the user answers ${function.bluetooth_permission_request}. From Android 12, a radio that is on reports ${constant.BluetoothState}.Unauthorized while the game does not have the `BLUETOOTH_SCAN` and `BLUETOOTH_CONNECT` permissions.]]
  *
  * [[Note: On iOS and macOS the state is ${constant.BluetoothState}.Unauthorized until the user has answered the prompt of ${function.bluetooth_permission_request}, and the callback reports the state again once the user has answered.]]
  * @param {Function} callback The function to call with the adapter state.

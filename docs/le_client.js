@@ -356,9 +356,9 @@
  * @function bluetooth_le_services_discover
  * @desc This function starts discovering the GATT services of the device on a connected client connection. When the callback reports ${constant.BluetoothError}.Ok, the services are listed by ${function.bluetooth_le_service_get_count} and ${function.bluetooth_le_service_get_at}.
  *
- * The services, characteristics and descriptors of a device are addressed by handles, not by UUID, so two attributes that share a UUID get their own handles. Discovery goes one level at a time: services first, then ${function.bluetooth_le_characteristics_discover} on each service you need, then ${function.bluetooth_le_descriptors_discover} on each characteristic whose descriptors you need. The getters list each level in the order discovery found it. Running discovery again keeps the handles of the attributes that are still there. Every handle discovered on a connection is retired when the connection ends.
+ * The services, characteristics and descriptors of a device are addressed by handles, not by UUID, so two attributes that share a UUID get their own handles. Discovery goes one level at a time: services first, then ${function.bluetooth_le_characteristics_discover} on each service you need, then ${function.bluetooth_le_descriptors_discover} on each characteristic whose descriptors you need. The getters list each level in the order discovery found it. Running discovery again keeps the handles of the attributes that are still there and retires the handles of those that are gone, with every handle under them. Every handle discovered on a connection is retired when the connection ends.
  *
- * If discovery cannot start, the function returns a ${constant.BluetoothError} other than `Ok`: NotInitialized, InvalidHandle for a handle that is not a client connection, or Disconnected while the connection is not connected (OperationFailed on Apple). The callback is then never called, and the reason is in ${function.bluetooth_last_error_message}. A connection that ends while discovery is running fails it with Disconnected.
+ * If discovery cannot start, the function returns a ${constant.BluetoothError} other than `Ok`: NotInitialized, InvalidHandle for a handle that is not a client connection, or Disconnected while the connection is not connected. The callback is then never called, and the reason is in ${function.bluetooth_last_error_message}. A connection that ends while discovery is running fails it with Disconnected.
  *
  * [[Note: Android downloads the whole GATT database in this one step, so on Android the characteristic and descriptor discoveries that follow complete at once.]]
  * @param {Real} connection The client connection handle.
@@ -449,9 +449,9 @@
  * @function bluetooth_le_characteristics_discover
  * @desc This function starts discovering the characteristics of the given service, which must come from ${function.bluetooth_le_services_discover}. When the callback reports ${constant.BluetoothError}.Ok, the characteristics are listed by ${function.bluetooth_le_characteristic_get_count} and ${function.bluetooth_le_characteristic_get_at}, in the order discovery found them.
  *
- * If discovery cannot start, the function returns a ${constant.BluetoothError} other than `Ok`: NotInitialized, InvalidHandle for a handle that is not a discovered service (also a service of a connection that has ended), or Disconnected when the connection is closing (OperationFailed on Apple). The callback is then never called, and the reason is in ${function.bluetooth_last_error_message}.
+ * If discovery cannot start, the function returns a ${constant.BluetoothError} other than `Ok`: NotInitialized, InvalidHandle for a handle that is not a discovered service (also a service of a connection that has ended), or Disconnected while the connection is not connected or is closing. The callback is then never called, and the reason is in ${function.bluetooth_last_error_message}.
  *
- * [[Note: On Android the characteristics were already downloaded by the service discovery, so the callback is called at once with ${constant.BluetoothError}.Ok.]]
+ * [[Note: On Android the characteristics were already downloaded by the service discovery, so the callback reports them without asking the device again.]]
  * @param {Real} service The service handle.
  * @param {Function} callback The function to call once discovery completes or fails.
  * @returns {Enum.BluetoothError}
@@ -559,9 +559,9 @@
  * @function bluetooth_le_descriptors_discover
  * @desc This function starts discovering the descriptors of the given characteristic, which must come from ${function.bluetooth_le_characteristics_discover}. When the callback reports ${constant.BluetoothError}.Ok, the descriptors are listed by ${function.bluetooth_le_descriptor_get_count} and ${function.bluetooth_le_descriptor_get_at}, in the order discovery found them.
  *
- * If discovery cannot start, the function returns a ${constant.BluetoothError} other than `Ok`: NotInitialized, InvalidHandle for a handle that is not a discovered characteristic, or Disconnected when the connection is closing (OperationFailed on Apple). The callback is then never called, and the reason is in ${function.bluetooth_last_error_message}.
+ * If discovery cannot start, the function returns a ${constant.BluetoothError} other than `Ok`: NotInitialized, InvalidHandle for a handle that is not a discovered characteristic, or Disconnected while the connection is not connected or is closing. The callback is then never called, and the reason is in ${function.bluetooth_last_error_message}.
  *
- * [[Note: On Android the descriptors were already downloaded by the service discovery, so the callback is called at once with ${constant.BluetoothError}.Ok.]]
+ * [[Note: On Android the descriptors were already downloaded by the service discovery, so the callback reports them without asking the device again.]]
  * @param {Real} characteristic The characteristic handle.
  * @param {Function} callback The function to call once discovery completes or fails.
  * @returns {Enum.BluetoothError}
@@ -645,7 +645,7 @@
  * @function bluetooth_le_characteristic_read
  * @desc This function starts reading the value of the given characteristic. The callback is called once with a value handle and the size of the value in bytes. Copy the bytes into a buffer with ${function.bluetooth_value_fetch}, which also frees the value; if you do not need them, free the value with ${function.bluetooth_value_release}. A value that is neither fetched nor released is dropped 30 seconds after its callback was queued, and at most 256 LE read and notification values are held at a time (the oldest is dropped past that), so fetch or release each value in the callback. A successful read of 0 bytes still delivers a value handle; a failed read delivers 0 and needs nothing freed.
  *
- * If the read cannot start, the function returns a ${constant.BluetoothError} other than `Ok`: NotInitialized, InvalidHandle for a handle that is not a discovered characteristic, or Disconnected while the connection is not connected (OperationFailed on Apple). The callback is then never called, and the reason is in ${function.bluetooth_last_error_message}. A device that refuses the read reports NotPermitted, or InsufficientSecurity when it needs pairing or encryption first, through the callback.
+ * If the read cannot start, the function returns a ${constant.BluetoothError} other than `Ok`: NotInitialized, InvalidHandle for a handle that is not a discovered characteristic, or Disconnected while the connection is not connected. The callback is then never called, and the reason is in ${function.bluetooth_last_error_message}. A device that refuses the read reports NotPermitted, or InsufficientSecurity when it needs pairing or encryption first, through the callback.
  *
  * [[Note: Apple reports reads and notifications through one system call, so on a subscribed characteristic a notification that arrives while the read is in flight can be what the read returns.]]
  * @param {Real} characteristic The characteristic handle.
@@ -692,7 +692,7 @@
  *
  * A write without response carries at most `mtu - 3` bytes, where `mtu` is the value of ${function.bluetooth_le_connection_get_mtu}, so you should keep such writes within that length on every platform.
  *
- * If the write cannot start, the function returns a ${constant.BluetoothError} other than `Ok`: NotInitialized, InvalidHandle for a handle that is not a discovered characteristic, InvalidArgument for a `write_type` that is not a ${constant.BluetoothLeWriteType} or an `offset` and `size` outside the buffer, NotSupported for a write without response on a characteristic without the WriteWithoutResponse property, Busy while 64 writes without response wait to be sent on the connection, or Disconnected while the connection is not connected (OperationFailed on Apple). The callback is then never called, and the reason is in ${function.bluetooth_last_error_message}. A device that refuses the write reports NotPermitted, or InsufficientSecurity when it needs pairing or encryption first, through the callback.
+ * If the write cannot start, the function returns a ${constant.BluetoothError} other than `Ok`: NotInitialized, InvalidHandle for a handle that is not a discovered characteristic, InvalidArgument for a `write_type` that is not a ${constant.BluetoothLeWriteType} or an `offset` and `size` outside the buffer, NotSupported for a write without response on a characteristic without the WriteWithoutResponse property, Busy while 64 writes without response wait to be sent on the connection, or Disconnected while the connection is not connected. The callback is then never called, and the reason is in ${function.bluetooth_last_error_message}. A device that refuses the write reports NotPermitted, or InsufficientSecurity when it needs pairing or encryption first, through the callback.
  *
  * [[Note: On Apple a write without response is also InvalidArgument past the link's maximum write length.]]
  * @param {Real} characteristic The characteristic handle.
@@ -737,7 +737,7 @@
  * @function bluetooth_le_characteristic_subscribe
  * @desc This function subscribes to or unsubscribes from the value updates of the given characteristic, by writing its Client Characteristic Configuration descriptor (0x2902) on the device. The callback is called once when the device has accepted or refused the change. While subscribed, every notification or indication is delivered to the callback set with ${function.bluetooth_set_callback_le_characteristic_value_changed}.
  *
- * If the change cannot start, the function returns a ${constant.BluetoothError} other than `Ok`: NotInitialized, InvalidHandle for a handle that is not a discovered characteristic, InvalidArgument for a `mode` that is not a ${constant.BluetoothLeSubscribeMode}, NotSupported for Notify on a characteristic without the Notify property or Indicate on one without the Indicate property, or Disconnected while the connection is not connected (OperationFailed on Apple). The callback is then never called, and the reason is in ${function.bluetooth_last_error_message}.
+ * If the change cannot start, the function returns a ${constant.BluetoothError} other than `Ok`: NotInitialized, InvalidHandle for a handle that is not a discovered characteristic, InvalidArgument for a `mode` that is not a ${constant.BluetoothLeSubscribeMode}, NotSupported for Notify on a characteristic without the Notify property or Indicate on one without the Indicate property, or Disconnected while the connection is not connected. The callback is then never called, and the reason is in ${function.bluetooth_last_error_message}.
  *
  * [[Note: On Android a characteristic with no Client Characteristic Configuration descriptor is NotSupported from the call itself. Windows and Apple send the request to the device, and the callback reports the failure.]]
  *
@@ -777,7 +777,7 @@
  * @function bluetooth_le_descriptor_read
  * @desc This function starts reading the value of the given descriptor. The callback is called once with a value handle and the size of the value in bytes, as for ${function.bluetooth_le_characteristic_read}: copy the bytes with ${function.bluetooth_value_fetch}, or free the value with ${function.bluetooth_value_release} if you do not need them. A value that is neither fetched nor released is dropped after 30 seconds.
  *
- * If the read cannot start, the function returns a ${constant.BluetoothError} other than `Ok`: NotInitialized, InvalidHandle for a handle that is not a discovered descriptor, or Disconnected while the connection is not connected (OperationFailed on Apple). The callback is then never called, and the reason is in ${function.bluetooth_last_error_message}.
+ * If the read cannot start, the function returns a ${constant.BluetoothError} other than `Ok`: NotInitialized, InvalidHandle for a handle that is not a discovered descriptor, or Disconnected while the connection is not connected. The callback is then never called, and the reason is in ${function.bluetooth_last_error_message}.
  * @param {Real} descriptor The descriptor handle.
  * @param {Function} callback The function to call once with the value read.
  * @returns {Enum.BluetoothError}
@@ -820,7 +820,7 @@
  *
  * The Client Characteristic Configuration descriptor (0x2902) cannot be written with this function: subscribe with ${function.bluetooth_le_characteristic_subscribe} instead.
  *
- * If the write cannot start, the function returns a ${constant.BluetoothError} other than `Ok`: NotInitialized, InvalidHandle for a handle that is not a discovered descriptor, InvalidArgument for the Client Characteristic Configuration descriptor or an `offset` and `size` outside the buffer, or Disconnected while the connection is not connected (OperationFailed on Apple). The callback is then never called, and the reason is in ${function.bluetooth_last_error_message}.
+ * If the write cannot start, the function returns a ${constant.BluetoothError} other than `Ok`: NotInitialized, InvalidHandle for a handle that is not a discovered descriptor, InvalidArgument for the Client Characteristic Configuration descriptor or an `offset` and `size` outside the buffer, or Disconnected while the connection is not connected. The callback is then never called, and the reason is in ${function.bluetooth_last_error_message}.
  * @param {Real} descriptor The descriptor handle.
  * @param {Buffer} data The buffer holding the bytes to write.
  * @param {Real} offset The position in the buffer of the first byte to write (in bytes).

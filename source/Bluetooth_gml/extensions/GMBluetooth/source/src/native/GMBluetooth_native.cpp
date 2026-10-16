@@ -790,6 +790,31 @@ namespace
             return erased;
         }
 
+        // Erases the parent's entries whose instance a discovery no longer
+        // reported (R1-258); returns the erased handles, as erase_children.
+        std::vector<std::uint64_t> erase_unreported(std::uint64_t parent, const std::vector<LeAttribute>& reported)
+        {
+            std::vector<std::uint64_t> erased;
+            std::scoped_lock lock(mutex_);
+            for (auto it = entries_.begin(); it != entries_.end();)
+            {
+                const std::uint64_t instance = it->second.instance;
+                const bool kept = it->second.parent != parent ||
+                    std::any_of(reported.begin(), reported.end(),
+                        [instance](const LeAttribute& attribute) { return attribute.instance == instance; });
+                if (kept)
+                {
+                    ++it;
+                }
+                else
+                {
+                    erased.push_back(it->first);
+                    it = entries_.erase(it);
+                }
+            }
+            return erased;
+        }
+
         void clear()
         {
             std::scoped_lock lock(mutex_);
@@ -1141,14 +1166,21 @@ namespace
 
     // Drops what discovery cached for one LE connection: its services, their
     // characteristics and those characteristics' descriptors.
-    void erase_le_connection_attributes(std::uint64_t connection)
+    void erase_le_descriptors_of(const std::vector<std::uint64_t>& characteristics)
     {
-        const auto services = g_service_cache.erase_children({ connection });
-        if (services.empty())
-            return;
-        const auto characteristics = g_characteristic_cache.erase_children(services);
         if (!characteristics.empty())
             g_descriptor_cache.erase_children(characteristics);
+    }
+
+    void erase_le_characteristics_of(const std::vector<std::uint64_t>& services)
+    {
+        if (!services.empty())
+            erase_le_descriptors_of(g_characteristic_cache.erase_children(services));
+    }
+
+    void erase_le_connection_attributes(std::uint64_t connection)
+    {
+        erase_le_characteristics_of(g_service_cache.erase_children({ connection }));
     }
 
     enum class LeOpKind : std::uint8_t
@@ -1458,17 +1490,22 @@ namespace
             const LeOpResult& result = event.result;
             switch (op->kind)
             {
+                // A discovery's result is the whole level: what it no longer
+                // reports is gone, with everything under it (R1-258).
                 case LeOpKind::ServicesDiscover:
+                    erase_le_characteristics_of(g_service_cache.erase_unreported(op->context, result.attributes));
                     for (const auto& attribute : result.attributes)
                         g_service_cache.find_or_insert(op->context, attribute);
                     break;
                 case LeOpKind::CharacteristicsDiscover:
                     // The GATT core properties byte: the bits above it mean
                     // something different on each platform (R1-153).
+                    erase_le_descriptors_of(g_characteristic_cache.erase_unreported(op->context, result.attributes));
                     for (const auto& attribute : result.attributes)
                         g_characteristic_cache.find_or_insert(op->context, attribute);
                     break;
                 case LeOpKind::DescriptorsDiscover:
+                    g_descriptor_cache.erase_unreported(op->context, result.attributes);
                     for (const auto& attribute : result.attributes)
                         g_descriptor_cache.find_or_insert(op->context, attribute);
                     break;
@@ -1968,6 +2005,28 @@ namespace
 
         out += "]}";
         return out;
+    }
+
+    // Sends the current known state to the state callback, if one is set.
+    // GMFunction::call queues safely into GameMaker's dispatcher.
+    void dispatch_current_state()
+    {
+        std::scoped_lock dispatch_lock(g_state_dispatch_mutex);
+        GMFunction callback;
+        { std::scoped_lock lock(g_callback_mutex); callback = g_callback_state_changed; }
+        if (!callback)
+            return;
+        const std::int32_t state = g_backend
+            ? g_backend->current_bluetooth_state()
+            : 0; // BluetoothState.Unknown
+        try
+        {
+            callback.call(static_cast<double>(state));
+        }
+        catch (const std::exception& e)
+        {
+            GMBT_LOG("Error dispatching current state_changed callback: %s", e.what());
+        }
     }
 
     void dispatch_le_event(const BackendEvent& event)
@@ -2665,6 +2724,8 @@ bool bluetooth_initialize()
         return false;
     }
 
+    // A callback set before this heard Unknown (R1-259).
+    dispatch_current_state();
     return true;
 }
 
@@ -3560,22 +3621,8 @@ bool bluetooth_set_callback_state_changed(const gm::wire::GMFunction& callback)
     GMBT_LOG("Bluetooth state changed callback registered");
 
     // The public contract promises the current known state immediately after
-    // registration. GMFunction::call queues safely into GameMaker's dispatcher.
-    if (callback)
-    {
-        std::scoped_lock dispatch_lock(g_state_dispatch_mutex);
-        const std::int32_t state = g_backend
-            ? g_backend->current_bluetooth_state()
-            : 0; // BluetoothState.Unknown
-        try
-        {
-            callback.call(static_cast<double>(state));
-        }
-        catch (const std::exception& e)
-        {
-            GMBT_LOG("Error dispatching initial state_changed callback: %s", e.what());
-        }
-    }
+    // registration.
+    dispatch_current_state();
 
     return true;
 }

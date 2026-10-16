@@ -1828,13 +1828,13 @@ static bool _scanPendingPowerOn = false;
 // ####################################################################################
 
 static gmbluetooth::Error gmbt_not_open(std::string &message) {
-    return gmbt_fail(message, gmbluetooth::Error::OperationFailed, "The LE connection is not open");
+    return gmbt_fail(message, gmbluetooth::Error::Disconnected, "The LE connection is not open");
 }
 
 // The attribute is named by the id its discovery reported; CoreBluetooth
 // has no handle to show instead.
 static gmbluetooth::Error gmbt_not_found(const char *what, std::uint64_t attributeId, std::string &message) {
-    return gmbt_fail(message, gmbluetooth::Error::NotFound,
+    return gmbt_fail(message, gmbluetooth::Error::InvalidHandle,
                      std::string(what) + " not found (instance " + std::to_string(attributeId) + ")");
 }
 

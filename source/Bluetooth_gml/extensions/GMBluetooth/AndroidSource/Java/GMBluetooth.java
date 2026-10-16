@@ -4803,6 +4803,11 @@ public class GMBluetooth extends GMBluetoothInternal
         if (entry == null || entry.gattService == null)
             return invalidAttribute(service, "Invalid BLE service handle");
 
+        LeConnectionEntry connEntry = getLeConnection(entry.connection);
+
+        if (connEntry == null || connEntry.gatt == null || !connEntry.connected)
+            return result(DISCONNECTED, "BLE connection is not connected");
+
         // The complete GATT database (services, characteristics and
         // descriptors) is already downloaded by the single discoverServices()
         // round trip that already ran - there is no further remote operation
@@ -4898,6 +4903,11 @@ public class GMBluetooth extends GMBluetoothInternal
 
         if (entry == null || entry.gattCharacteristic == null)
             return invalidAttribute(characteristic, "Invalid BLE characteristic handle");
+
+        LeConnectionEntry connEntry = getLeConnection(entry.connection);
+
+        if (connEntry == null || connEntry.gatt == null || !connEntry.connected)
+            return result(DISCONNECTED, "BLE connection is not connected");
 
         synchronized (leEntityLock)
         {
