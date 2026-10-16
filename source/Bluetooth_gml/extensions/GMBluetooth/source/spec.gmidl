@@ -423,19 +423,29 @@ function bluetooth_permission_get_status(): gmval;
 /// Asks for the Bluetooth permissions the platform needs, showing the system prompt
 /// when the answer is not known yet. callback(error_code, message, status), status a
 /// BluetoothPermissionStatus, fires once: when the user answers, or at once when the
-/// answer is already known (always Granted on Windows). On Apple the prompt appears
-/// only here; until it has been answered, every call that uses Bluetooth returns
-/// PermissionDenied, as on Android without the runtime permissions.
+/// answer is already known (always Granted on Windows). Its error_code is Ok whenever
+/// the request was answered, also when refused (status says which), and
+/// NotInitialized when bluetooth_shutdown comes first. Returns NotInitialized before
+/// bluetooth_initialize; on Android, OperationFailed when the prompt cannot be shown
+/// (no activity, or requestPermissions threw). The callback is not called unless the
+/// return is Ok. On Apple the prompt appears only here; until it has been answered,
+/// every call that uses Bluetooth returns PermissionDenied, as on Android without the
+/// runtime permissions.
 [global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_permission_request(callback: func): gmval;
 
 /// Asks the user to turn the Bluetooth radio on (RequestEnable). callback(error_code,
 /// message) fires once: Ok when the radio is on, at once when it already was;
 /// BluetoothDisabled when the user declined or the radio stayed off; PermissionDenied
-/// when the system refused the request. Android shows the system dialog and needs the
-/// Bluetooth permission on Android 12+ (PermissionDenied before it starts). Windows
-/// asks for radio access and switches the radio on. Apple has no API to do this:
-/// NotSupported.
+/// when the system refused the request; on Windows, OperationFailed when the request
+/// failed; NotInitialized when bluetooth_shutdown comes first. Returns NotInitialized
+/// before bluetooth_initialize, NotSupported when RequestEnable is not supported, and
+/// otherwise Ok or a pre-flight failure that fires no callback. Android shows the
+/// system dialog and needs the Bluetooth permission on Android 12+ (PermissionDenied
+/// before it starts), and returns OperationFailed when the dialog cannot be shown.
+/// Windows asks for radio access and switches the radio on; it returns NotSupported
+/// with no radio, and OperationFailed when its worker thread is not running. Apple has
+/// no API to do this: NotSupported.
 [global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_request_enable(callback: func): gmval;
 
@@ -536,9 +546,12 @@ function bluetooth_device_get_advertisement([type_hint=`uint64`] device: gmval):
 /// remembered device can be connected without scanning. A device already in the cache
 /// keeps its handle; otherwise it enters the cache without firing device_found, and
 /// its name is empty until the platform knows it. 0 when it cannot, the reason in
-/// bluetooth_last_error_code(): InvalidArgument for an id from another platform or a
-/// malformed one; on Apple, BluetoothDisabled while the radio is off and NotFound
-/// for an LE id the system does not know.
+/// bluetooth_last_error_code(): NotInitialized before bluetooth_initialize;
+/// InvalidArgument for an id from another platform or a malformed one; on Apple,
+/// PermissionDenied until bluetooth_permission_request has been called, and for an LE
+/// id BluetoothDisabled while the radio is off and NotFound when the system does not
+/// know it; on Android, NotSupported with no Bluetooth adapter and OperationFailed
+/// when the device cannot be added to the cache.
 [global, bind = typed_gml, type_hint=`uint64`]
 function bluetooth_device_from_id(id: string): gmval;
 
@@ -671,19 +684,29 @@ function bluetooth_classic_discoverable_is_running(): bool;
 [global, bind = typed_gml]
 function bluetooth_pairing_is_supported([type_hint=`uint64`] device: gmval): bool;
 
-/// Attempts to pair (bond) with the given device at the OS level. This is separate from
-/// bluetooth_classic_connect/bluetooth_le_connect: some connections only succeed once the
-/// two devices are paired, and once paired the OS remembers the relationship across app runs.
-/// Returns immediately with an error code indicating whether the pairing request was
-/// accepted; callback is invoked once, later, when pairing actually completes or fails:
-/// callback(error_code, message, device).
-/// Android: works uniformly for Classic and LE devices, via BluetoothDevice.createBond().
-/// Windows: Classic only, via BluetoothAuthenticateDeviceEx. Returns NotSupported for LE
-///   devices.
-/// macOS: Classic only, via IOBluetoothDevicePair. Returns NotSupported for LE devices -
-///   BLE bonding on Apple platforms happens implicitly when a protected characteristic is
-///   accessed and cannot be triggered explicitly.
-/// iOS: always NotSupported (Classic isn't supported on iOS; BLE bonding is implicit, as above).
+/// Pairs (bonds) with the device at the OS level, separately from bluetooth_classic_connect
+/// and bluetooth_le_connect; the OS remembers the pairing across runs.
+/// callback(error_code, message, device) fires once, later: Ok when paired (at once on
+/// Windows and Android for a device already paired); OperationFailed when the pairing
+/// failed, was rejected or was cancelled; on macOS, Timeout after 60 seconds;
+/// NotInitialized when bluetooth_shutdown comes first. Returns NotInitialized;
+/// InvalidHandle for a handle that names no device; PermissionDenied, NotSupported or
+/// BluetoothDisabled from the radio check; Busy while the same device is already
+/// pairing; and the platform's own pre-flight codes below. The callback is not called
+/// unless the return is Ok.
+/// Android: Classic and LE, via BluetoothDevice.createBond(). InvalidArgument for a device
+///   with no usable address; OperationFailed when the bond receiver cannot be registered
+///   or createBond() fails.
+/// Windows: Classic only, via BluetoothAuthenticateDeviceEx. NotSupported for LE;
+///   InvalidArgument for a missing or malformed address; OperationFailed when the pairing
+///   thread cannot start.
+/// macOS: Classic only, via IOBluetoothDevicePair. PermissionDenied until
+///   bluetooth_permission_request has been called; NotSupported for LE, since BLE bonding
+///   on Apple happens implicitly when a protected characteristic is accessed;
+///   InvalidArgument with no address; NotFound when IOBluetooth cannot resolve the device;
+///   OperationFailed when the pairing cannot be created or started.
+/// iOS: NotSupported after the checks above (Classic is not supported, BLE bonding is
+///   implicit).
 [global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_pair([type_hint=`uint64`] device: gmval, callback: func): gmval;
 

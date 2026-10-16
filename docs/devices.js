@@ -106,6 +106,9 @@
  * function fails with BluetoothDisabled while the radio is off, NotFound for an id the system does not
  * know, and PermissionDenied until ${function.bluetooth_permission_request} has been called.]]
  *
+ * [[Note: On Android the function fails with NotSupported on a device with no Bluetooth adapter,
+ * and with OperationFailed when the device cannot be added to the cache.]]
+ *
  * [[Note: On Windows the device is built from the address in the id, so the function succeeds
  * without contacting the device.]]
  * @param {String} id The device id, as returned by ${function.bluetooth_device_get_id}.
@@ -443,8 +446,9 @@
  * not Ok: NotInitialized, InvalidHandle for a device handle that is not valid, PermissionDenied,
  * BluetoothDisabled, NotSupported for a device the platform cannot pair (see
  * ${function.bluetooth_pairing_is_supported}), InvalidArgument for a device with no usable address,
- * or Busy while a pairing of the same device is already in progress. The reason is also in
- * ${function.bluetooth_last_error_code} and ${function.bluetooth_last_error_message}.
+ * Busy while a pairing of the same device is already in progress, or OperationFailed when the
+ * system could not start the pairing. The reason is also in ${function.bluetooth_last_error_code}
+ * and ${function.bluetooth_last_error_message}.
  *
  * When the pairing fails, is rejected or is cancelled by the user, the callback reports
  * ${constant.BluetoothError}.OperationFailed. If you call ${function.bluetooth_shutdown} before the
@@ -453,8 +457,8 @@
  * [[Note: Android pairs Classic and LE devices. Windows and macOS pair Classic devices only and
  * return NotSupported for an LE device. iOS always returns NotSupported.]]
  *
- * [[Note: On macOS a pairing that has not completed after 60 seconds fails with
- * ${constant.BluetoothError}.Timeout.]]
+ * [[Note: On macOS the function returns NotFound when the system cannot find the device, and a
+ * pairing that has not completed after 60 seconds fails with ${constant.BluetoothError}.Timeout.]]
  * @param {Real} device The handle of the device to pair with.
  * @param {Function} callback The function to call once the pairing succeeds or fails.
  * @returns {Enum.BluetoothError} ${constant.BluetoothError}.Ok if the pairing started, otherwise the

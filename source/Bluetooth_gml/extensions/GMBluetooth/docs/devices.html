@@ -1461,6 +1461,11 @@ know, and PermissionDenied until <a href="core.html#bluetooth_permission_request
 </div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
+<p>On Android the function fails with NotSupported on a device with no Bluetooth adapter,
+and with OperationFailed when the device cannot be added to the cache.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
 <p>On Windows the device is built from the address in the id, so the function succeeds
 without contacting the device.</p>
 </div>
@@ -2121,8 +2126,9 @@ succeeds or fails. On Windows and Android, a device that is already paired compl
 not Ok: NotInitialized, InvalidHandle for a device handle that is not valid, PermissionDenied,
 BluetoothDisabled, NotSupported for a device the platform cannot pair (see
 <a href="devices.html#bluetooth_pairing_is_supported">bluetooth_pairing_is_supported</a>), InvalidArgument for a device with no usable address,
-or Busy while a pairing of the same device is already in progress. The reason is also in
-<a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>.</p>
+Busy while a pairing of the same device is already in progress, or OperationFailed when the
+system could not start the pairing. The reason is also in <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a>
+and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>.</p>
 <p>When the pairing fails, is rejected or is cancelled by the user, the callback reports
 <a href="core.html#bluetootherror">BluetoothError</a>.OperationFailed. If you call <a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a> before the
 pairing completes, the callback is called with NotInitialized.</p>
@@ -2133,8 +2139,8 @@ return NotSupported for an LE device. iOS always returns NotSupported.</p>
 </div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>On macOS a pairing that has not completed after 60 seconds fails with
-<a href="core.html#bluetootherror">BluetoothError</a>.Timeout.</p>
+<p>On macOS the function returns NotFound when the system cannot find the device, and a
+pairing that has not completed after 60 seconds fails with <a href="core.html#bluetootherror">BluetoothError</a>.Timeout.</p>
 </div>
 <p>This function operates asynchronously, which means that it does not immediately return the requested result. Instead, upon completion of the task, it will trigger the <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a>.</p>
 <p><br></p>
