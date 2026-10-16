@@ -1,7 +1,6 @@
 #include "GMBluetooth_native.h"
 #include "GMBluetooth_backend.h"
 #include "GMBluetooth_log.h"
-#include "GMBluetooth_json.h"
 
 #include <algorithm>
 #include <atomic>
@@ -1594,7 +1593,7 @@ namespace
         std::string message;
         const Error error = is_write
             ? g_backend->le_server_respond_write(request_id, att_error, message)
-            : g_backend->le_server_respond_read(request_id, att_error, std::string(), message);
+            : g_backend->le_server_respond_read(request_id, att_error, {}, message);
         if (error != Error::Ok)
             GMBT_LOG("LE server request %d could not be answered (0x%02x): %s", request_id, att_error, message.c_str());
     }
@@ -1706,17 +1705,13 @@ namespace
         return request;
     }
 
-    // A server request event's attribute: the characteristic named by
-    // "characteristic_id" and, for a descriptor request, the descriptor named
-    // by "descriptor_id" under it. False for an id the server does not hold.
-    bool le_server_request_attribute(const json::Value& root, std::uint64_t& characteristic, std::uint64_t& descriptor)
+    // A server request event's attribute: the characteristic named by its id
+    // and, for a descriptor request, the descriptor named by its id under it.
+    // False for an id the server does not hold.
+    bool le_server_request_attribute(const LeAttributeRef& attribute, std::uint64_t& characteristic, std::uint64_t& descriptor)
     {
-        const auto id_of = [&root](const char* name) -> std::uint64_t {
-            const auto* field = root.find(name);
-            return field ? field->as_uint64(0) : 0;
-        };
-        characteristic = id_of("characteristic_id");
-        descriptor = id_of("descriptor_id");
+        characteristic = attribute.characteristic;
+        descriptor = attribute.descriptor;
 
         const auto c = find_le_server_attribute(characteristic, HandleKind::LeServerCharacteristic);
         if (!c)
@@ -1830,180 +1825,61 @@ namespace
         return std::string();
     }
 
-    // --- LE event JSON helpers ---
-
-    bool le_event_has_error(const json::Value& root)
+    // The device a server event's central is: device_id in the backend's own
+    // id scheme, so the central and a scan result for the same peer are one
+    // device, and the address only where the platform has one. Added without
+    // device_found (R1-155); 0 when the event names no central.
+    std::uint64_t le_server_event_device(const LeServerCentral& central)
     {
-        return root.find("error_code") != nullptr;
-    }
-
-    std::int32_t le_event_error_code(const json::Value& root)
-    {
-        const auto* field = root.find("error_code");
-        return field ? field->as_int(0) : 0;
-    }
-
-    // The BluetoothError a backend already mapped ("error"), or fallback when
-    // the event does not carry one.
-    Error le_event_error(const json::Value& root, Error fallback)
-    {
-        const auto* field = root.find("error");
-        if (!field)
-            return fallback;
-        const std::int32_t value = field->as_int(static_cast<std::int32_t>(fallback));
-        if (value < static_cast<std::int32_t>(Error::Ok) || value > static_cast<std::int32_t>(Error::InsufficientSecurity))
-            return fallback;
-        return static_cast<Error>(value);
-    }
-
-    std::uint64_t le_event_connection(const json::Value& root)
-    {
-        const auto* field = root.find("connection");
-        return field ? field->as_uint64(0) : 0;
-    }
-
-    std::string le_event_string(const json::Value& root, const char* key)
-    {
-        const auto* field = root.find(key);
-        return field ? field->as_string() : std::string();
-    }
-
-    // Several Apple event payloads embed a JSON array/object as a *string*
-    // rather than a nested value (e.g. "services", "device") - decode that
-    // inner JSON here rather than treating the field as opaque text.
-    std::optional<json::Value> le_event_nested(const json::Value& root, const char* key)
-    {
-        const auto* field = root.find(key);
-        if (!field || !field->is_string())
-            return std::nullopt;
-        return json::parse(field->string_value);
-    }
-
-    // The device a server event's central is, from the "device" object Apple
-    // nests as a string or the fields Windows sends at the root: "device_id" in
-    // the backend's own id scheme, so the central and a scan result for the
-    // same peer are one device, and "address" only where the platform has one.
-    // Added without device_found (R1-155); 0 when the event names no central.
-    std::uint64_t le_server_event_device(const json::Value& root)
-    {
-        std::string device_id;
-        std::string address;
-        if (auto nested = le_event_nested(root, "device"); nested && nested->is_object())
-        {
-            if (const auto* field = nested->find("device_id"); field && field->is_string())
-                device_id = field->string_value;
-            if (const auto* field = nested->find("address"); field && field->is_string())
-                address = field->string_value;
-        }
-        if (device_id.empty())
-            device_id = le_event_string(root, "device_id");
-        if (address.empty())
-            address = le_event_string(root, "address");
-        if (device_id.empty())
-            device_id = address;
+        const std::string& device_id = central.device_id.empty() ? central.address : central.device_id;
         if (device_id.empty())
             return 0;
 
         DiscoveredDevice d;
         d.transport = Transport::LowEnergy;
         d.id = device_id;
-        d.address = address;
-        d.address_available = !address.empty();
+        d.address = central.address;
+        d.address_available = !central.address.empty();
         return g_device_manager.upsert_device(d);
-    }
-
-    void append_json_string(std::string& out, std::string_view value)
-    {
-        out.push_back('"');
-        for (const char ch : value)
-        {
-            switch (ch)
-            {
-                case '"': out += "\\\""; break;
-                case '\\': out += "\\\\"; break;
-                case '\b': out += "\\b"; break;
-                case '\f': out += "\\f"; break;
-                case '\n': out += "\\n"; break;
-                case '\r': out += "\\r"; break;
-                case '\t': out += "\\t"; break;
-                default:
-                {
-                    const auto c = static_cast<unsigned char>(ch);
-                    if (c < 0x20)
-                    {
-                        static constexpr char hex[] = "0123456789abcdef";
-                        out += "\\u00";
-                        out.push_back(hex[(c >> 4) & 0x0f]);
-                        out.push_back(hex[c & 0x0f]);
-                    }
-                    else
-                    {
-                        out.push_back(ch);
-                    }
-                    break;
-                }
-            }
-        }
-        out.push_back('"');
     }
 
     constexpr std::string_view k_cccd_uuid = "00002902-0000-1000-8000-00805f9b34fb";
 
-    // Mints the service's handles in definition order and writes each as the
-    // "id" its backend keys the attribute by. The CCCD belongs to the platform:
-    // it gets no handle and stays out of the JSON, as every backend skips it.
-    std::string register_le_server_service_locked(const BluetoothLeServiceDefinition& service, std::uint64_t& service_handle)
+    // Mints the service's handles in definition order and gives each to its
+    // backend as the id it keys the attribute by. The CCCD belongs to the
+    // platform: it gets no handle and is left out, as every backend skips it.
+    LeServerService register_le_server_service_locked(const BluetoothLeServiceDefinition& service)
     {
-        const std::string service_uuid = canonical_uuid(service.uuid);
-        service_handle = mint_le_server_attribute_locked(HandleKind::LeServerService, 0, service_uuid);
+        LeServerService out;
+        out.id = mint_le_server_attribute_locked(HandleKind::LeServerService, 0, canonical_uuid(service.uuid));
+        out.uuid = service.uuid;
+        out.characteristics.reserve(service.characteristics.size());
 
-        std::string out;
-        out.reserve(256);
-        out += "{\"id\":" + std::to_string(service_handle) + ",\"uuid\":";
-        append_json_string(out, service.uuid);
-        out += ",\"characteristics\":[";
-
-        for (std::size_t i = 0; i < service.characteristics.size(); ++i)
+        for (const auto& characteristic : service.characteristics)
         {
-            if (i != 0)
-                out.push_back(',');
+            LeServerCharacteristic entry;
+            entry.id = mint_le_server_attribute_locked(HandleKind::LeServerCharacteristic,
+                out.id, canonical_uuid(characteristic.uuid), characteristic.properties & 0xFF);
+            entry.uuid = characteristic.uuid;
+            entry.properties = characteristic.properties;
+            entry.permissions = characteristic.permissions;
+            entry.value = characteristic.value;
 
-            const auto& characteristic = service.characteristics[i];
-            const std::uint64_t characteristic_handle = mint_le_server_attribute_locked(HandleKind::LeServerCharacteristic,
-                service_handle, canonical_uuid(characteristic.uuid), characteristic.properties & 0xFF);
-
-            out += "{\"id\":" + std::to_string(characteristic_handle) + ",\"uuid\":";
-            append_json_string(out, characteristic.uuid);
-            out += ",\"properties\":" + std::to_string(characteristic.properties);
-            out += ",\"permissions\":" + std::to_string(characteristic.permissions);
-
-            if (!characteristic.value.empty())
-            {
-                out += ",\"value\":";
-                append_json_string(out, json::base64_encode(characteristic.value.data(), characteristic.value.size()));
-            }
-
-            out += ",\"descriptors\":[";
-            bool first = true;
             for (const auto& descriptor : characteristic.descriptors)
             {
                 const std::string descriptor_uuid = canonical_uuid(descriptor.uuid);
                 if (descriptor_uuid == k_cccd_uuid)
                     continue;
 
-                const std::uint64_t descriptor_handle = mint_le_server_attribute_locked(HandleKind::LeServerDescriptor,
-                    characteristic_handle, descriptor_uuid);
-                if (!first)
-                    out.push_back(',');
-                first = false;
-                out += "{\"id\":" + std::to_string(descriptor_handle) + ",\"uuid\":";
-                append_json_string(out, descriptor.uuid);
-                out.push_back('}');
+                LeServerDescriptor d;
+                d.id = mint_le_server_attribute_locked(HandleKind::LeServerDescriptor, entry.id, descriptor_uuid);
+                d.uuid = descriptor.uuid;
+                entry.descriptors.push_back(std::move(d));
             }
-            out += "]}";
+
+            out.characteristics.push_back(std::move(entry));
         }
 
-        out += "]}";
         return out;
     }
 
@@ -2029,361 +1905,247 @@ namespace
         }
     }
 
-    void dispatch_le_event(const BackendEvent& event)
+    void dispatch_state_changed(const BackendEvent& event)
     {
-        const std::string& type = event.event_type;
-
-        auto parsed = json::parse(event.json);
-        if (!parsed || !parsed->is_object())
+        std::scoped_lock dispatch_lock(g_state_dispatch_mutex);
+        GMFunction callback;
+        { std::scoped_lock lock(g_callback_mutex); callback = g_callback_state_changed; }
+        if (!callback)
         {
-            GMBT_LOG("LE event '%s' has unparseable JSON payload, dropping", type.c_str());
             g_dropped_events++;
             return;
         }
-        const json::Value& root = *parsed;
-
-        if (type == "bluetooth_state_changed")
+        try
         {
-            const auto* state_field = root.find("state");
-            const std::int32_t state = state_field ? state_field->as_int(0) : 0;
+            callback.call(static_cast<double>(event.value));
+        }
+        catch (const std::exception& e)
+        {
+            GMBT_LOG("Error dispatching state_changed callback: %s", e.what());
+        }
+    }
 
-            std::scoped_lock dispatch_lock(g_state_dispatch_mutex);
-            GMFunction callback;
-            { std::scoped_lock lock(g_callback_mutex); callback = g_callback_state_changed; }
-            if (callback)
+    void dispatch_le_connect_result(const BackendEvent& event)
+    {
+        const std::uint64_t connection = event.connection;
+        GMFunction callback;
+        {
+            std::scoped_lock lock(g_pending_le_connect_mutex);
+            const auto it = g_pending_le_connect_callbacks.find(connection);
+            if (it != g_pending_le_connect_callbacks.end())
             {
-                try
-                {
-                    callback.call(static_cast<double>(state));
-                }
-                catch (const std::exception& e)
-                {
-                    GMBT_LOG("Error dispatching state_changed callback: %s", e.what());
-                }
-            }
-            else
-            {
-                g_dropped_events++;
+                callback = it->second;
+                g_pending_le_connect_callbacks.erase(it);
             }
         }
-        else if (type == "bluetooth_le_server_services_reset")
+        if (!callback)
         {
-            // The platform dropped the server's services (Apple, on a power-off)
-            // and the game adds them again, so none of them is a duplicate now.
-            forget_le_server_services();
-        }
-        else if (type == "bluetooth_le_peripheral_open")
-        {
-            const std::uint64_t connection = le_event_connection(root);
-            GMFunction callback;
-            {
-                std::scoped_lock lock(g_pending_le_connect_mutex);
-                const auto it = g_pending_le_connect_callbacks.find(connection);
-                if (it != g_pending_le_connect_callbacks.end())
-                {
-                    callback = it->second;
-                    g_pending_le_connect_callbacks.erase(it);
-                }
-            }
-            if (!callback)
-            {
-                g_dropped_events++;
-                return;
-            }
-            const bool failed = le_event_has_error(root);
-            const Error error = !failed ? Error::Ok
-                : le_event_error(root, le_event_error_code(root) == 133 ? Error::Timeout : Error::ConnectionFailed);
-            const std::string message = failed ? le_event_string(root, "message") : std::string();
-            const std::uint64_t device = g_le_connection_manager.get_device(connection);
-            if (failed)
-            {
-                // The link never came up: nothing queued on it can complete.
-                retire_le_connection(connection);
-            }
-            try
-            {
-                // callback(error_code, message, connection, device)
-                callback.call(static_cast<double>(error), message, static_cast<double>(connection), static_cast<double>(device));
-            }
-            catch (const std::exception& e)
-            {
-                GMBT_LOG("Error dispatching le_connect callback: %s", e.what());
-            }
-        }
-        else if (type == "bluetooth_le_peripheral_disconnect")
-        {
-            // Apple: the backend resolves the peripheral's address to its
-            // connection. 0 only if the peripheral was never connected through
-            // bluetooth_le_connect. A connection already retired - by
-            // bluetooth_le_disconnect, or by the other of the two events Apple
-            // can send for one drop - has had its disconnect.
-            const std::uint64_t connection = le_event_connection(root);
-            if (!g_le_connection_manager.is_valid(connection))
-            {
-                g_dropped_events++;
-                return;
-            }
-            retire_le_connection(connection);
-
-            GMFunction callback;
-            { std::scoped_lock lock(g_callback_mutex); callback = g_callback_le_disconnected; }
-            if (callback)
-            {
-                try
-                {
-                    // callback(error_code, message, connection)
-                    callback.call(static_cast<double>(le_event_error(root, Error::Disconnected)), le_event_string(root, "message"),
-                        static_cast<double>(connection));
-                }
-                catch (const std::exception& e)
-                {
-                    GMBT_LOG("Error dispatching le_disconnected callback: %s", e.what());
-                }
-            }
-            else
-            {
-                g_dropped_events++;
-            }
-        }
-        else if (type == "bluetooth_le_peripheral_connection_state_changed")
-        {
-            const auto* is_connected_field = root.find("is_connected");
-            const bool is_connected = is_connected_field && is_connected_field->as_bool(false);
-            if (is_connected)
-            {
-                // No spec callback carries "(re)connected" for this iOS-only event.
-                g_dropped_events++;
-                return;
-            }
-
-            // As above: only a connection still live gets its disconnect.
-            const std::uint64_t connection = le_event_connection(root);
-            if (!g_le_connection_manager.is_valid(connection))
-            {
-                g_dropped_events++;
-                return;
-            }
-            retire_le_connection(connection);
-
-            GMFunction callback;
-            { std::scoped_lock lock(g_callback_mutex); callback = g_callback_le_disconnected; }
-            if (callback)
-            {
-                try
-                {
-                    // callback(error_code, message, connection)
-                    callback.call(static_cast<double>(le_event_error(root, Error::Disconnected)), le_event_string(root, "message"),
-                        static_cast<double>(connection));
-                }
-                catch (const std::exception& e)
-                {
-                    GMBT_LOG("Error dispatching le_disconnected callback: %s", e.what());
-                }
-            }
-            else
-            {
-                g_dropped_events++;
-            }
-        }
-        else if (type == "bluetooth_le_characteristic_value_changed")
-        {
-            const std::uint64_t connection = le_event_connection(root);
-            const auto* service_field = root.find("service_instance");
-            const auto* characteristic_field = root.find("characteristic_instance");
-            const std::uint64_t service_instance = service_field ? service_field->as_uint64(0) : 0;
-            const std::uint64_t characteristic_instance = characteristic_field ? characteristic_field->as_uint64(0) : 0;
-
-            const std::uint64_t service = service_instance ? g_service_cache.find_by_instance(connection, service_instance) : 0;
-            const std::uint64_t characteristic = service && characteristic_instance
-                ? g_characteristic_cache.find_by_instance(service, characteristic_instance)
-                : 0;
-            if (!characteristic)
-            {
-                GMBT_TRACE("LE characteristic_value_changed for unknown characteristic %llu (connection=%llu), dropping",
-                    static_cast<unsigned long long>(characteristic_instance), static_cast<unsigned long long>(connection));
-                g_dropped_events++;
-                return;
-            }
-
-            GMFunction callback;
-            { std::scoped_lock lock(g_callback_mutex); callback = g_callback_le_characteristic_value_changed; }
-            if (!callback)
-            {
-                g_dropped_events++;
-                return;
-            }
-
-            std::vector<std::uint8_t> bytes;
-            if (const auto* value = root.find("value"); value && value->is_string())
-            {
-                auto decoded = json::base64_decode(value->string_value);
-                if (!decoded)
-                {
-                    GMBT_LOG("LE characteristic_value_changed with a malformed value (connection=%llu), dropping",
-                        static_cast<unsigned long long>(connection));
-                    g_dropped_events++;
-                    return;
-                }
-                bytes = std::move(*decoded);
-            }
-            const std::size_t size = bytes.size();
-            const std::uint64_t value = store_value(std::move(bytes), ValueOwner::Le);
-
-            try
-            {
-                // callback(characteristic, connection, value, size)
-                callback.call(static_cast<double>(characteristic), static_cast<double>(connection),
-                    static_cast<double>(value), static_cast<double>(size));
-            }
-            catch (const std::exception& e)
-            {
-                GMBT_LOG("Error dispatching le_characteristic_value_changed callback: %s", e.what());
-            }
-        }
-        else if (type == "bluetooth_le_server_connection_state_changed")
-        {
-            // A backend reports a central's arrival where it sees one (a
-            // subscription) and its departure where the platform has one; the
-            // first event of any kind from a central is its connect.
-            const auto* connected_field = root.find("connected");
-            const bool connected = connected_field && connected_field->as_bool(false);
-            const std::string central = le_event_string(root, "central");
-
-            if (connected)
-                note_server_central(central, le_server_event_device(root));
-            else
-                retire_server_central(central);
-        }
-        else if (type == "bluetooth_le_server_characteristic_read_request" ||
-                 type == "bluetooth_le_server_descriptor_read_request")
-        {
-            const auto* request_id_field = root.find("request_id");
-            const std::int32_t request_id = request_id_field ? request_id_field->as_int(0) : 0;
-            std::uint64_t characteristic = 0;
-            std::uint64_t descriptor = 0;
-            if (!le_server_request_attribute(root, characteristic, descriptor))
-            {
-                GMBT_LOG("LE server read request %d names no attribute the server holds, answering it", request_id);
-                answer_le_server_request(request_id, false, k_att_attribute_not_found);
-                g_dropped_events++;
-                return;
-            }
-            const auto* offset_field = root.find("offset");
-            const std::int32_t offset = offset_field ? offset_field->as_int(0) : 0;
-            const std::uint64_t connection = note_server_central(le_event_string(root, "central"), le_server_event_device(root));
-
-            GMFunction callback;
-            { std::scoped_lock lock(g_callback_mutex); callback = g_callback_le_server_read_request; }
-            if (!callback)
-            {
-                // Nobody will answer it, so the central hears now instead of
-                // waiting out the ATT timeout and dropping the link.
-                answer_le_server_request(request_id, false, k_att_request_not_supported);
-                g_dropped_events++;
-                return;
-            }
-
-            expire_le_server_requests();
-            {
-                std::scoped_lock lock(g_pending_le_server_requests_mutex);
-                PendingLeServerRequest request;
-                request.connection = connection;
-                request.is_write = false;
-                g_pending_le_server_requests[request_id] = std::move(request);
-            }
-
-            try
-            {
-                // callback(request_id, connection, characteristic, descriptor_or_0, offset)
-                // GML answers with the value's bytes from offset on, as on Android.
-                callback.call(static_cast<double>(request_id), static_cast<double>(connection), static_cast<double>(characteristic),
-                    static_cast<double>(descriptor), static_cast<double>(offset));
-            }
-            catch (const std::exception& e)
-            {
-                GMBT_LOG("Error dispatching le_server_read_request callback: %s", e.what());
-            }
-        }
-        else if (type == "bluetooth_le_server_characteristic_write_request" ||
-                 type == "bluetooth_le_server_descriptor_write_request")
-        {
-            const auto* request_id_field = root.find("request_id");
-            const std::int32_t request_id = request_id_field ? request_id_field->as_int(0) : 0;
-            const auto* response_needed_field = root.find("response_needed");
-            const bool response_needed = !response_needed_field || response_needed_field->as_bool(true);
-            std::uint64_t characteristic = 0;
-            std::uint64_t descriptor = 0;
-            if (!le_server_request_attribute(root, characteristic, descriptor))
-            {
-                GMBT_LOG("LE server write request %d names no attribute the server holds, answering it", request_id);
-                if (response_needed)
-                    answer_le_server_request(request_id, true, k_att_attribute_not_found);
-                g_dropped_events++;
-                return;
-            }
-            const auto* offset_field = root.find("offset");
-            const std::int32_t offset = offset_field ? offset_field->as_int(0) : 0;
-            const std::uint64_t connection = note_server_central(le_event_string(root, "central"), le_server_event_device(root));
-
-            GMFunction callback;
-            { std::scoped_lock lock(g_callback_mutex); callback = g_callback_le_server_write_request; }
-            if (!callback)
-            {
-                // As for a read; a write without response needs no answer.
-                if (response_needed)
-                    answer_le_server_request(request_id, true, k_att_request_not_supported);
-                g_dropped_events++;
-                return;
-            }
-
-            std::vector<std::uint8_t> value;
-            if (const auto* value_field = root.find("value"); value_field && value_field->is_string())
-            {
-                auto decoded = json::base64_decode(value_field->string_value);
-                if (!decoded)
-                {
-                    GMBT_LOG("LE server write request %d has a malformed value, answering it", request_id);
-                    if (response_needed)
-                        answer_le_server_request(request_id, true, k_att_unlikely_error);
-                    g_dropped_events++;
-                    return;
-                }
-                value = std::move(*decoded);
-            }
-
-            expire_le_server_requests();
-            const std::size_t size = value.size();
-            const std::uint64_t value_id = store_value(std::move(value), ValueOwner::ServerWrite);
-            {
-                std::scoped_lock lock(g_pending_le_server_requests_mutex);
-                PendingLeServerRequest request;
-                request.connection = connection;
-                request.is_write = true;
-                request.response_needed = response_needed;
-                request.value = value_id;
-                g_pending_le_server_requests[request_id] = std::move(request);
-            }
-
-            try
-            {
-                // callback(request_id, connection, characteristic, descriptor_or_0, offset, response_needed, value, size)
-                callback.call(static_cast<double>(request_id), static_cast<double>(connection), static_cast<double>(characteristic),
-                    static_cast<double>(descriptor), static_cast<double>(offset), response_needed,
-                    static_cast<double>(value_id), static_cast<double>(size));
-            }
-            catch (const std::exception& e)
-            {
-                GMBT_LOG("Error dispatching le_server_write_request callback: %s", e.what());
-            }
-        }
-        else
-        {
-            // Known synchronous-only events with no GML callback
-            // (bluetooth_le_advertise_stop, bluetooth_le_server_open/close/clear_services,
-            // bluetooth_le_server_notify_value's fire-and-forget error signal) land here
-            // deliberately, alongside any genuinely unrecognized event_type.
-            GMBT_LOG("LE event dropped: no route for event_type '%s'", type.c_str());
             g_dropped_events++;
+            return;
+        }
+        const bool failed = event.error != Error::Ok;
+        const std::string message = failed ? event.message : std::string();
+        const std::uint64_t device = g_le_connection_manager.get_device(connection);
+        if (failed)
+        {
+            // The link never came up: nothing queued on it can complete.
+            retire_le_connection(connection);
+        }
+        try
+        {
+            // callback(error_code, message, connection, device)
+            callback.call(static_cast<double>(event.error), message, static_cast<double>(connection), static_cast<double>(device));
+        }
+        catch (const std::exception& e)
+        {
+            GMBT_LOG("Error dispatching le_connect callback: %s", e.what());
+        }
+    }
+
+    void dispatch_le_disconnected(const BackendEvent& event)
+    {
+        // 0 only if the peripheral was never connected through
+        // bluetooth_le_connect. A connection already retired - by
+        // bluetooth_le_disconnect, or by the other of the two reports Apple
+        // can make for one drop - has had its disconnect.
+        const std::uint64_t connection = event.connection;
+        if (!g_le_connection_manager.is_valid(connection))
+        {
+            g_dropped_events++;
+            return;
+        }
+        retire_le_connection(connection);
+
+        GMFunction callback;
+        { std::scoped_lock lock(g_callback_mutex); callback = g_callback_le_disconnected; }
+        if (!callback)
+        {
+            g_dropped_events++;
+            return;
+        }
+        const Error error = event.error != Error::Ok ? event.error : Error::Disconnected;
+        try
+        {
+            // callback(error_code, message, connection)
+            callback.call(static_cast<double>(error), event.message, static_cast<double>(connection));
+        }
+        catch (const std::exception& e)
+        {
+            GMBT_LOG("Error dispatching le_disconnected callback: %s", e.what());
+        }
+    }
+
+    void dispatch_le_value_changed(BackendEvent& event)
+    {
+        const std::uint64_t connection = event.connection;
+        const std::uint64_t service_instance = event.attribute.service;
+        const std::uint64_t characteristic_instance = event.attribute.characteristic;
+
+        const std::uint64_t service = service_instance ? g_service_cache.find_by_instance(connection, service_instance) : 0;
+        const std::uint64_t characteristic = service && characteristic_instance
+            ? g_characteristic_cache.find_by_instance(service, characteristic_instance)
+            : 0;
+        if (!characteristic)
+        {
+            GMBT_TRACE("LE characteristic_value_changed for unknown characteristic %llu (connection=%llu), dropping",
+                static_cast<unsigned long long>(characteristic_instance), static_cast<unsigned long long>(connection));
+            g_dropped_events++;
+            return;
+        }
+
+        GMFunction callback;
+        { std::scoped_lock lock(g_callback_mutex); callback = g_callback_le_characteristic_value_changed; }
+        if (!callback)
+        {
+            g_dropped_events++;
+            return;
+        }
+
+        const std::size_t size = event.bytes.size();
+        const std::uint64_t value = store_value(std::move(event.bytes), ValueOwner::Le);
+
+        try
+        {
+            // callback(characteristic, connection, value, size)
+            callback.call(static_cast<double>(characteristic), static_cast<double>(connection),
+                static_cast<double>(value), static_cast<double>(size));
+        }
+        catch (const std::exception& e)
+        {
+            GMBT_LOG("Error dispatching le_characteristic_value_changed callback: %s", e.what());
+        }
+    }
+
+    // A backend reports a central's arrival where it sees one (a
+    // subscription) and its departure where the platform has one; the first
+    // event of any kind from a central is its connect.
+    void dispatch_le_server_central(const BackendEvent& event)
+    {
+        if (event.connected)
+            note_server_central(event.central.key, le_server_event_device(event.central));
+        else
+            retire_server_central(event.central.key);
+    }
+
+    void dispatch_le_server_read_request(const BackendEvent& event)
+    {
+        const std::int32_t request_id = event.request_id;
+        std::uint64_t characteristic = 0;
+        std::uint64_t descriptor = 0;
+        if (!le_server_request_attribute(event.attribute, characteristic, descriptor))
+        {
+            GMBT_LOG("LE server read request %d names no attribute the server holds, answering it", request_id);
+            answer_le_server_request(request_id, false, k_att_attribute_not_found);
+            g_dropped_events++;
+            return;
+        }
+        const std::int32_t offset = static_cast<std::int32_t>(event.offset);
+        const std::uint64_t connection = note_server_central(event.central.key, le_server_event_device(event.central));
+
+        GMFunction callback;
+        { std::scoped_lock lock(g_callback_mutex); callback = g_callback_le_server_read_request; }
+        if (!callback)
+        {
+            // Nobody will answer it, so the central hears now instead of
+            // waiting out the ATT timeout and dropping the link.
+            answer_le_server_request(request_id, false, k_att_request_not_supported);
+            g_dropped_events++;
+            return;
+        }
+
+        expire_le_server_requests();
+        {
+            std::scoped_lock lock(g_pending_le_server_requests_mutex);
+            PendingLeServerRequest request;
+            request.connection = connection;
+            request.is_write = false;
+            g_pending_le_server_requests[request_id] = std::move(request);
+        }
+
+        try
+        {
+            // callback(request_id, connection, characteristic, descriptor_or_0, offset)
+            // GML answers with the value's bytes from offset on, as on Android.
+            callback.call(static_cast<double>(request_id), static_cast<double>(connection), static_cast<double>(characteristic),
+                static_cast<double>(descriptor), static_cast<double>(offset));
+        }
+        catch (const std::exception& e)
+        {
+            GMBT_LOG("Error dispatching le_server_read_request callback: %s", e.what());
+        }
+    }
+
+    void dispatch_le_server_write_request(BackendEvent& event)
+    {
+        const std::int32_t request_id = event.request_id;
+        const bool response_needed = event.response_needed;
+        std::uint64_t characteristic = 0;
+        std::uint64_t descriptor = 0;
+        if (!le_server_request_attribute(event.attribute, characteristic, descriptor))
+        {
+            GMBT_LOG("LE server write request %d names no attribute the server holds, answering it", request_id);
+            if (response_needed)
+                answer_le_server_request(request_id, true, k_att_attribute_not_found);
+            g_dropped_events++;
+            return;
+        }
+        const std::int32_t offset = static_cast<std::int32_t>(event.offset);
+        const std::uint64_t connection = note_server_central(event.central.key, le_server_event_device(event.central));
+
+        GMFunction callback;
+        { std::scoped_lock lock(g_callback_mutex); callback = g_callback_le_server_write_request; }
+        if (!callback)
+        {
+            // As for a read; a write without response needs no answer.
+            if (response_needed)
+                answer_le_server_request(request_id, true, k_att_request_not_supported);
+            g_dropped_events++;
+            return;
+        }
+
+        expire_le_server_requests();
+        const std::size_t size = event.bytes.size();
+        const std::uint64_t value_id = store_value(std::move(event.bytes), ValueOwner::ServerWrite);
+        {
+            std::scoped_lock lock(g_pending_le_server_requests_mutex);
+            PendingLeServerRequest request;
+            request.connection = connection;
+            request.is_write = true;
+            request.response_needed = response_needed;
+            request.value = value_id;
+            g_pending_le_server_requests[request_id] = std::move(request);
+        }
+
+        try
+        {
+            // callback(request_id, connection, characteristic, descriptor_or_0, offset, response_needed, value, size)
+            callback.call(static_cast<double>(request_id), static_cast<double>(connection), static_cast<double>(characteristic),
+                static_cast<double>(descriptor), static_cast<double>(offset), response_needed,
+                static_cast<double>(value_id), static_cast<double>(size));
+        }
+        catch (const std::exception& e)
+        {
+            GMBT_LOG("Error dispatching le_server_write_request callback: %s", e.what());
         }
     }
 
@@ -2451,10 +2213,9 @@ namespace
             return connection;
         };
         hooks.push_event = [](BackendEvent event) {
-            GMBT_TRACE("event: type=%d transport=%d event_type='%s'",
+            GMBT_TRACE("event: type=%d transport=%d",
                 static_cast<int>(event.type),
-                static_cast<int>(event.transport),
-                event.event_type.c_str());
+                static_cast<int>(event.transport));
 
             // The connect completion callback is one-shot and per-connection,
             // not one of the persistently-registered callbacks below.
@@ -2586,10 +2347,36 @@ namespace
                 return;
             }
 
-            if (event.type == BackendEventType::LeEvent)
+            switch (event.type)
             {
-                dispatch_le_event(event);
+            case BackendEventType::StateChanged:
+                dispatch_state_changed(event);
                 return;
+            case BackendEventType::LeConnectResult:
+                dispatch_le_connect_result(event);
+                return;
+            case BackendEventType::LeDisconnected:
+                dispatch_le_disconnected(event);
+                return;
+            case BackendEventType::LeValueChanged:
+                dispatch_le_value_changed(event);
+                return;
+            case BackendEventType::LeServerCentral:
+                dispatch_le_server_central(event);
+                return;
+            case BackendEventType::LeServerReadRequest:
+                dispatch_le_server_read_request(event);
+                return;
+            case BackendEventType::LeServerWriteRequest:
+                dispatch_le_server_write_request(event);
+                return;
+            case BackendEventType::LeServerServicesReset:
+                // The platform dropped the server's services and the game adds
+                // them again, so none of them is a duplicate now.
+                forget_le_server_services();
+                return;
+            default:
+                break;
             }
 
             if (event.type == BackendEventType::ClassicReceivePaused)
@@ -4209,12 +3996,12 @@ BluetoothError bluetooth_le_characteristic_write(std::uint64_t characteristic, s
     }
 
     const std::uint8_t* buffer = static_cast<const std::uint8_t*>(data.data()) + offset;
-    const std::string value_base64 = json::base64_encode(buffer, size);
+    const std::vector<std::uint8_t> value(buffer, buffer + size);
 
     const auto op_id = g_le_ops.add(kind, callback, characteristic, connection);
 
     std::string message;
-    const Error error = g_backend->le_characteristic_write(op_id, connection, ref, value_base64, with_response, message);
+    const Error error = g_backend->le_characteristic_write(op_id, connection, ref, value, with_response, message);
     set_last_error(error, message);
 
     if (error != Error::Ok)
@@ -4347,12 +4134,12 @@ BluetoothError bluetooth_le_descriptor_write(std::uint64_t descriptor, struct gm
         return to_gm(Error::InvalidArgument);
 
     const std::uint8_t* buffer = static_cast<const std::uint8_t*>(data.data()) + offset;
-    const std::string value_base64 = json::base64_encode(buffer, size);
+    const std::vector<std::uint8_t> value(buffer, buffer + size);
 
     const auto op_id = g_le_ops.add(LeOpKind::DescriptorWrite, callback, descriptor, connection);
 
     std::string message;
-    const Error error = g_backend->le_descriptor_write(op_id, connection, ref, value_base64, message);
+    const Error error = g_backend->le_descriptor_write(op_id, connection, ref, value, message);
     set_last_error(error, message);
 
     if (error != Error::Ok)
@@ -4606,7 +4393,7 @@ BluetoothError bluetooth_le_server_add_service(const BluetoothLeServiceDefinitio
 
     const std::string service_uuid = canonical_uuid(service.uuid);
     std::uint64_t service_handle = 0;
-    std::string service_json;
+    LeServerService definition;
     {
         std::scoped_lock lock(g_le_server_services_mutex);
         if (!g_le_server_services.insert(service_uuid).second)
@@ -4615,7 +4402,8 @@ BluetoothError bluetooth_le_server_add_service(const BluetoothLeServiceDefinitio
             g_last_error_message = "Service " + service_uuid + " has already been added";
             return to_gm(Error::Busy);
         }
-        service_json = register_le_server_service_locked(service, service_handle);
+        definition = register_le_server_service_locked(service);
+        service_handle = definition.id;
     }
 
     const auto op_id = g_le_ops.add(LeOpKind::ServerAddService, callback, service_handle, 0);
@@ -4625,7 +4413,7 @@ BluetoothError bluetooth_le_server_add_service(const BluetoothLeServiceDefinitio
     }
 
     std::string message;
-    const Error error = g_backend->le_server_add_service(op_id, service_json, message);
+    const Error error = g_backend->le_server_add_service(op_id, definition, message);
     set_last_error(error, message);
 
     if (error != Error::Ok)
@@ -4686,12 +4474,15 @@ BluetoothError bluetooth_le_server_respond_read(std::int32_t request_id, Bluetoo
     if (!take_le_server_request(request_id))
         return to_gm(g_last_error);
 
-    std::string value_base64;
+    std::vector<std::uint8_t> value;
     if (success && size > 0)
-        value_base64 = json::base64_encode(static_cast<const std::uint8_t*>(data.data()) + offset, size);
+    {
+        const std::uint8_t* buffer = static_cast<const std::uint8_t*>(data.data()) + offset;
+        value.assign(buffer, buffer + size);
+    }
 
     std::string message;
-    const Error error = g_backend->le_server_respond_read(request_id, static_cast<std::int32_t>(error_code), value_base64, message);
+    const Error error = g_backend->le_server_respond_read(request_id, static_cast<std::int32_t>(error_code), value, message);
     set_last_error(error, message);
     return to_gm(error);
 }
@@ -4762,10 +4553,10 @@ BluetoothError bluetooth_le_server_notify_value(std::uint64_t characteristic, st
         return to_gm(Error::InvalidArgument);
 
     const std::uint8_t* buffer = static_cast<const std::uint8_t*>(data.data()) + offset;
-    const std::string value_base64 = json::base64_encode(buffer, size);
+    const std::vector<std::uint8_t> value(buffer, buffer + size);
 
     std::string message;
-    const Error error = g_backend->le_server_notify_value(characteristic, central, value_base64, message);
+    const Error error = g_backend->le_server_notify_value(characteristic, central, value, message);
     set_last_error(error, message);
     return to_gm(error);
 }

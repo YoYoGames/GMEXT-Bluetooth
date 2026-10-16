@@ -212,6 +212,45 @@ namespace gmbluetooth
         std::vector<LeAdvertiseManufacturerData> manufacturer_data;
     };
 
+    // A GATT server service as the core hands it to le_server_add_service.
+    // Each attribute carries the id the core minted for it, which the backend
+    // keys the attribute by and reports on its requests; uuid is as GML gave
+    // it, already checked. A 0x2902 descriptor is never listed: the platform
+    // owns the CCCD.
+    struct LeServerDescriptor
+    {
+        std::uint64_t id = 0;
+        std::string uuid;
+    };
+
+    struct LeServerCharacteristic
+    {
+        std::uint64_t id = 0;
+        std::string uuid;
+        std::int32_t properties = 0;
+        std::int32_t permissions = 0;
+        std::vector<std::uint8_t> value; // empty: no initial value
+        std::vector<LeServerDescriptor> descriptors;
+    };
+
+    struct LeServerService
+    {
+        std::uint64_t id = 0;
+        std::string uuid;
+        std::vector<LeServerCharacteristic> characteristics;
+    };
+
+    // The remote central a GATT server event comes from. key names it for as
+    // long as it stays connected, and the core maps it to a server connection
+    // handle; device_id is the id a scan result for the same peer has, and
+    // address is empty where the platform gives none.
+    struct LeServerCentral
+    {
+        std::string key;
+        std::string device_id;
+        std::string address;
+    };
+
     // What an LE call returns besides its error. Discovery fills attributes;
     // a characteristic or descriptor read fills value; an RSSI read fills
     // number with the dBm; the rest leave them empty.
@@ -233,11 +272,32 @@ namespace gmbluetooth
         // k_classic_receive_paused_expiry_check while it stays paused, so the
         // core expires values even when GML never fetches; connection names it.
         ClassicReceivePaused,
-        LeEvent,
+        // The radio's state changed: value is the BluetoothState.
+        StateChanged,
+        // The end of an le_connect: error is Ok when the link is open,
+        // otherwise why it never came up, with message.
+        LeConnectResult,
+        // A link the game did not close went away: error and message say why.
+        LeDisconnected,
+        // A notification or indication on connection: attribute names the
+        // characteristic by its service and characteristic instances, bytes
+        // holds the value.
+        LeValueChanged,
+        // A GATT server central arrived (connected) or left; central names it.
+        LeServerCentral,
+        // A read or write request on a local attribute from central:
+        // attribute.characteristic is the characteristic's id and
+        // attribute.descriptor the descriptor's, 0 for a characteristic
+        // request; request_id, offset, and for a write bytes and
+        // response_needed.
+        LeServerReadRequest,
+        LeServerWriteRequest,
+        // The platform dropped every service the server had (Apple, on a
+        // power-off).
+        LeServerServicesReset,
         // The completion of an LE call that took an op id: op_id names the
         // call, error is Ok or its failure, message says why, and result holds
-        // what it returned. No event_type and no json: the core knows what
-        // the call was from its op id.
+        // what it returned. The core knows what the call was from its op id.
         LeOpCompleted,
         DevicePaired,
         // The answer to permission_request: value is the PermissionStatus.
@@ -265,9 +325,10 @@ namespace gmbluetooth
         // DevicesQueried only.
         std::vector<DiscoveredDevice> devices;
 
-        // ClassicDataAvailable only: one chunk received on connection, copied
-        // off the receive buffer before the push. The backend counts it as
+        // ClassicDataAvailable: one chunk received on connection, copied off
+        // the receive buffer before the push; the backend counts it as
         // outstanding until classic_receive_consumed gives it back.
+        // LeValueChanged and LeServerWriteRequest: the value.
         std::vector<std::uint8_t> bytes;
 
         Error error = Error::Ok;
@@ -275,21 +336,17 @@ namespace gmbluetooth
 
         std::string message;
 
-        // BLE event stream. event_type is the normalized public event name and
-        // json preserves the old extension's proven payload schema. The GATT
-        // server events (bluetooth_le_server_connection_state_changed and the
-        // read and write requests) carry "central", a string naming the remote
-        // central for as long as it stays connected, which the core maps to a
-        // server connection handle; connection_state_changed with connected
-        // false is that central's disconnect. The read and write requests name
-        // their attribute by "characteristic_id" and, for a descriptor,
-        // "descriptor_id": the "id" the core gave it in the service JSON. "address" or Apple's nested
-        // "device" names the device. bluetooth_le_characteristic_value_changed
-        // names its characteristic by "service_instance" and
-        // "characteristic_instance", the LeAttribute instances discovery
-        // reported, with "connection" and the base64 "value".
-        std::string event_type;
-        std::string json;
+        // LeValueChanged and the server requests.
+        LeAttributeRef attribute;
+
+        // LeServerCentral and the server requests.
+        LeServerCentral central;
+        bool connected = false;
+
+        // The server requests.
+        std::int32_t request_id = 0;
+        std::uint32_t offset = 0;
+        bool response_needed = true;
     };
 
     struct CoreHooks
@@ -331,8 +388,8 @@ namespace gmbluetooth
         }
 
         // BluetoothState raw values from spec.gmidl. Backends that can observe
-        // adapter/manager state should override this and emit
-        // bluetooth_state_changed LeEvent events on subsequent transitions.
+        // adapter/manager state should override this and push a StateChanged
+        // event on each later transition.
         virtual std::int32_t current_bluetooth_state() const
         {
             return 0; // BluetoothState.Unknown
@@ -663,14 +720,14 @@ namespace gmbluetooth
             std::uint64_t op_id,
             std::uint64_t connection,
             const LeAttributeRef& characteristic,
-            const std::string& value_base64,
+            const std::vector<std::uint8_t>& value,
             bool with_response,
             std::string& message)
         {
             (void)op_id;
             (void)connection;
             (void)characteristic;
-            (void)value_base64;
+            (void)value;
             (void)with_response;
 
             message = "BLE GATT is not supported by this backend";
@@ -715,13 +772,13 @@ namespace gmbluetooth
             std::uint64_t op_id,
             std::uint64_t connection,
             const LeAttributeRef& descriptor,
-            const std::string& value_base64,
+            const std::vector<std::uint8_t>& value,
             std::string& message)
         {
             (void)op_id;
             (void)connection;
             (void)descriptor;
-            (void)value_base64;
+            (void)value;
 
             message = "BLE GATT is not supported by this backend";
             return Error::NotSupported;
@@ -769,17 +826,13 @@ namespace gmbluetooth
             return false;
         }
 
-        // service_json gives the service, each characteristic and each
-        // descriptor an "id" (a number), which the backend keys the attribute
-        // by and reports on its requests. A 0x2902 descriptor never has one:
-        // the core leaves it out of the JSON.
         virtual Error le_server_add_service(
             std::uint64_t op_id,
-            const std::string& service_json,
+            const LeServerService& service,
             std::string& message)
         {
             (void)op_id;
-            (void)service_json;
+            (void)service;
 
             message = "BLE peripheral/server mode is not supported by this backend";
             return Error::NotSupported;
@@ -794,12 +847,12 @@ namespace gmbluetooth
         virtual Error le_server_respond_read(
             std::int32_t request_id,
             std::int32_t status,
-            const std::string& value_base64,
+            const std::vector<std::uint8_t>& value,
             std::string& message)
         {
             (void)request_id;
             (void)status;
-            (void)value_base64;
+            (void)value;
 
             message = "BLE peripheral/server mode is not supported by this backend";
             return Error::NotSupported;
@@ -821,16 +874,16 @@ namespace gmbluetooth
         // server event named the central by, and NotFound when that central is
         // not subscribed to the characteristic.
         // characteristic_id: the id the core gave the characteristic in its
-        // service JSON; NotFound when no live characteristic has it.
+        // LeServerService; NotFound when no live characteristic has it.
         virtual Error le_server_notify_value(
             std::uint64_t characteristic_id,
             const std::string& central,
-            const std::string& value_base64,
+            const std::vector<std::uint8_t>& value,
             std::string& message)
         {
             (void)characteristic_id;
             (void)central;
-            (void)value_base64;
+            (void)value;
 
             message = "BLE peripheral/server mode is not supported by this backend";
             return Error::NotSupported;

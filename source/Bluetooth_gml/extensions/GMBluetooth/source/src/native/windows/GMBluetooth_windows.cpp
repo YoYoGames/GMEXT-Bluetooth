@@ -1,5 +1,4 @@
 #include "GMBluetooth_backend.h"
-#include "GMBluetooth_json.h"
 #include "GMBluetooth_log.h"
 
 #if defined(_WIN32)
@@ -40,6 +39,7 @@
 #include <optional>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <thread>
 #include <type_traits>
@@ -472,38 +472,6 @@ namespace gmbluetooth
             return bytes;
         }
 
-        std::string json_escape(std::string_view value)
-        {
-            std::string out;
-            out.reserve(value.size() + 8);
-            for (const unsigned char c : value)
-            {
-                switch (c)
-                {
-                    case '\\': out += "\\\\"; break;
-                    case '"': out += "\\\""; break;
-                    case '\b': out += "\\b"; break;
-                    case '\f': out += "\\f"; break;
-                    case '\n': out += "\\n"; break;
-                    case '\r': out += "\\r"; break;
-                    case '\t': out += "\\t"; break;
-                    default:
-                        if (c < 0x20)
-                        {
-                            char escaped[7]{};
-                            std::snprintf(escaped, sizeof(escaped), "\\u%04x", c);
-                            out += escaped;
-                        }
-                        else
-                        {
-                            out.push_back(static_cast<char>(c));
-                        }
-                        break;
-                }
-            }
-            return out;
-        }
-
         // "aa:bb:cc:dd:ee:ff" in the uppercase form every id carries; empty
         // when it is not an address in that shape.
         std::string normalized_address(std::string address)
@@ -533,48 +501,19 @@ namespace gmbluetooth
             return normalized_address(device_id.substr(dash + 1));
         }
 
-        // The central fields every GATT server event carries: the key the core
-        // maps to a server connection, and the device address when known,
-        // with the id a scan result for the same peer has (R1-155).
-        std::string server_central_json(const std::string& central, const std::string& address)
+        // The central a GATT server event carries: the key the core maps to a
+        // server connection, and the device address when known, with the id a
+        // scan result for the same peer has (R1-155).
+        LeServerCentral server_central(const std::string& key, const std::string& address)
         {
-            std::string out = "\"central\":\"" + json_escape(central) + "\"";
+            LeServerCentral central;
+            central.key = key;
             if (!address.empty())
             {
-                out += ",\"address\":\"" + json_escape(address) + "\"";
-                out += ",\"device_id\":\"win:ble:" + json_escape(address) + "\"";
+                central.address = address;
+                central.device_id = "win:ble:" + address;
             }
-            return out;
-        }
-
-        std::string make_server_request_json(
-            std::int32_t request_id,
-            const std::string& central,
-            const std::string& address,
-            std::uint64_t characteristic_id,
-            std::uint64_t descriptor_id,
-            std::uint32_t offset,
-            const std::vector<std::uint8_t>* value,
-            bool response_needed = true)
-        {
-            std::string out = "{\"request_id\":" + std::to_string(request_id) +
-                "," + server_central_json(central, address) +
-                ",\"characteristic_id\":" + std::to_string(characteristic_id);
-            if (descriptor_id != 0)
-                out += ",\"descriptor_id\":" + std::to_string(descriptor_id);
-            out += ",\"offset\":" + std::to_string(offset);
-
-            // A write request always says whether it waits for an answer.
-            if (value)
-            {
-                out += ",\"value\":\"";
-                out += json::base64_encode(value->data(), value->size());
-                out += "\"";
-                out += std::string(",\"response_needed\":") + (response_needed ? "true" : "false");
-            }
-
-            out += "}";
-            return out;
+            return central;
         }
 
         // BluetoothLeAttributePermission onto Windows protection levels. READ
@@ -2057,17 +1996,12 @@ namespace gmbluetooth
 
     void push_le_client_event(
         const std::shared_ptr<SharedLeClientState>& shared,
-        std::string event_type,
-        std::string json)
+        BackendEvent event)
     {
         if (!shared || !shared->alive->load() || !shared->hooks.push_event)
             return;
 
-        BackendEvent event;
-        event.type = BackendEventType::LeEvent;
         event.transport = Transport::LowEnergy;
-        event.event_type = std::move(event_type);
-        event.json = std::move(json);
         shared->hooks.push_event(std::move(event));
     }
 
@@ -2102,22 +2036,19 @@ namespace gmbluetooth
         push_le_op_completion(shared, op_id, outcome.error, std::move(outcome.message));
     }
 
-    // A failed bluetooth_le_peripheral_open. error_code keeps the old
-    // status (133 for a peer that did not answer); error and message are
-    // what the core reports.
-    std::string le_error_json(
-        std::int32_t error_code,
+    // The end of an le_connect: Ok, or why the link never came up.
+    void push_le_connect_result(
+        const std::shared_ptr<SharedLeClientState>& shared,
         std::uint64_t connection,
         Error error,
-        const std::string& message)
+        std::string message)
     {
-        std::string out = "{";
-        if (connection != 0)
-            out += "\"connection\":" + std::to_string(connection) + ",";
-        out += "\"error_code\":" + std::to_string(error_code) +
-            ",\"error\":" + std::to_string(static_cast<std::int32_t>(error)) +
-            ",\"message\":\"" + json_escape(message) + "\"}";
-        return out;
+        BackendEvent event;
+        event.type = BackendEventType::LeConnectResult;
+        event.connection = connection;
+        event.error = error;
+        event.message = std::move(message);
+        push_le_client_event(shared, std::move(event));
     }
 
     constexpr const char* k_le_open_cancelled = "Connection cancelled by bluetooth_le_disconnect";
@@ -2405,15 +2336,12 @@ namespace gmbluetooth
         current->peer_dropped.store(true);
 
         unregister_le_client_connection(shared, current->handle);
-        push_le_client_event(
-            shared,
-            "bluetooth_le_peripheral_connection_state_changed",
-            "{\"connection\":" +
-                std::to_string(current->handle) +
-                ",\"is_connected\":false" +
-                ",\"error\":" +
-                std::to_string(static_cast<std::int32_t>(Error::Disconnected)) +
-                ",\"message\":\"The Bluetooth LE device disconnected\"}");
+        BackendEvent event;
+        event.type = BackendEventType::LeDisconnected;
+        event.connection = current->handle;
+        event.error = Error::Disconnected;
+        event.message = "The Bluetooth LE device disconnected";
+        push_le_client_event(shared, std::move(event));
 
         // Its queued ops are dropped now; the device is closed off this
         // handler, on the backend worker.
@@ -2432,15 +2360,12 @@ namespace gmbluetooth
         std::optional<WDB::BluetoothAddressType> address_type)
     {
         // What it opened is closed and the core told why.
-        const auto fail_open = [&shared, &state](std::int32_t error_code, Error failure, const std::string& why)
+        const auto fail_open = [&shared, &state](Error failure, const std::string& why)
         {
             state->closing.store(true);
             close_le_client_connection_noexcept(state);
             unregister_le_client_connection(shared, state->handle);
-            push_le_client_event(
-                shared,
-                "bluetooth_le_peripheral_open",
-                le_error_json(error_code, state->handle, failure, why));
+            push_le_connect_result(shared, state->handle, failure, why);
         };
 
         const auto cancelled_message = [&state]()
@@ -2460,7 +2385,7 @@ namespace gmbluetooth
 
             if (!remote)
             {
-                fail_open(1, Error::ConnectionFailed, "Windows found no Bluetooth LE device at this address");
+                fail_open(Error::ConnectionFailed, "Windows found no Bluetooth LE device at this address");
                 return;
             }
 
@@ -2499,10 +2424,7 @@ namespace gmbluetooth
                 catch (...)
                 {
                 }
-                push_le_client_event(
-                    shared,
-                    "bluetooth_le_peripheral_open",
-                    le_error_json(1, state->handle, Error::ConnectionFailed, cancelled_message()));
+                push_le_connect_result(shared, state->handle, Error::ConnectionFailed, cancelled_message());
                 return;
             }
 
@@ -2542,7 +2464,7 @@ namespace gmbluetooth
             if (services_query.wait_for(std::chrono::seconds(15)) == winrt::Windows::Foundation::AsyncStatus::Started)
             {
                 services_query.Cancel();
-                fail_open(133, Error::Timeout, "The Bluetooth LE device did not answer within 15 seconds");
+                fail_open(Error::Timeout, "The Bluetooth LE device did not answer within 15 seconds");
                 return;
             }
             const auto services_result = services_query.GetResults();
@@ -2565,7 +2487,7 @@ namespace gmbluetooth
                     outcome.error = Error::ConnectionFailed;
                 }
 
-                fail_open(unreachable ? 133 : 1, outcome.error, outcome.message);
+                fail_open(outcome.error, outcome.message);
                 return;
             }
 
@@ -2609,26 +2531,19 @@ namespace gmbluetooth
                     {
                     }
                 }
-                push_le_client_event(
-                    shared,
-                    "bluetooth_le_peripheral_open",
-                    le_error_json(1, state->handle, Error::ConnectionFailed, cancelled_message()));
+                push_le_connect_result(shared, state->handle, Error::ConnectionFailed, cancelled_message());
                 return;
             }
 
-            push_le_client_event(
-                shared,
-                "bluetooth_le_peripheral_open",
-                "{\"connection\":" +
-                    std::to_string(state->handle) + "}");
+            push_le_connect_result(shared, state->handle, Error::Ok, std::string());
         }
         catch (const winrt::hresult_error& error)
         {
-            fail_open(1, Error::ConnectionFailed, gatt_exception_outcome(error).message);
+            fail_open(Error::ConnectionFailed, gatt_exception_outcome(error).message);
         }
         catch (...)
         {
-            fail_open(1, Error::ConnectionFailed, "Opening the Bluetooth LE device failed with an unexpected exception");
+            fail_open(Error::ConnectionFailed, "Opening the Bluetooth LE device failed with an unexpected exception");
         }
     }
 
@@ -2828,10 +2743,9 @@ namespace gmbluetooth
     void push_bluetooth_state(const std::shared_ptr<SharedLeState>& le)
     {
         BackendEvent event;
-        event.type = BackendEventType::LeEvent;
+        event.type = BackendEventType::StateChanged;
         event.transport = Transport::Unknown;
-        event.event_type = "bluetooth_state_changed";
-        event.json = "{\"state\":" + std::to_string(le->bluetooth_state.load()) + "}";
+        event.value = le->bluetooth_state.load();
         push_le_event(le, std::move(event));
     }
 
@@ -3224,11 +3138,10 @@ namespace gmbluetooth
             return;
 
         BackendEvent event;
-        event.type = BackendEventType::LeEvent;
+        event.type = BackendEventType::LeServerCentral;
         event.transport = Transport::LowEnergy;
-        event.event_type = "bluetooth_le_server_connection_state_changed";
-        event.json = std::string("{\"connected\":") + (connected ? "true" : "false") + "," +
-            server_central_json(central, address) + "}";
+        event.central = server_central(central, address);
+        event.connected = connected;
         push_le_event(le, std::move(event));
     }
 
@@ -3473,19 +3386,13 @@ namespace gmbluetooth
             const std::string central = note_server_session(le, args.Session(), central_address, central_is_new);
 
             BackendEvent event;
-            event.type = BackendEventType::LeEvent;
+            event.type = BackendEventType::LeServerReadRequest;
             event.transport = Transport::LowEnergy;
-            event.event_type = descriptor_id == 0
-                ? "bluetooth_le_server_characteristic_read_request"
-                : "bluetooth_le_server_descriptor_read_request";
-            event.json = make_server_request_json(
-                request_id,
-                central,
-                central_address,
-                characteristic_id,
-                descriptor_id,
-                request.Offset(),
-                nullptr);
+            event.request_id = request_id;
+            event.central = server_central(central, central_address);
+            event.attribute.characteristic = characteristic_id;
+            event.attribute.descriptor = descriptor_id;
+            event.offset = request.Offset();
             push_le_event(le, std::move(event));
         }
         catch (...)
@@ -3518,7 +3425,7 @@ namespace gmbluetooth
                 return;
             }
 
-            const std::vector<std::uint8_t> value = buffer_to_bytes(request.Value());
+            std::vector<std::uint8_t> value = buffer_to_bytes(request.Value());
             const bool with_response = request.Option() == WDBG::GattWriteOption::WriteWithResponse;
             const std::int32_t request_id = le->next_gatt_request_id.fetch_add(1);
             // A write without response needs no answer: it is completed now and
@@ -3539,20 +3446,15 @@ namespace gmbluetooth
             const std::string central = note_server_session(le, args.Session(), central_address, central_is_new);
 
             BackendEvent event;
-            event.type = BackendEventType::LeEvent;
+            event.type = BackendEventType::LeServerWriteRequest;
             event.transport = Transport::LowEnergy;
-            event.event_type = descriptor_id == 0
-                ? "bluetooth_le_server_characteristic_write_request"
-                : "bluetooth_le_server_descriptor_write_request";
-            event.json = make_server_request_json(
-                request_id,
-                central,
-                central_address,
-                characteristic_id,
-                descriptor_id,
-                request.Offset(),
-                &value,
-                with_response);
+            event.request_id = request_id;
+            event.central = server_central(central, central_address);
+            event.attribute.characteristic = characteristic_id;
+            event.attribute.descriptor = descriptor_id;
+            event.offset = request.Offset();
+            event.bytes = std::move(value);
+            event.response_needed = with_response;
             push_le_event(le, std::move(event));
         }
         catch (...)
@@ -3614,25 +3516,11 @@ namespace gmbluetooth
         service.provider = nullptr;
     }
 
-    // The "id" the core gave a service JSON entry; 0 when it has none.
-    std::uint64_t local_attribute_id(const json::Value& entry)
-    {
-        const auto* id_field = entry.find("id");
-        return id_field ? id_field->as_uint64(0) : 0;
-    }
-
     // Everything le_server_add_service can refuse, checked on the game
     // thread before any WinRT call.
-    Error parse_local_service(const std::string& service_json, LocalServiceDefinition& out, std::string& message)
+    Error to_local_service(const LeServerService& service, LocalServiceDefinition& out, std::string& message)
     {
-        const auto root = json::parse(service_json);
-        if (!root || !root->is_object())
-        {
-            message = "Invalid BLE service definition";
-            return Error::InvalidArgument;
-        }
-
-        out.id = local_attribute_id(*root);
+        out.id = service.id;
         if (out.id == 0)
         {
             message = "BLE service definition has no valid id";
@@ -3640,106 +3528,71 @@ namespace gmbluetooth
         }
         std::unordered_set<std::uint64_t> ids{out.id};
 
-        const auto* uuid_field = root->find("uuid");
-        if (!uuid_field || !uuid_field->is_string() || uuid_field->string_value.empty())
+        if (service.uuid.empty())
         {
             message = "BLE service UUID is required";
             return Error::InvalidArgument;
         }
 
-        if (!parse_winrt_guid(uuid_field->string_value, out.guid))
+        if (!parse_winrt_guid(service.uuid, out.guid))
         {
             message = "Invalid BLE service UUID";
             return Error::InvalidArgument;
         }
-        out.uuid = normalize_uuid(uuid_field->string_value);
+        out.uuid = normalize_uuid(service.uuid);
 
-        const auto* characteristics = root->find("characteristics");
-        if (!characteristics || !characteristics->is_array())
-            return Error::Ok;
-
-        for (const auto& characteristic_value : characteristics->array_value)
+        for (const auto& source : service.characteristics)
         {
-            if (!characteristic_value.is_object())
-                continue;
-
-            const auto* permissions_field = characteristic_value.find("permissions");
-            const std::int32_t permissions = permissions_field ? permissions_field->as_int(0) : 0;
             // Windows has no protection level for a signed write.
-            if ((permissions & (kPermissionWriteSigned | kPermissionWriteSignedMitm)) != 0)
+            if ((source.permissions & (kPermissionWriteSigned | kPermissionWriteSignedMitm)) != 0)
             {
                 message = "Windows has no signed-write permission: "
                     "BluetoothLeAttributePermission.WriteSigned and WriteSignedMitm are not supported";
                 return Error::NotSupported;
             }
 
-            const auto* char_uuid_field = characteristic_value.find("uuid");
-            if (!char_uuid_field || !char_uuid_field->is_string())
-                continue;
-
             LocalCharacteristicDefinition characteristic;
-            if (!parse_winrt_guid(char_uuid_field->string_value, characteristic.guid))
+            if (!parse_winrt_guid(source.uuid, characteristic.guid))
             {
                 message = "Invalid BLE characteristic UUID";
                 return Error::InvalidArgument;
             }
-            characteristic.uuid = normalize_uuid(char_uuid_field->string_value);
+            characteristic.uuid = normalize_uuid(source.uuid);
 
-            characteristic.id = local_attribute_id(characteristic_value);
+            characteristic.id = source.id;
             if (characteristic.id == 0 || !ids.insert(characteristic.id).second)
             {
                 message = "BLE characteristic " + characteristic.uuid + " has no valid id";
                 return Error::InvalidArgument;
             }
 
-            const auto* properties_field = characteristic_value.find("properties");
-            characteristic.properties = properties_field ? properties_field->as_int(0) : 0;
-            characteristic.permissions = permissions;
+            characteristic.properties = source.properties;
+            characteristic.permissions = source.permissions;
+            characteristic.value = source.value;
 
-            if (const auto* initial_value = characteristic_value.find("value");
-                initial_value && initial_value->is_string() && !initial_value->string_value.empty())
+            for (const auto& source_descriptor : source.descriptors)
             {
-                auto decoded = json::base64_decode(initial_value->string_value);
-                if (!decoded)
+                LocalDescriptorDefinition descriptor;
+                if (!parse_winrt_guid(source_descriptor.uuid, descriptor.guid))
                 {
-                    message = "Invalid BLE characteristic value: expected standard base64";
+                    message = "Invalid BLE descriptor UUID";
                     return Error::InvalidArgument;
                 }
-                characteristic.value = std::move(*decoded);
-            }
+                descriptor.uuid = normalize_uuid(source_descriptor.uuid);
 
-            if (const auto* descriptors = characteristic_value.find("descriptors"); descriptors && descriptors->is_array())
-            {
-                for (const auto& descriptor_value : descriptors->array_value)
+                // Windows creates the Client Characteristic Configuration
+                // descriptor automatically for Notify/Indicate characteristics.
+                if (descriptor.uuid == "00002902-0000-1000-8000-00805f9b34fb")
+                    continue;
+
+                descriptor.id = source_descriptor.id;
+                if (descriptor.id == 0 || !ids.insert(descriptor.id).second)
                 {
-                    if (!descriptor_value.is_object())
-                        continue;
-                    const auto* descriptor_uuid_field = descriptor_value.find("uuid");
-                    if (!descriptor_uuid_field || !descriptor_uuid_field->is_string())
-                        continue;
-
-                    LocalDescriptorDefinition descriptor;
-                    if (!parse_winrt_guid(descriptor_uuid_field->string_value, descriptor.guid))
-                    {
-                        message = "Invalid BLE descriptor UUID";
-                        return Error::InvalidArgument;
-                    }
-                    descriptor.uuid = normalize_uuid(descriptor_uuid_field->string_value);
-
-                    // Windows creates the Client Characteristic Configuration
-                    // descriptor automatically for Notify/Indicate characteristics.
-                    if (descriptor.uuid == "00002902-0000-1000-8000-00805f9b34fb")
-                        continue;
-
-                    descriptor.id = local_attribute_id(descriptor_value);
-                    if (descriptor.id == 0 || !ids.insert(descriptor.id).second)
-                    {
-                        message = "BLE descriptor " + descriptor.uuid + " has no valid id";
-                        return Error::InvalidArgument;
-                    }
-
-                    characteristic.descriptors.push_back(std::move(descriptor));
+                    message = "BLE descriptor " + descriptor.uuid + " has no valid id";
+                    return Error::InvalidArgument;
                 }
+
+                characteristic.descriptors.push_back(std::move(descriptor));
             }
 
             out.characteristics.push_back(std::move(characteristic));
@@ -5037,7 +4890,7 @@ namespace gmbluetooth
             std::uint64_t op_id,
             std::uint64_t connection,
             const LeAttributeRef& attribute,
-            const std::string& value_base64,
+            const std::vector<std::uint8_t>& value,
             bool with_response,
             std::string& message) override
         {
@@ -5054,14 +4907,7 @@ namespace gmbluetooth
                 return Error::InvalidHandle;
             }
 
-            auto decoded = json::base64_decode(value_base64);
-            if (!decoded)
-            {
-                message = "The value to write is not valid base64";
-                return Error::OperationFailed;
-            }
-
-            const auto payload = std::move(*decoded);
+            const auto payload = value;
             const auto shared = le_client_;
             return post_le_op(state, op_id, message, [shared, op_id, state, characteristic, payload, with_response]()
             {
@@ -5173,27 +5019,13 @@ namespace gmbluetooth
                                 !shared->alive->load())
                                 return;
 
-                            const auto bytes =
-                                buffer_to_bytes(
-                                    args.CharacteristicValue());
-
-                            push_le_client_event(
-                                shared,
-                                "bluetooth_le_characteristic_value_changed",
-                                "{\"connection\":" +
-                                    std::to_string(
-                                        current->handle) +
-                                    ",\"service_instance\":" +
-                                    std::to_string(
-                                        service_instance) +
-                                    ",\"characteristic_instance\":" +
-                                    std::to_string(
-                                        characteristic_instance) +
-                                    ",\"value\":\"" +
-                                    json::base64_encode(
-                                        bytes.data(),
-                                        bytes.size()) +
-                                    "\"}");
+                            BackendEvent event;
+                            event.type = BackendEventType::LeValueChanged;
+                            event.connection = current->handle;
+                            event.attribute.service = service_instance;
+                            event.attribute.characteristic = characteristic_instance;
+                            event.bytes = buffer_to_bytes(args.CharacteristicValue());
+                            push_le_client_event(shared, std::move(event));
                         });
 
                     // Stored under the mutex close takes; a close that came
@@ -5323,7 +5155,7 @@ namespace gmbluetooth
             std::uint64_t op_id,
             std::uint64_t connection,
             const LeAttributeRef& attribute,
-            const std::string& value_base64,
+            const std::vector<std::uint8_t>& value,
             std::string& message) override
         {
             auto state = find_le_client_connection(le_client_, connection);
@@ -5339,14 +5171,7 @@ namespace gmbluetooth
                 return Error::InvalidHandle;
             }
 
-            auto decoded = json::base64_decode(value_base64);
-            if (!decoded)
-            {
-                message = "The value to write is not valid base64";
-                return Error::OperationFailed;
-            }
-
-            const auto payload = std::move(*decoded);
+            const auto payload = value;
             const auto shared = le_client_;
             return post_le_op(state, op_id, message, [shared, op_id, state, descriptor, payload]()
             {
@@ -5708,7 +5533,7 @@ namespace gmbluetooth
             return le_server_open_.load();
         }
 
-        Error le_server_add_service(std::uint64_t op_id, const std::string& service_json, std::string& message) override
+        Error le_server_add_service(std::uint64_t op_id, const LeServerService& service, std::string& message) override
         {
             if (!le_server_open_.load())
             {
@@ -5717,7 +5542,7 @@ namespace gmbluetooth
             }
 
             LocalServiceDefinition definition;
-            const Error parsed = parse_local_service(service_json, definition, message);
+            const Error parsed = to_local_service(service, definition, message);
             if (parsed != Error::Ok)
                 return parsed;
 
@@ -5767,7 +5592,7 @@ namespace gmbluetooth
         Error le_server_respond_read(
             std::int32_t request_id,
             std::int32_t status,
-            const std::string& value_base64,
+            const std::vector<std::uint8_t>& value,
             std::string& message) override
         {
             PendingGattRead pending;
@@ -5787,32 +5612,16 @@ namespace gmbluetooth
             {
                 // status is a BluetoothAttError the core validated: the ATT
                 // code itself. The value is read only for a success.
-                std::optional<std::vector<std::uint8_t>> value;
-                if (status == 0)
-                    value = json::base64_decode(value_base64);
-
                 GMBT_TRACE(
                     "Responding to GATT read: request_id=%d status=%d request_state=%d request_offset=%u bytes=%zu",
                     request_id,
                     status,
                     static_cast<int>(pending.request.State()),
                     pending.request.Offset(),
-                    value ? value->size() : std::size_t{0});
-
-                // A value that will not decode still answers the central,
-                // so it never waits out the ATT timeout.
-                if (status == 0 && !value)
-                {
-                    constexpr std::uint8_t unlikely_error = 0x0E;
-                    pending.request.RespondWithProtocolError(unlikely_error);
-                    if (pending.deferral)
-                        pending.deferral.Complete();
-                    message = "The read response value is not valid base64; the central was answered with ATT error 0x0E";
-                    return Error::OperationFailed;
-                }
+                    status == 0 ? value.size() : std::size_t{0});
 
                 if (status == 0)
-                    pending.request.RespondWithValue(bytes_to_buffer(*value));
+                    pending.request.RespondWithValue(bytes_to_buffer(value));
                 else
                     pending.request.RespondWithProtocolError(static_cast<std::uint8_t>(status));
 
@@ -5909,7 +5718,7 @@ namespace gmbluetooth
         Error le_server_notify_value(
             std::uint64_t characteristic_id,
             const std::string& central,
-            const std::string& value_base64,
+            const std::vector<std::uint8_t>& value,
             std::string& message) override
         {
             WDBG::GattLocalCharacteristic characteristic{nullptr};
@@ -5961,13 +5770,6 @@ namespace gmbluetooth
                 }
             }
 
-            auto decoded = json::base64_decode(value_base64);
-            if (!decoded)
-            {
-                message = "The notification value is not valid base64";
-                return Error::OperationFailed;
-            }
-
             const auto notifies = notify_queue_;
             bool start = false;
             {
@@ -5981,7 +5783,7 @@ namespace gmbluetooth
                 PendingNotify pending;
                 pending.characteristic = characteristic;
                 pending.client = client;
-                pending.bytes = std::move(*decoded);
+                pending.bytes = value;
                 notifies->queue.push_back(std::move(pending));
 
                 start = !notifies->in_flight;
