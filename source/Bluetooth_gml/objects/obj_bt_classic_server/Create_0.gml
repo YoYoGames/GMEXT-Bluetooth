@@ -39,6 +39,8 @@ start_classic_server_demo = function()
 
             var _error = bluetooth_permission_request(function(_error_code, _message, _status)
             {
+                global.bt_permission_status = _status;
+
                 show_debug_message(
                     "[GML] permission request: " + string(_error_code)
                     + " " + _message
@@ -86,6 +88,37 @@ start_classic_server_demo = function()
         );
     }
 };
+
+// Draw only draws: Step calls this every frame to take what Draw shows.
+refresh_status = function()
+{
+    status_running = bt_ready && bluetooth_classic_server_is_running();
+    status_discoverable = bt_ready && bluetooth_classic_discoverable_is_running();
+    status_connected = false;
+    status_device_name = "-";
+    status_device_address = "-";
+
+    var _conn = global.classic_conn;
+
+    if (_conn == 0 || !bluetooth_classic_connection_is_valid(_conn)) return;
+
+    status_connected = bluetooth_classic_connection_is_connected(_conn);
+
+    if (!status_connected) return;
+
+    var _device = bluetooth_classic_connection_get_device(_conn);
+
+    if (!bluetooth_device_is_valid(_device)) return;
+
+    status_device_name = bluetooth_device_get_name(_device);
+
+    if (bluetooth_device_has_address(_device))
+    {
+        status_device_address = bluetooth_device_get_address(_device);
+    }
+};
+
+refresh_status();
 
 if (!bt_ready)
 {

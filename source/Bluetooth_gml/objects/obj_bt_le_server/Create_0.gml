@@ -128,6 +128,8 @@ start_le_server_demo = function()
 
             var _error = bluetooth_permission_request(function(_error_code, _message, _status)
             {
+                global.bt_permission_status = _status;
+
                 show_debug_message(
                     "[GML] permission request: " + string(_error_code)
                     + " " + _message
@@ -229,6 +231,15 @@ start_le_server_demo = function()
         );
     }
 };
+
+// Draw only draws: Step calls this every frame to take what Draw shows.
+refresh_status = function()
+{
+    status_server_running = bt_ready && bluetooth_le_server_is_running();
+    status_advertising = bt_ready && bluetooth_le_advertise_is_running();
+};
+
+refresh_status();
 
 if (!bt_ready)
 {

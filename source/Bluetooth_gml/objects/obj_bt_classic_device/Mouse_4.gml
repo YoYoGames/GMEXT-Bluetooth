@@ -1,8 +1,6 @@
 if (locked) exit;
 if (!instance_exists(owner)) exit;
 
-show_debug_message("Connecting");
-
 var _stop = bluetooth_classic_scan_stop();
 
 if (_stop != BluetoothError.Ok)

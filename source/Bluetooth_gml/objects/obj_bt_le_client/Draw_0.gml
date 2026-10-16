@@ -9,11 +9,10 @@ var _line = 17;
 // Permission
 // -----------------------------------------------------------------------------
 
-var _permission = bluetooth_permission_get_status();
-
+// Step takes the scan and connection state (refresh_status); Draw only draws.
 var _permission_text = "Unknown";
 
-switch (_permission)
+switch (global.bt_permission_status)
 {
     case BluetoothPermissionStatus.Granted:
         _permission_text = "Granted";
@@ -29,12 +28,7 @@ switch (_permission)
 // Scan state
 // -----------------------------------------------------------------------------
 
-var _scan_running = false;
-
-if (bt_ready)
-{
-    _scan_running = bluetooth_le_scan_is_running();
-}
+var _scan_running = status_scanning;
 
 
 // -----------------------------------------------------------------------------
@@ -43,35 +37,11 @@ if (bt_ready)
 
 var _conn = global.ble_conn;
 
-var _connected = false;
-var _device_name = "-";
-var _device_address = "-";
-var _device_id = "-";
-var _rssi = "-";
-
-if (_conn != 0 && bluetooth_le_connection_is_valid(_conn))
-{
-    _connected = bluetooth_le_connection_is_connected(_conn);
-
-    var _device = bluetooth_le_connection_get_device(_conn);
-
-    if (bluetooth_device_is_valid(_device))
-    {
-        _device_name = bluetooth_device_get_name(_device);
-        _device_id = bluetooth_device_get_id(_device);
-
-        if (bluetooth_device_has_address(_device))
-        {
-            _device_address = bluetooth_device_get_address(_device);
-        }
-
-        if (bluetooth_device_has_rssi(_device))
-        {
-            _rssi = string(bluetooth_device_get_rssi(_device)) + " dBm";
-        }
-    }
-
-}
+var _connected = status_connected;
+var _device_name = status_device_name;
+var _device_address = status_device_address;
+var _device_id = status_device_id;
+var _rssi = status_rssi;
 
 
 // -----------------------------------------------------------------------------

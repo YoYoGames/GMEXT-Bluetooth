@@ -10,11 +10,10 @@ var _line = 17;
 // Permission
 // -----------------------------------------------------------------------------
 
-var _permission = bluetooth_permission_get_status();
-
+// Step takes the scan and connection state (refresh_status); Draw only draws.
 var _permission_text = "Unknown";
 
-switch (_permission)
+switch (global.bt_permission_status)
 {
     case BluetoothPermissionStatus.Granted:
         _permission_text = "Granted";
@@ -25,63 +24,14 @@ switch (_permission)
         break;
 }
 
-
-// -----------------------------------------------------------------------------
-// Scan state
-// -----------------------------------------------------------------------------
-
-var _scanning = false;
-
-if (bt_ready)
-{
-    _scanning = bluetooth_classic_scan_is_running();
-}
-
-
-// -----------------------------------------------------------------------------
-// Connection state
-// -----------------------------------------------------------------------------
-
 var _conn = global.classic_conn;
-
-var _valid = false;
-var _connected = false;
-
-var _name = "-";
-var _address = "-";
-var _paired = false;
-var _pairing_supported = false;
-
-if (_conn != 0)
-{
-    _valid = bluetooth_classic_connection_is_valid(_conn);
-
-    if (_valid)
-    {
-        _connected =
-            bluetooth_classic_connection_is_connected(_conn);
-
-        var _device =
-            bluetooth_classic_connection_get_device(_conn);
-
-        if (bluetooth_device_is_valid(_device))
-        {
-            _name = bluetooth_device_get_name(_device);
-
-            if (bluetooth_device_has_address(_device))
-            {
-                _address =
-                    bluetooth_device_get_address(_device);
-            }
-
-            _pairing_supported =
-                bluetooth_pairing_is_supported(_device);
-
-            _paired =
-                bluetooth_device_is_paired(_device);
-        }
-    }
-}
+var _scanning = status_scanning;
+var _valid = status_valid;
+var _connected = status_connected;
+var _name = status_device_name;
+var _address = status_device_address;
+var _paired = status_paired;
+var _pairing_supported = status_pairing_supported;
 
 
 // -----------------------------------------------------------------------------

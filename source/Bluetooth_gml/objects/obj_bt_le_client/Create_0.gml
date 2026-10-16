@@ -45,6 +45,8 @@ bluetooth_request_permissions = function()
 
     var _error = bluetooth_permission_request(function(_error_code, _message, _status)
     {
+        global.bt_permission_status = _status;
+
         show_debug_message(
             $"[GML] permission request: {_error_code} {_message}, status: {_status}"
         );
@@ -180,6 +182,42 @@ connect_device = function(_device)
         );
     }
 };
+
+// Draw only draws: Step calls this every frame to take what Draw shows.
+refresh_status = function()
+{
+    status_scanning = bt_ready && bluetooth_le_scan_is_running();
+    status_connected = false;
+    status_device_name = "-";
+    status_device_address = "-";
+    status_device_id = "-";
+    status_rssi = "-";
+
+    var _conn = global.ble_conn;
+
+    if (_conn == 0 || !bluetooth_le_connection_is_valid(_conn)) return;
+
+    status_connected = bluetooth_le_connection_is_connected(_conn);
+
+    var _device = bluetooth_le_connection_get_device(_conn);
+
+    if (!bluetooth_device_is_valid(_device)) return;
+
+    status_device_name = bluetooth_device_get_name(_device);
+    status_device_id = bluetooth_device_get_id(_device);
+
+    if (bluetooth_device_has_address(_device))
+    {
+        status_device_address = bluetooth_device_get_address(_device);
+    }
+
+    if (bluetooth_device_has_rssi(_device))
+    {
+        status_rssi = string(bluetooth_device_get_rssi(_device)) + " dBm";
+    }
+};
+
+refresh_status();
 
 if (!bt_ready)
 {

@@ -7,6 +7,4 @@ if (!bluetooth_pairing_is_supported(device))
     exit;
 }
 
-show_debug_message("Pairing");
-
 owner.pair_device(device, false);

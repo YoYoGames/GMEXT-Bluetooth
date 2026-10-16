@@ -5,10 +5,10 @@ var _y = 400;
 var _line = 17;
 
 
-// State
-var _permission = bluetooth_permission_get_status();
-var _server_running = bt_ready && bluetooth_le_server_is_running();
-var _advertising = bt_ready && bluetooth_le_advertise_is_running();
+// State: Step takes it (refresh_status); Draw only draws.
+var _permission = global.bt_permission_status;
+var _server_running = status_server_running;
+var _advertising = status_advertising;
 
 
 // Permission text

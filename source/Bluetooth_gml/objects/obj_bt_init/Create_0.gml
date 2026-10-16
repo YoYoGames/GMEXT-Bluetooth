@@ -52,6 +52,25 @@ global.bt_capabilities = {
     classic_server: false
 };
 
+// Draw only draws: Step calls this every frame to take what Draw shows.
+refresh_status = function()
+{
+    status_initialized = bluetooth_is_initialized();
+    status_error_code = 0;
+    status_error_message = "";
+
+    if (status_initialized)
+    {
+        status_error_code = bluetooth_last_error_code();
+        status_error_message = bluetooth_last_error_message();
+    }
+};
+
+// Step polls the permission once a second; see Step.
+permission_poll_frames = game_get_speed(gamespeed_fps);
+
+refresh_status();
+
 if (!bt_ready)
 {
     show_debug_message(
@@ -104,6 +123,8 @@ if (global.bt_permission_status != BluetoothPermissionStatus.Granted)
     show_debug_message("[GML] Requesting Bluetooth permission...");
     var _error = bluetooth_permission_request(function(_error_code, _message, _status)
     {
+        global.bt_permission_status = _status;
+
         show_debug_message(
             "[GML] Bluetooth permission request: "
             + string(_error_code)

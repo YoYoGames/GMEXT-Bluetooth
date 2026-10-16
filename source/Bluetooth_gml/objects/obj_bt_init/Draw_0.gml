@@ -8,23 +8,7 @@ var _line = 17;
 // -----------------------------------------------------------------------------
 // General Bluetooth state only.
 // Feature-specific state belongs to the BLE/Classic client/server objects.
-// -----------------------------------------------------------------------------
-
-var _initialized = bluetooth_is_initialized();
-var _permission = BluetoothPermissionStatus.Unknown;
-var _error_code = 0;
-var _error_message = "";
-
-if (_initialized)
-{
-    _permission = bluetooth_permission_get_status();
-    global.bt_permission_status = _permission;
-
-    _error_code = bluetooth_last_error_code();
-    _error_message = bluetooth_last_error_message();
-}
-
-
+// Step takes the state (refresh_status); Draw only draws it.
 // -----------------------------------------------------------------------------
 // Draw
 // -----------------------------------------------------------------------------
@@ -38,10 +22,10 @@ draw_set_valign(fa_top);
 draw_text(_x, _y, "BLUETOOTH");
 _y += _line * 2;
 
-draw_text(_x, _y, "Initialized: " + bt_yes_no(_initialized));
+draw_text(_x, _y, "Initialized: " + bt_yes_no(status_initialized));
 _y += _line;
 
-draw_text(_x, _y, "Permission: " + bt_permission_name(_permission));
+draw_text(_x, _y, "Permission: " + bt_permission_name(global.bt_permission_status));
 _y += _line;
 
 draw_text(
@@ -84,7 +68,7 @@ draw_text(
 _y += _line * 2;
 
 
-draw_text(_x, _y, "Last Error Code: " + string(_error_code));
+draw_text(_x, _y, "Last Error Code: " + string(status_error_code));
 _y += _line;
 
-draw_text(_x, _y, "Last Error: " + _error_message);
+draw_text(_x, _y, "Last Error: " + status_error_message);

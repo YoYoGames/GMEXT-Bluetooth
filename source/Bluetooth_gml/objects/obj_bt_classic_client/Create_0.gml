@@ -47,10 +47,43 @@ bluetooth_print_device = function(_device)
         ? bluetooth_device_get_address(_device)
         : "<no address>";
 
-    show_debug_message("----------------------------------------");
-    show_debug_message($"Handle:  {_device}");
-    show_debug_message($"Name:    {_name}");
-    show_debug_message($"Address: {_addr}");
+    show_debug_message($"[GML] classic device found: handle={_device} name={_name} address={_addr}");
+};
+
+// Draw only draws: Step calls this every frame to take what Draw shows.
+refresh_status = function()
+{
+    status_scanning = bt_ready && bluetooth_classic_scan_is_running();
+    status_valid = false;
+    status_connected = false;
+    status_device_name = "-";
+    status_device_address = "-";
+    status_pairing_supported = false;
+    status_paired = false;
+
+    var _conn = global.classic_conn;
+
+    if (_conn == 0) return;
+
+    status_valid = bluetooth_classic_connection_is_valid(_conn);
+
+    if (!status_valid) return;
+
+    status_connected = bluetooth_classic_connection_is_connected(_conn);
+
+    var _device = bluetooth_classic_connection_get_device(_conn);
+
+    if (!bluetooth_device_is_valid(_device)) return;
+
+    status_device_name = bluetooth_device_get_name(_device);
+
+    if (bluetooth_device_has_address(_device))
+    {
+        status_device_address = bluetooth_device_get_address(_device);
+    }
+
+    status_pairing_supported = bluetooth_pairing_is_supported(_device);
+    status_paired = bluetooth_device_is_paired(_device);
 };
 
 bluetooth_request_permissions = function()
@@ -60,6 +93,8 @@ bluetooth_request_permissions = function()
 
     var _error = bluetooth_permission_request(function(_error_code, _message, _status)
     {
+        global.bt_permission_status = _status;
+
         show_debug_message(
             $"[GML] permission request: {_error_code} {_message}, status: {_status}"
         );
@@ -168,6 +203,8 @@ connect_device = function(_device)
         client: id
     };
 
+    show_debug_message("[GML] classic connect to " + bluetooth_device_get_name(_device));
+
     pending_conn = bluetooth_classic_connect(
         _device,
         DEMO_CLASSIC_SERVICE_UUID,
@@ -225,6 +262,8 @@ pair_device = function(_device, _connect_after)
 
     pairing = true;
 
+    show_debug_message("[GML] pair " + bluetooth_device_get_name(_device));
+
     var _error = bluetooth_pair(
         _device,
         method(_ctx, function(_error_code, _message, _device)
@@ -267,6 +306,8 @@ pair_device = function(_device, _connect_after)
         );
     }
 };
+
+refresh_status();
 
 if (!bt_ready)
 {
