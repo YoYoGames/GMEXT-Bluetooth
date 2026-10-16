@@ -2104,10 +2104,6 @@ The above code closes the connection stored in <code>connection</code> if its ha
 
 <h1 id="bluetooth_le_connection_is_valid">bluetooth_le_connection_is_valid<a class="headerlink" href="#bluetooth_le_connection_is_valid" title="Permanent link">&para;</a></h1>
 <p>This function checks whether the given handle names a live client connection. A handle is valid from the moment <a href="le_client.html#bluetooth_le_connect">bluetooth_le_connect</a> returns it, while it is still connecting, until it is disconnected, drops or fails to connect.</p>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>On Android this function also returns <code>true</code> for a server connection handle, which the other platforms report as not valid.</p>
-</div>
 <p><br></p>
 <p><strong>Syntax:</strong></p>
 <blockquote>
@@ -2148,10 +2144,6 @@ The above code clears the instance variable <code>connection</code> when the han
 
 <h1 id="bluetooth_le_connection_is_connected">bluetooth_le_connection_is_connected<a class="headerlink" href="#bluetooth_le_connection_is_connected" title="Permanent link">&para;</a></h1>
 <p>This function checks whether the given connection is currently connected. It returns <code>false</code> while the connection is still being made, after it has dropped, and for a handle that is not valid.</p>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>On Android this function also returns <code>true</code> for a connected server connection handle.</p>
-</div>
 <p><br></p>
 <p><strong>Syntax:</strong></p>
 <blockquote>
@@ -2192,10 +2184,6 @@ The above code reads a characteristic only when the connection stored in <code>c
 
 <h1 id="bluetooth_le_connection_get_device">bluetooth_le_connection_get_device<a class="headerlink" href="#bluetooth_le_connection_get_device" title="Permanent link">&para;</a></h1>
 <p>This function returns the handle of the device the given connection was made to, or 0 for a handle that is not a live client connection.</p>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>On Android this function also returns the central's device handle for a server connection.</p>
-</div>
 <p><br></p>
 <p><strong>Syntax:</strong></p>
 <blockquote>

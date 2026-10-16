@@ -4533,14 +4533,14 @@ public class GMBluetooth extends GMBluetoothInternal
     @Override
     public boolean bluetooth_le_connection_is_valid(long connection)
     {
-        return getLeConnection(connection) != null;
+        return leClientConnection(connection) != null;
     }
 
 
     @Override
     public boolean bluetooth_le_connection_is_connected(long connection)
     {
-        LeConnectionEntry entry = getLeConnection(connection);
+        LeConnectionEntry entry = leClientConnection(connection);
         return entry != null && entry.connected;
     }
 
@@ -4548,7 +4548,7 @@ public class GMBluetooth extends GMBluetoothInternal
     @Override
     public long bluetooth_le_connection_get_device(long connection)
     {
-        LeConnectionEntry entry = getLeConnection(connection);
+        LeConnectionEntry entry = leClientConnection(connection);
         return entry != null ? entry.device : 0;
     }
 

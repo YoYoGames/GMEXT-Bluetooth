@@ -188,8 +188,6 @@
 /**
  * @function bluetooth_le_connection_is_valid
  * @desc This function checks whether the given handle names a live client connection. A handle is valid from the moment ${function.bluetooth_le_connect} returns it, while it is still connecting, until it is disconnected, drops or fails to connect.
- *
- * [[Note: On Android this function also returns `true` for a server connection handle, which the other platforms report as not valid.]]
  * @param {Real} connection The connection handle to check.
  * @returns {Bool} `true` if the handle is a live client connection, otherwise `false`.
  * @example
@@ -206,8 +204,6 @@
 /**
  * @function bluetooth_le_connection_is_connected
  * @desc This function checks whether the given connection is currently connected. It returns `false` while the connection is still being made, after it has dropped, and for a handle that is not valid.
- *
- * [[Note: On Android this function also returns `true` for a connected server connection handle.]]
  * @param {Real} connection The connection handle to check.
  * @returns {Bool} `true` if the connection is connected, otherwise `false`.
  * @example
@@ -224,8 +220,6 @@
 /**
  * @function bluetooth_le_connection_get_device
  * @desc This function returns the handle of the device the given connection was made to, or 0 for a handle that is not a live client connection.
- *
- * [[Note: On Android this function also returns the central's device handle for a server connection.]]
  * @param {Real} connection The connection handle.
  * @returns {Real} The device handle, or 0 if the connection is not valid.
  * @example
