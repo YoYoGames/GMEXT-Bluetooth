@@ -1,0 +1,2465 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+      
+        <link rel="prev" href="extension_options.html">
+      
+      
+        <link rel="next" href="devices.html">
+      
+      
+        
+      
+      
+      <link rel="icon" href="assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Core - GMEXT-Bluetooth</title>
+      
+    
+    
+      <link rel="stylesheet" href="assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+    
+      <link rel="stylesheet" href="assets/css/extra.css">
+    
+    <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  <script>(function(){try{var w=["--gm-nav-width","--gm-toc-width"],i,v;for(i=0;i<w.length;i++){v=localStorage.getItem(w[i]);if(v)document.documentElement.style.setProperty(w[i],v)}}catch(e){}})()</script></head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#core" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="home.html" title="GMEXT-Bluetooth" class="md-header__button md-logo" aria-label="GMEXT-Bluetooth" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            GMEXT-Bluetooth
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Core
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/YoYoGames/GMEXT-Bluetooth" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="home.html" title="GMEXT-Bluetooth" class="md-nav__button md-logo" aria-label="GMEXT-Bluetooth" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    GMEXT-Bluetooth
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/YoYoGames/GMEXT-Bluetooth" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="home.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Bluetooth Extension
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="getting_started.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="platform_setup.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Platform Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="extension_options.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extension Options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Modules
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Modules
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="core.html" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#core" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Core
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Core">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Functions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#constants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Constants
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_initialize" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_initialize
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_shutdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_shutdown
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_is_initialized" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_is_initialized
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_last_error_code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_last_error_code
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_last_error_message" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_last_error_message
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_feature_is_supported" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_feature_is_supported
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_permission_get_status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_permission_get_status
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_permission_request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_permission_request
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_request_enable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_request_enable
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_value_fetch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_value_fetch
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="bluetooth_value_fetch">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#usage-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Usage Notes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_value_release" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_value_release
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_set_callback_state_changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_set_callback_state_changed
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_remove_callback_state_changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_remove_callback_state_changed
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetootherror" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothError
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothstate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothState
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothpermissionstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothPermissionStatus
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothfeature" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothFeature
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothtransport" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothTransport
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="devices.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Devices
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="le_client.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LE Client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="le_server.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LE Server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="classic.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Classic
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#core" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Core
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Core">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Functions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#constants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Constants
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_initialize" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_initialize
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_shutdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_shutdown
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_is_initialized" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_is_initialized
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_last_error_code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_last_error_code
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_last_error_message" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_last_error_message
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_feature_is_supported" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_feature_is_supported
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_permission_get_status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_permission_get_status
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_permission_request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_permission_request
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_request_enable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_request_enable
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_value_fetch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_value_fetch
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="bluetooth_value_fetch">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#usage-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Usage Notes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_value_release" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_value_release
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_set_callback_state_changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_set_callback_state_changed
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_remove_callback_state_changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_remove_callback_state_changed
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetootherror" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothError
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothstate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothState
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothpermissionstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothPermissionStatus
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothfeature" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothFeature
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothtransport" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothTransport
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<p><a id="top"></a></p>
+<h1 id="core"><strong>Core</strong><a class="headerlink" href="#core" title="Permanent link">&para;</a></h1>
+<p>The functions to start and stop the extension, read the error of a failed call, check the platform's capabilities and permissions, turn the radio on, read the bytes that callbacks deliver, and follow the state of the local Bluetooth adapter.</p>
+<h2 id="functions">Functions<a class="headerlink" href="#functions" title="Permanent link">&para;</a></h2>
+<p>These are the core functions of the extension.</p>
+<ul>
+<li><a href="core.html#bluetooth_initialize">bluetooth_initialize</a></li>
+<li><a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a></li>
+<li><a href="core.html#bluetooth_is_initialized">bluetooth_is_initialized</a></li>
+<li><a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a></li>
+<li><a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a></li>
+<li><a href="core.html#bluetooth_feature_is_supported">bluetooth_feature_is_supported</a></li>
+<li><a href="core.html#bluetooth_permission_get_status">bluetooth_permission_get_status</a></li>
+<li><a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a></li>
+<li><a href="core.html#bluetooth_request_enable">bluetooth_request_enable</a></li>
+<li><a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a></li>
+<li><a href="core.html#bluetooth_value_release">bluetooth_value_release</a></li>
+<li><a href="core.html#bluetooth_set_callback_state_changed">bluetooth_set_callback_state_changed</a></li>
+<li><a href="core.html#bluetooth_remove_callback_state_changed">bluetooth_remove_callback_state_changed</a></li>
+</ul>
+<h2 id="constants">Constants<a class="headerlink" href="#constants" title="Permanent link">&para;</a></h2>
+<p>These are the constants used across the extension.</p>
+<ul>
+<li><a href="core.html#bluetootherror">BluetoothError</a></li>
+<li><a href="core.html#bluetoothstate">BluetoothState</a></li>
+<li><a href="core.html#bluetoothpermissionstatus">BluetoothPermissionStatus</a></li>
+<li><a href="core.html#bluetoothfeature">BluetoothFeature</a></li>
+<li><a href="core.html#bluetoothtransport">BluetoothTransport</a></li>
+</ul>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_initialize">bluetooth_initialize<a class="headerlink" href="#bluetooth_initialize" title="Permanent link">&para;</a></h1>
+<p>This function starts the extension and its platform backend. You must call it before any other Bluetooth function: until it succeeds, every call that uses Bluetooth returns <a href="core.html#bluetootherror">BluetoothError</a>.NotInitialized.</p>
+<p>The function returns <code>true</code> once the extension is running, and also when it is already running. It also returns <code>true</code> on a device that has no Bluetooth hardware: the extension then reports <a href="core.html#bluetoothstate">BluetoothState</a>.Unsupported, <a href="core.html#bluetooth_feature_is_supported">bluetooth_feature_is_supported</a> returns <code>false</code> and every Bluetooth call returns <a href="core.html#bluetootherror">BluetoothError</a>.NotSupported.</p>
+<p>If the backend cannot be started, the function returns <code>false</code> and the reason is in <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>, normally <a href="core.html#bluetootherror">BluetoothError</a>.OperationFailed. The extension is then not initialised, so <a href="core.html#bluetooth_is_initialized">bluetooth_is_initialized</a> returns <code>false</code> and you can call this function again to retry.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Windows the function waits up to 3 seconds for the Bluetooth adapter to answer, because the capabilities are read from it. An adapter that answers later still sets them and reports its state to the callback set with <a href="core.html#bluetooth_set_callback_state_changed">bluetooth_set_callback_state_changed</a>.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On iOS and macOS the function does not show the Bluetooth permission prompt. While the user has not answered it, Bluetooth stays unavailable until you call <a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a>.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_initialize()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p><code>true</code> if the extension is running, otherwise <code>false</code>.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">if (!bluetooth_initialize())
+{
+    show_debug_message($"Bluetooth could not start: {bluetooth_last_error_message()}");
+    exit;
+}
+
+if (!bluetooth_feature_is_supported(BluetoothFeature.LeCentral))
+{
+    show_debug_message("This device cannot act as an LE client");
+}</code></pre>
+The above code initialises the extension in the Create Event of a controller object. If the backend could not be started, the reason is read with <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a> and the event ends there. Otherwise <a href="core.html#bluetooth_feature_is_supported">bluetooth_feature_is_supported</a> is used to check whether the device can scan for and connect to LE devices.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_shutdown">bluetooth_shutdown<a class="headerlink" href="#bluetooth_shutdown" title="Permanent link">&para;</a></h1>
+<p>This function stops the extension. It ends every connection, scan, advertisement and server, and frees every value still held for <a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a>. Every device, connection and value handle the extension gave out is no longer valid afterwards.</p>
+<p>Every callback that is still waiting for the outcome of an operation (a connect, a read, a pairing, a permission or enable request, and so on) is called once with <a href="core.html#bluetootherror">BluetoothError</a>.NotInitialized. The callbacks you registered with the <code>bluetooth_set_callback_*</code> functions stay registered, so they are used again after the next call to <a href="core.html#bluetooth_initialize">bluetooth_initialize</a>.</p>
+<p>You should call this function when the game no longer needs Bluetooth, for example in the Clean Up Event of the object that initialised it. Calling it when the extension is not running does nothing.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_shutdown()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p>N/A</p>
+</blockquote>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">if (bluetooth_is_initialized())
+{
+    bluetooth_shutdown();
+}</code></pre>
+The above code, placed in the Clean Up Event of the controller object, stops the extension if it is running. Any operation still in progress reports <a href="core.html#bluetootherror">BluetoothError</a>.NotInitialized to its callback.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_is_initialized">bluetooth_is_initialized<a class="headerlink" href="#bluetooth_is_initialized" title="Permanent link">&para;</a></h1>
+<p>This function checks whether the extension is running. It returns <code>true</code> after a successful call to <a href="core.html#bluetooth_initialize">bluetooth_initialize</a> and until <a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a> is called, and <code>false</code> before that, after it, or when <a href="core.html#bluetooth_initialize">bluetooth_initialize</a> failed.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_is_initialized()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p><code>true</code> if the extension is running, otherwise <code>false</code>.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">if (!bluetooth_is_initialized())
+{
+    bluetooth_initialize();
+}</code></pre>
+The above code initialises the extension only when it is not already running.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_last_error_code">bluetooth_last_error_code<a class="headerlink" href="#bluetooth_last_error_code" title="Permanent link">&para;</a></h1>
+<p>This function returns the error code of the most recent call that failed. Every function that can fail sets it when it fails: a function that returns a <a href="core.html#bluetootherror">BluetoothError</a> returns the same code, <a href="le_client.html#bluetooth_le_connect">bluetooth_le_connect</a> and <a href="classic.html#bluetooth_classic_connect">bluetooth_classic_connect</a> return 0, <a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a> returns -1, and <a href="core.html#bluetooth_initialize">bluetooth_initialize</a> returns <code>false</code>.</p>
+<p>A call that succeeds leaves the last error as it was, so you should read it straight after the call that failed, not to check whether a call succeeded. It is <a href="core.html#bluetootherror">BluetoothError</a>.Ok until the first failure. The outcome of an operation that completes later is reported to its callback in the callback's own <code>error_code</code> argument, not here.</p>
+<p>Use <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a> to get a description of the same failure.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_last_error_code()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a></p>
+</blockquote>
+<p>The error code of the most recent failed call.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">var _error = bluetooth_request_enable(on_enable);
+if (_error != BluetoothError.Ok)
+{
+    var _code = bluetooth_last_error_code();
+    show_debug_message($"Request failed with code {_code}: {bluetooth_last_error_message()}");
+}</code></pre>
+The above code asks the user to turn the Bluetooth radio on and, when the request cannot start, reads the code and the description of the failure.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_last_error_message">bluetooth_last_error_message<a class="headerlink" href="#bluetooth_last_error_message" title="Permanent link">&para;</a></h1>
+<p>This function returns a description of the most recent call that failed, the same failure <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> returns the code of. The text comes from the extension or the platform and is meant for logs and debugging, not for the player; it is not localised and can differ between platforms for the same code.</p>
+<p>Like the code, the message is set only when a call fails, so it still describes an earlier failure after a call that succeeds. It is an empty string until the first failure.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_last_error_message()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></p>
+</blockquote>
+<p>The description of the most recent failed call.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">if (!bluetooth_initialize())
+{
+    show_debug_message($"Bluetooth could not start: {bluetooth_last_error_message()}");
+}</code></pre>
+The above code writes the reason to the output log when the extension could not be initialised.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_feature_is_supported">bluetooth_feature_is_supported<a class="headerlink" href="#bluetooth_feature_is_supported" title="Permanent link">&para;</a></h1>
+<p>This function checks whether the current platform and Bluetooth adapter can do the given feature. Use it to decide which parts of your game's Bluetooth support to offer before you call the functions that need them: a function that uses a feature the platform cannot do returns <a href="core.html#bluetootherror">BluetoothError</a>.NotSupported.</p>
+<p>The function returns <code>false</code> before <a href="core.html#bluetooth_initialize">bluetooth_initialize</a> has been called, on a device without Bluetooth, and for a value that is not a <a href="core.html#bluetoothfeature">BluetoothFeature</a> member. The answers for <a href="core.html#bluetoothfeature">BluetoothFeature</a>.LeCentral, <a href="core.html#bluetoothfeature">BluetoothFeature</a>.LeAdvertise, <a href="core.html#bluetoothfeature">BluetoothFeature</a>.LeServer, <a href="core.html#bluetoothfeature">BluetoothFeature</a>.Classic and <a href="core.html#bluetoothfeature">BluetoothFeature</a>.ClassicServer are the same as those of <a href="le_client.html#bluetooth_le_is_supported">bluetooth_le_is_supported</a>, <a href="le_server.html#bluetooth_le_advertise_is_supported">bluetooth_le_advertise_is_supported</a>, <a href="le_server.html#bluetooth_le_server_is_supported">bluetooth_le_server_is_supported</a>, <a href="classic.html#bluetooth_classic_is_supported">bluetooth_classic_is_supported</a> and <a href="classic.html#bluetooth_classic_server_is_supported">bluetooth_classic_server_is_supported</a>.</p>
+<p>The table below shows what each platform can do when its hardware allows it. "Adapter" means the answer depends on the Bluetooth adapter or the OS version of the device the game runs on.</p>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Windows</th>
+<th>macOS</th>
+<th>iOS</th>
+<th>Android</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>LeCentral</code></td>
+<td>Adapter</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Adapter</td>
+</tr>
+<tr>
+<td><code>LePassiveScan</code></td>
+<td>Adapter</td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>LeAdvertise</code>, <code>LeAdvertiseName</code>, <code>LeAdvertiseServiceUuids</code></td>
+<td>Adapter</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Adapter</td>
+</tr>
+<tr>
+<td><code>LeAdvertiseServiceData</code>, <code>LeAdvertiseManufacturerData</code>, <code>LeAdvertiseTxPower</code>, <code>LeAdvertiseIncludeTxPower</code>, <code>LeAdvertiseNonConnectable</code></td>
+<td>Adapter</td>
+<td>No</td>
+<td>No</td>
+<td>Adapter</td>
+</tr>
+<tr>
+<td><code>LeServer</code></td>
+<td>Adapter</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Adapter</td>
+</tr>
+<tr>
+<td><code>LeServerDescriptorRequests</code></td>
+<td>Adapter</td>
+<td>No</td>
+<td>No</td>
+<td>Adapter</td>
+</tr>
+<tr>
+<td><code>LeServerSignedWrite</code>, <code>LeServerConnectionEvents</code>, <code>LePairing</code></td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+<td>Adapter</td>
+</tr>
+<tr>
+<td><code>Classic</code>, <code>ClassicServer</code>, <code>ClassicPairing</code></td>
+<td>Adapter</td>
+<td>Yes</td>
+<td>No</td>
+<td>Adapter</td>
+</tr>
+<tr>
+<td><code>ClassicDiscoverable</code></td>
+<td>Adapter</td>
+<td>No</td>
+<td>No</td>
+<td>Adapter</td>
+</tr>
+<tr>
+<td><code>ClassicDiscoverableStop</code></td>
+<td>Adapter</td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>PermissionRequest</code></td>
+<td>No</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Android 6+</td>
+</tr>
+<tr>
+<td><code>LeMtuRequest</code></td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+<td>Adapter</td>
+</tr>
+<tr>
+<td><code>LeReadRssi</code></td>
+<td>No</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Adapter</td>
+</tr>
+<tr>
+<td><code>LeConnectionPriority</code></td>
+<td>Adapter</td>
+<td>No</td>
+<td>No</td>
+<td>Adapter</td>
+</tr>
+<tr>
+<td><code>RequestEnable</code></td>
+<td>Adapter</td>
+<td>No</td>
+<td>No</td>
+<td>Adapter</td>
+</tr>
+<tr>
+<td><code>PairedDevicesQuery</code></td>
+<td>Adapter</td>
+<td>Yes</td>
+<td>No</td>
+<td>Adapter</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Windows the answers come from the adapter, which <a href="core.html#bluetooth_initialize">bluetooth_initialize</a> queries. Ask after it has been called, and ask again when the state callback reports a change, since an adapter that is added or removed changes them.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_feature_is_supported(feature)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>feature</td>
+<td><a href="core.html#bluetoothfeature">BluetoothFeature</a></td>
+<td>The feature to check.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p><code>true</code> if the platform and adapter can do the feature, otherwise <code>false</code>.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">can_advertise = bluetooth_feature_is_supported(BluetoothFeature.LeAdvertise);
+can_send_manufacturer_data = bluetooth_feature_is_supported(BluetoothFeature.LeAdvertiseManufacturerData);
+
+if (can_advertise &amp;&amp; !can_send_manufacturer_data)
+{
+    show_debug_message("Advertising without manufacturer data on this platform");
+}</code></pre>
+The above code checks whether the game can advertise and whether the advertisement can carry manufacturer data, and stores both answers in instance variables. On a platform that can advertise but cannot send manufacturer data, such as iOS, a message is written to the output log.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_permission_get_status">bluetooth_permission_get_status<a class="headerlink" href="#bluetooth_permission_get_status" title="Permanent link">&para;</a></h1>
+<p>This function returns whether the game has the Bluetooth permissions the platform needs. It does not ask the user; use <a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a> for that.</p>
+<p>The function returns <a href="core.html#bluetoothpermissionstatus">BluetoothPermissionStatus</a>.Unknown before <a href="core.html#bluetooth_initialize">bluetooth_initialize</a> has been called.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Windows the function always returns <a href="core.html#bluetoothpermissionstatus">BluetoothPermissionStatus</a>.Granted, since a desktop app needs no Bluetooth permission.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Android the function returns <a href="core.html#bluetoothpermissionstatus">BluetoothPermissionStatus</a>.Granted when every runtime permission the current Android version needs is granted: <code>BLUETOOTH_SCAN</code>, <code>BLUETOOTH_CONNECT</code> and <code>BLUETOOTH_ADVERTISE</code> from Android 12, <code>ACCESS_FINE_LOCATION</code> on Android 6 to 11. Android cannot tell a permission that was never asked for from one that was refused, so the extension remembers that it asked: the status is <a href="core.html#bluetoothpermissionstatus">BluetoothPermissionStatus</a>.Unknown until <a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a> has been called once, and <a href="core.html#bluetoothpermissionstatus">BluetoothPermissionStatus</a>.Denied after that while a permission is missing. Clearing the app's data resets it.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On iOS and macOS the function reports the app's Bluetooth authorisation: <a href="core.html#bluetoothpermissionstatus">BluetoothPermissionStatus</a>.Unknown until the user has answered the prompt that <a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a> shows, and <a href="core.html#bluetoothpermissionstatus">BluetoothPermissionStatus</a>.Denied when the user refused it or it is restricted on the device.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_permission_get_status()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="core.html#bluetoothpermissionstatus">BluetoothPermissionStatus</a></p>
+</blockquote>
+<p>The game's Bluetooth permission status.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">var _status = bluetooth_permission_get_status();
+if (_status == BluetoothPermissionStatus.Denied)
+{
+    show_debug_message("Bluetooth permission was refused, enable it in the system settings");
+}</code></pre>
+The above code reads the permission status and writes a message to the output log when the permission was refused.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_permission_request">bluetooth_permission_request<a class="headerlink" href="#bluetooth_permission_request" title="Permanent link">&para;</a></h1>
+<p>This function asks for the Bluetooth permissions the platform needs, showing the system prompt when the user has not answered it yet. The callback is called once with the answer: when the user answers the prompt, or without a prompt when the answer is already known.</p>
+<p>The callback's <code>error_code</code> is <a href="core.html#bluetootherror">BluetoothError</a>.Ok whenever the request was answered, also when the user refused it, so check its <code>status</code> argument to see whether the permission was granted. If you call this function again while the prompt is still up, no second prompt is shown and both callbacks get the same answer. If <a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a> is called before the answer, the callback is called with <a href="core.html#bluetootherror">BluetoothError</a>.NotInitialized and <a href="core.html#bluetoothpermissionstatus">BluetoothPermissionStatus</a>.Unknown.</p>
+<p>The function returns a <a href="core.html#bluetootherror">BluetoothError</a>. It returns <a href="core.html#bluetootherror">BluetoothError</a>.NotInitialized before <a href="core.html#bluetooth_initialize">bluetooth_initialize</a> has been called, and on Android <a href="core.html#bluetootherror">BluetoothError</a>.OperationFailed when the prompt cannot be shown. The reason is then in <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>, and the callback is never called.</p>
+<p>After the user answers, the callback set with <a href="core.html#bluetooth_set_callback_state_changed">bluetooth_set_callback_state_changed</a> reports the new adapter state on Android, iOS and macOS.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Windows no permission is needed: the callback is called with <a href="core.html#bluetoothpermissionstatus">BluetoothPermissionStatus</a>.Granted without a prompt.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Android 12 and later the function asks for <code>BLUETOOTH_SCAN</code>, <code>BLUETOOTH_CONNECT</code> and <code>BLUETOOTH_ADVERTISE</code>; on Android 6 to 11 it asks for <code>ACCESS_FINE_LOCATION</code> and <code>ACCESS_COARSE_LOCATION</code>. Before Android 6 the permissions are granted at install time and the callback is called without a prompt. The permissions must be declared in the game's manifest, see <a href="platform_setup.html">Platform Setup</a>.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Important</p>
+<p>On iOS and macOS the system prompt is shown only by this function. Until the user has answered it, every function that uses Bluetooth returns <a href="core.html#bluetootherror">BluetoothError</a>.PermissionDenied and the adapter state is <a href="core.html#bluetoothstate">BluetoothState</a>.Unauthorized, as on Android without the runtime permissions. Once it has been answered, later calls report the answer without a prompt.</p>
+</div>
+<p>This function operates asynchronously, which means that it does not immediately return the requested result. Instead, upon completion of the task, it will trigger the <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a>.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_permission_request(callback)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>callback</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Script_Functions.htm">Function</a></td>
+<td>The function to call once with the answer.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a></p>
+</blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the request was made, otherwise the reason it was not.</p>
+<p><br></p>
+<p><strong>Triggers:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a></p>
+</blockquote>
+<p>Called once, when the request is answered or Bluetooth is shut down before the answer.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>error_code</td>
+<td><a href="core.html#bluetootherror">BluetoothError</a></td>
+<td><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the request was answered, otherwise <a href="core.html#bluetootherror">BluetoothError</a>.NotInitialized.</td>
+</tr>
+<tr>
+<td>message</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></td>
+<td>A description of the failure, or an empty string when the request was answered.</td>
+</tr>
+<tr>
+<td>status</td>
+<td><a href="core.html#bluetoothpermissionstatus">BluetoothPermissionStatus</a></td>
+<td>The permission status after the answer.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">var _error = bluetooth_permission_request(function(_error_code, _message, _status)
+{
+    if (_error_code != BluetoothError.Ok)
+    {
+        show_debug_message($"Permission request failed: {_message}");
+        return;
+    }
+
+    bluetooth_allowed = (_status == BluetoothPermissionStatus.Granted);
+    show_debug_message($"Bluetooth permission granted: {bluetooth_allowed}");
+});
+
+if (_error != BluetoothError.Ok)
+{
+    show_debug_message($"Permission request did not start: {bluetooth_last_error_message()}");
+}</code></pre>
+The above code asks for the Bluetooth permissions. When the request is answered, the instance variable <code>bluetooth_allowed</code> is set to whether the permission was granted; when Bluetooth was shut down before the answer, the message is written to the output log instead. If the request could not be made at all, the reason is read with <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a> and the callback is never called.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_request_enable">bluetooth_request_enable<a class="headerlink" href="#bluetooth_request_enable" title="Permanent link">&para;</a></h1>
+<p>This function asks the user to turn the Bluetooth radio on. The callback is called once with the outcome: <a href="core.html#bluetootherror">BluetoothError</a>.Ok when the radio is on, <a href="core.html#bluetootherror">BluetoothError</a>.BluetoothDisabled when the user declined or the radio stayed off, <a href="core.html#bluetootherror">BluetoothError</a>.PermissionDenied when the system refused the request, and <a href="core.html#bluetootherror">BluetoothError</a>.NotInitialized when <a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a> is called before the answer. When the radio is already on, the callback is called with <a href="core.html#bluetootherror">BluetoothError</a>.Ok without asking the user.</p>
+<p>If you call this function again while a request is still waiting, no second request is made and both callbacks get the same outcome.</p>
+<p>The function returns a <a href="core.html#bluetootherror">BluetoothError</a>: <a href="core.html#bluetootherror">BluetoothError</a>.NotInitialized before <a href="core.html#bluetooth_initialize">bluetooth_initialize</a> has been called, <a href="core.html#bluetootherror">BluetoothError</a>.NotSupported when the platform cannot turn the radio on (see <a href="core.html#bluetoothfeature">BluetoothFeature</a>.RequestEnable), <a href="core.html#bluetootherror">BluetoothError</a>.PermissionDenied on Android 12 and later without the <code>BLUETOOTH_CONNECT</code> permission, and <a href="core.html#bluetootherror">BluetoothError</a>.OperationFailed when the request cannot be made. The reason is then in <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>, and the callback is never called.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Android the function shows the system dialog that asks the user to turn Bluetooth on. From Android 12 it needs the <code>BLUETOOTH_CONNECT</code> permission, so call <a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a> first.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Windows the function asks for access to the radio and switches it on, without a dialog of its own. The callback can also report <a href="core.html#bluetootherror">BluetoothError</a>.OperationFailed when Windows fails the request, and the function returns <a href="core.html#bluetootherror">BluetoothError</a>.NotSupported when there is no Bluetooth radio.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>iOS and macOS have no way for an app to turn the radio on, so the function always returns <a href="core.html#bluetootherror">BluetoothError</a>.NotSupported there. Ask the player to turn Bluetooth on in the system settings instead.</p>
+</div>
+<p>This function operates asynchronously, which means that it does not immediately return the requested result. Instead, upon completion of the task, it will trigger the <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a>.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_request_enable(callback)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>callback</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Script_Functions.htm">Function</a></td>
+<td>The function to call once with the outcome.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a></p>
+</blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the request was made, otherwise the reason it was not.</p>
+<p><br></p>
+<p><strong>Triggers:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a></p>
+</blockquote>
+<p>Called once, when the radio is on, the request is declined or fails, or Bluetooth is shut down before the answer.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>error_code</td>
+<td><a href="core.html#bluetootherror">BluetoothError</a></td>
+<td><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the radio is on, otherwise the reason it is not.</td>
+</tr>
+<tr>
+<td>message</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></td>
+<td>A description of the failure, or an empty string on success.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">if (bluetooth_feature_is_supported(BluetoothFeature.RequestEnable))
+{
+    var _error = bluetooth_request_enable(function(_error_code, _message)
+    {
+        if (_error_code != BluetoothError.Ok)
+        {
+            show_debug_message($"Bluetooth is still off: {_message}");
+            return;
+        }
+        show_debug_message("Bluetooth is on");
+    });
+
+    if (_error != BluetoothError.Ok)
+    {
+        show_debug_message($"Enable request did not start: {bluetooth_last_error_message()}");
+    }
+}
+else
+{
+    show_debug_message("Please turn Bluetooth on in the system settings");
+}</code></pre>
+The above code first checks with <a href="core.html#bluetooth_feature_is_supported">bluetooth_feature_is_supported</a> whether the platform can turn the radio on. If it can, the user is asked to turn it on and the callback writes the outcome to the output log; if the request could not be made, the reason is read with <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>. On a platform that cannot do it, such as iOS, the player is told to use the system settings.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_value_fetch">bluetooth_value_fetch<a class="headerlink" href="#bluetooth_value_fetch" title="Permanent link">&para;</a></h1>
+<p>This function copies the bytes of a value into the given buffer, and frees the value. It is the one way to read every byte payload the extension delivers: an LE characteristic or descriptor read, a notification or indication, a write request to your LE server, and a chunk of data received on a Classic connection.</p>
+<p>The callbacks that deliver bytes do not pass them directly. They pass a value handle and the number of bytes it holds, <code>value</code> and <code>size</code>, and you call this function with that handle to get the bytes. A handle can be fetched only once: the value is freed when it has been copied.</p>
+<p>The buffer must have room for all <code>size</code> bytes at the given offset, that is, <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_get_size.htm">buffer_get_size</a> of the buffer must be at least <code>offset + size</code>; the whole value is copied, never a part of it. A <code>buffer_fixed</code> buffer of <code>size</code> bytes is the usual choice. The function returns the number of bytes it copied, which is always the <code>size</code> the callback reported.</p>
+<p>On failure the function returns -1 and the reason is in <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>:</p>
+<ul>
+<li><a href="core.html#bluetootherror">BluetoothError</a>.InvalidHandle for a value that is unknown, has already been fetched or released, or has expired. A failed read passes the value 0, which is always unknown.</li>
+<li><a href="core.html#bluetootherror">BluetoothError</a>.InvalidArgument for a buffer that is too small. Nothing is copied and the value is kept, so you can call the function again with a larger buffer.</li>
+</ul>
+<p>The bytes are written straight into the buffer's memory, so neither the buffer's used size nor its seek position changes. Read them with <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_peek.htm">buffer_peek</a>, or with <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_read.htm">buffer_read</a> after <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_seek.htm">buffer_seek</a> to <code>offset</code>, and use the returned count rather than the buffer's used size. Call <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_set_used_size.htm">buffer_set_used_size</a> before you pass the buffer to a function that only works on its used size, such as <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_copy.htm">buffer_copy</a> or <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_save.htm">buffer_save</a>.</p>
+<h3 id="usage-notes">Usage Notes<a class="headerlink" href="#usage-notes" title="Permanent link">&para;</a></h3>
+<p>The extension holds each value until you fetch or release it, within these limits:</p>
+<ul>
+<li>A value expires 30 seconds after its callback was queued. Fetch it in the callback that delivers it.</li>
+<li>At most 256 values from LE reads and notifications are held. Past that, the oldest of them is dropped.</li>
+<li>The value of a write request to your LE server is freed with its request, when you answer it with <a href="le_server.html#bluetooth_le_server_respond_write">bluetooth_le_server_respond_write</a>, so fetch it before you answer.</li>
+<li>The values of a Classic connection count toward a limit of 1 MiB per connection. While its unfetched values hold more than that, Windows and Android stop reading from the peer until some are fetched or released; macOS ends the connection with <a href="core.html#bluetootherror">BluetoothError</a>.Disconnected. A Classic value that expires unfetched also ends its connection with <a href="core.html#bluetootherror">BluetoothError</a>.Disconnected, rather than leave a gap in the data.</li>
+<li>A value stays available after its connection ends, so bytes delivered just before a disconnect can still be fetched.</li>
+<li><a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a> frees every value.</li>
+</ul>
+<p>Use <a href="core.html#bluetooth_value_release">bluetooth_value_release</a> to free a value whose bytes you do not need.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_value_fetch(value, out_data, offset)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>value</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The value handle a callback delivered.</td>
+</tr>
+<tr>
+<td>out_data</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/Buffers.htm">Buffer</a></td>
+<td>The buffer to copy the bytes into.</td>
+</tr>
+<tr>
+<td>offset</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The position in the buffer to copy the bytes to (in bytes).</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></p>
+</blockquote>
+<p>The number of bytes copied, or -1 if the value could not be fetched.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">var _error = bluetooth_le_characteristic_read(characteristic, function(_error_code, _message, _characteristic, _value, _size)
+{
+    if (_error_code != BluetoothError.Ok)
+    {
+        show_debug_message($"Read failed: {_message}");
+        return;
+    }
+
+    var _buffer = buffer_create(max(_size, 1), buffer_fixed, 1);
+    var _copied = bluetooth_value_fetch(_value, _buffer, 0);
+    if (_copied &lt; 0)
+    {
+        show_debug_message($"Fetch failed: {bluetooth_last_error_message()}");
+    }
+    else if (_copied &gt; 0)
+    {
+        var _first = buffer_peek(_buffer, 0, buffer_u8);
+        show_debug_message($"Read {_copied} bytes, the first is {_first}");
+    }
+    buffer_delete(_buffer);
+});
+
+if (_error != BluetoothError.Ok)
+{
+    show_debug_message($"Read did not start: {bluetooth_last_error_message()}");
+}</code></pre>
+The above code reads the characteristic stored in the instance variable <code>characteristic</code> with <a href="le_client.html#bluetooth_le_characteristic_read">bluetooth_le_characteristic_read</a>. When the read succeeds, a fixed buffer the size of the value is created (at least 1 byte, since a value can be empty) and <a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a> copies the bytes into it at offset 0, freeing the value. The first byte is then read with <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_peek.htm">buffer_peek</a>, which reads the buffer's memory directly, and the buffer is deleted. If the read could not start, the reason is read with <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a> and the callback is never called.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_value_release">bluetooth_value_release<a class="headerlink" href="#bluetooth_value_release" title="Permanent link">&para;</a></h1>
+<p>This function frees a value without copying its bytes. Use it for a value whose bytes you do not need, so that it does not count toward the limits described in <a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a> until it expires: on a Classic connection, this lets the connection keep receiving.</p>
+<p>The function returns <a href="core.html#bluetootherror">BluetoothError</a>.Ok when the value was freed, and <a href="core.html#bluetootherror">BluetoothError</a>.InvalidHandle for a value that is unknown, has already been fetched or released, or has expired; the reason is then in <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_value_release(value)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>value</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The value handle a callback delivered.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a></p>
+</blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the value was freed, otherwise <a href="core.html#bluetootherror">BluetoothError</a>.InvalidHandle.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">bluetooth_set_callback_le_characteristic_value_changed(function(_characteristic, _connection, _value, _size)
+{
+    if (_characteristic != heart_rate_characteristic)
+    {
+        bluetooth_value_release(_value);
+        return;
+    }
+
+    bluetooth_value_fetch(_value, heart_rate_buffer, 0);
+});</code></pre>
+The above code registers a callback for notifications. A notification from any characteristic other than the one stored in <code>heart_rate_characteristic</code> is freed with <a href="core.html#bluetooth_value_release">bluetooth_value_release</a> without being read; the bytes of the wanted one are copied into the buffer <code>heart_rate_buffer</code> with <a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a>.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_set_callback_state_changed">bluetooth_set_callback_state_changed<a class="headerlink" href="#bluetooth_set_callback_state_changed" title="Permanent link">&para;</a></h1>
+<p>This function sets the function to call when the state of the local Bluetooth adapter changes, for example when the user turns Bluetooth on or off. It replaces the callback set by an earlier call.</p>
+<p>The callback is called once with the current state when you set it, and then whenever the state changes. Before <a href="core.html#bluetooth_initialize">bluetooth_initialize</a> the current state is <a href="core.html#bluetoothstate">BluetoothState</a>.Unknown, so you should set the callback after initialising the extension. The callback stays set across <a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a> and the next <a href="core.html#bluetooth_initialize">bluetooth_initialize</a>, until you remove it with <a href="core.html#bluetooth_remove_callback_state_changed">bluetooth_remove_callback_state_changed</a>.</p>
+<p>The function always returns <code>true</code>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Android the callback is also called when <a href="core.html#bluetooth_initialize">bluetooth_initialize</a> runs and after the user answers <a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a>. From Android 12, a radio that is on reports <a href="core.html#bluetoothstate">BluetoothState</a>.Unauthorized while the game does not have the <code>BLUETOOTH_SCAN</code> and <code>BLUETOOTH_CONNECT</code> permissions.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On iOS and macOS the state is <a href="core.html#bluetoothstate">BluetoothState</a>.Unauthorized until the user has answered the prompt of <a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a>, and the callback reports the state again once the user has answered.</p>
+</div>
+<p>This function operates asynchronously, which means that it does not immediately return the requested result. Instead, upon completion of the task, it will trigger the <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a>.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_set_callback_state_changed(callback)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>callback</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Script_Functions.htm">Function</a></td>
+<td>The function to call with the adapter state.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p>Always <code>true</code>.</p>
+<p><br></p>
+<p><strong>Triggers:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a></p>
+</blockquote>
+<p>Called once when the callback is set, and then whenever the state of the local Bluetooth adapter changes.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>state</td>
+<td><a href="core.html#bluetoothstate">BluetoothState</a></td>
+<td>The new state of the local Bluetooth adapter.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">bluetooth_set_callback_state_changed(function(_state)
+{
+    bluetooth_ready = (_state == BluetoothState.PoweredOn);
+    if (_state == BluetoothState.PoweredOff)
+    {
+        show_debug_message("Bluetooth is off");
+    }
+});</code></pre>
+The above code sets a callback that keeps the instance variable <code>bluetooth_ready</code> up to date with whether the adapter is on and usable, and writes a message to the output log when it is turned off.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_remove_callback_state_changed">bluetooth_remove_callback_state_changed<a class="headerlink" href="#bluetooth_remove_callback_state_changed" title="Permanent link">&para;</a></h1>
+<p>This function removes the callback set with <a href="core.html#bluetooth_set_callback_state_changed">bluetooth_set_callback_state_changed</a>, so adapter state changes are no longer reported. It always returns <code>true</code>, also when no callback was set.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_remove_callback_state_changed()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p>Always <code>true</code>.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">bluetooth_remove_callback_state_changed();</code></pre>
+The above code stops the reporting of adapter state changes.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetootherror">BluetoothError<a class="headerlink" href="#bluetootherror" title="Permanent link">&para;</a></h1>
+<p>This enum holds the result codes of the extension. Every function that can fail returns one of them, except <a href="le_client.html#bluetooth_le_connect">bluetooth_le_connect</a> and <a href="classic.html#bluetooth_classic_connect">bluetooth_classic_connect</a>, which return the new connection handle or 0. After a failed call, <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> returns the code and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a> describes it. A call that fails never calls its callback.</p>
+<p>A callback that reports the outcome of an operation receives one of these codes as its first argument, <code>error_code</code>, followed by a <code>message</code> that describes a failure.</p>
+<p>The same condition fails with the same code on every platform, and these conditions are checked before anything starts, so they come back from the call itself:</p>
+<table>
+<thead>
+<tr>
+<th>Condition</th>
+<th>Code</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A handle that is not, or is no longer, valid</td>
+<td><code>InvalidHandle</code></td>
+</tr>
+<tr>
+<td>A device of the wrong transport, or another bad argument</td>
+<td><code>InvalidArgument</code></td>
+</tr>
+<tr>
+<td>The radio is off</td>
+<td><code>BluetoothDisabled</code></td>
+</tr>
+<tr>
+<td>The permission is missing or was refused</td>
+<td><code>PermissionDenied</code></td>
+</tr>
+<tr>
+<td>No Bluetooth hardware, or a feature the platform cannot do (see <a href="core.html#bluetooth_feature_is_supported">bluetooth_feature_is_supported</a>)</td>
+<td><code>NotSupported</code></td>
+</tr>
+<tr>
+<td>The LE server is not running</td>
+<td><code>OperationFailed</code></td>
+</tr>
+<tr>
+<td>A second advertisement, a duplicate service, or a full send or notify queue</td>
+<td><code>Busy</code></td>
+</tr>
+</tbody>
+</table>
+<p>Starting a scan or a server that is already running returns <code>Ok</code> and starts nothing new, and stopping one that is not running returns <code>Ok</code> and calls nothing. A disconnect that you ask for takes effect when the call returns: the handle is no longer valid and no disconnected callback is called for it.</p>
+<p>These constants are referenced by the following functions:</p>
+<ul>
+<li><a href="classic.html#bluetooth_classic_scan_start">bluetooth_classic_scan_start</a></li>
+<li><a href="classic.html#bluetooth_classic_scan_stop">bluetooth_classic_scan_stop</a></li>
+<li><a href="classic.html#bluetooth_classic_connect">bluetooth_classic_connect</a></li>
+<li><a href="classic.html#bluetooth_classic_disconnect">bluetooth_classic_disconnect</a></li>
+<li><a href="classic.html#bluetooth_classic_send">bluetooth_classic_send</a></li>
+<li><a href="classic.html#bluetooth_classic_server_start">bluetooth_classic_server_start</a></li>
+<li><a href="classic.html#bluetooth_classic_server_stop">bluetooth_classic_server_stop</a></li>
+<li><a href="classic.html#bluetooth_classic_discoverable_start">bluetooth_classic_discoverable_start</a></li>
+<li><a href="classic.html#bluetooth_classic_discoverable_stop">bluetooth_classic_discoverable_stop</a></li>
+<li><a href="classic.html#bluetooth_set_callback_classic_disconnected">bluetooth_set_callback_classic_disconnected</a></li>
+<li><a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a></li>
+<li><a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a></li>
+<li><a href="core.html#bluetooth_request_enable">bluetooth_request_enable</a></li>
+<li><a href="core.html#bluetooth_value_release">bluetooth_value_release</a></li>
+<li><a href="devices.html#bluetooth_paired_devices_query">bluetooth_paired_devices_query</a></li>
+<li><a href="devices.html#bluetooth_pair">bluetooth_pair</a></li>
+<li><a href="devices.html#bluetooth_set_callback_scan_stopped">bluetooth_set_callback_scan_stopped</a></li>
+<li><a href="le_client.html#bluetooth_le_scan_start">bluetooth_le_scan_start</a></li>
+<li><a href="le_client.html#bluetooth_le_scan_stop">bluetooth_le_scan_stop</a></li>
+<li><a href="le_client.html#bluetooth_le_connected_devices_query">bluetooth_le_connected_devices_query</a></li>
+<li><a href="le_client.html#bluetooth_le_connect">bluetooth_le_connect</a></li>
+<li><a href="le_client.html#bluetooth_le_disconnect">bluetooth_le_disconnect</a></li>
+<li><a href="le_client.html#bluetooth_le_connection_request_mtu">bluetooth_le_connection_request_mtu</a></li>
+<li><a href="le_client.html#bluetooth_le_connection_read_rssi">bluetooth_le_connection_read_rssi</a></li>
+<li><a href="le_client.html#bluetooth_le_connection_request_priority">bluetooth_le_connection_request_priority</a></li>
+<li><a href="le_client.html#bluetooth_le_services_discover">bluetooth_le_services_discover</a></li>
+<li><a href="le_client.html#bluetooth_le_characteristics_discover">bluetooth_le_characteristics_discover</a></li>
+<li><a href="le_client.html#bluetooth_le_descriptors_discover">bluetooth_le_descriptors_discover</a></li>
+<li><a href="le_client.html#bluetooth_le_characteristic_read">bluetooth_le_characteristic_read</a></li>
+<li><a href="le_client.html#bluetooth_le_characteristic_write">bluetooth_le_characteristic_write</a></li>
+<li><a href="le_client.html#bluetooth_le_characteristic_subscribe">bluetooth_le_characteristic_subscribe</a></li>
+<li><a href="le_client.html#bluetooth_le_descriptor_read">bluetooth_le_descriptor_read</a></li>
+<li><a href="le_client.html#bluetooth_le_descriptor_write">bluetooth_le_descriptor_write</a></li>
+<li><a href="le_server.html#bluetooth_le_advertise_start">bluetooth_le_advertise_start</a></li>
+<li><a href="le_server.html#bluetooth_le_advertise_stop">bluetooth_le_advertise_stop</a></li>
+<li><a href="le_server.html#bluetooth_le_server_start">bluetooth_le_server_start</a></li>
+<li><a href="le_server.html#bluetooth_le_server_stop">bluetooth_le_server_stop</a></li>
+<li><a href="le_server.html#bluetooth_le_server_add_service">bluetooth_le_server_add_service</a></li>
+<li><a href="le_server.html#bluetooth_le_server_clear_services">bluetooth_le_server_clear_services</a></li>
+<li><a href="le_server.html#bluetooth_le_server_respond_read">bluetooth_le_server_respond_read</a></li>
+<li><a href="le_server.html#bluetooth_le_server_respond_write">bluetooth_le_server_respond_write</a></li>
+<li><a href="le_server.html#bluetooth_le_server_notify_value">bluetooth_le_server_notify_value</a></li>
+<li><a href="le_client.html#bluetooth_set_callback_le_disconnected">bluetooth_set_callback_le_disconnected</a></li>
+</ul>
+<p><br></p>
+<table>
+<thead>
+<tr>
+<th>Member</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Ok</code></td>
+<td>The call or operation succeeded.</td>
+</tr>
+<tr>
+<td><code>Unknown</code></td>
+<td>The platform reported an error that matches no other code; the message holds its description.</td>
+</tr>
+<tr>
+<td><code>NotSupported</code></td>
+<td>The device has no Bluetooth hardware, or the platform or adapter cannot do what was asked.</td>
+</tr>
+<tr>
+<td><code>NotInitialized</code></td>
+<td>The extension is not running: <a href="core.html#bluetooth_initialize">bluetooth_initialize</a> has not been called, or <a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a> ended the operation.</td>
+</tr>
+<tr>
+<td><code>BluetoothDisabled</code></td>
+<td>The Bluetooth radio is off, or the user declined to turn it on.</td>
+</tr>
+<tr>
+<td><code>PermissionDenied</code></td>
+<td>The game does not have the Bluetooth permission, or the user or the system refused it.</td>
+</tr>
+<tr>
+<td><code>InvalidArgument</code></td>
+<td>An argument is not valid, such as a device of the wrong transport or a buffer that is too small.</td>
+</tr>
+<tr>
+<td><code>InvalidHandle</code></td>
+<td>A handle that is not, or is no longer, valid.</td>
+</tr>
+<tr>
+<td><code>Busy</code></td>
+<td>The operation cannot start while another one is in progress, such as a second advertisement, a duplicate service or a full send or notify queue.</td>
+</tr>
+<tr>
+<td><code>Timeout</code></td>
+<td>The remote device did not answer in time.</td>
+</tr>
+<tr>
+<td><code>NotFound</code></td>
+<td>What was asked for does not exist, such as a device id the system does not know.</td>
+</tr>
+<tr>
+<td><code>ConnectionFailed</code></td>
+<td>The connection could not be made: the device refused it, the link failed or the connect was cancelled.</td>
+</tr>
+<tr>
+<td><code>Disconnected</code></td>
+<td>The connection ended before the operation completed.</td>
+</tr>
+<tr>
+<td><code>OperationFailed</code></td>
+<td>The platform could not carry out the operation, or the LE server is not running.</td>
+</tr>
+<tr>
+<td><code>NotPermitted</code></td>
+<td>The remote device refused the attribute operation, because the read or write is not permitted or the request is not supported; the message names the ATT error.</td>
+</tr>
+<tr>
+<td><code>InsufficientSecurity</code></td>
+<td>The remote device requires pairing, encryption or authorisation before the attribute operation; the message names the ATT error.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetoothstate">BluetoothState<a class="headerlink" href="#bluetoothstate" title="Permanent link">&para;</a></h1>
+<p>This enum holds the states of the local Bluetooth adapter, which the callback set with <a href="core.html#bluetooth_set_callback_state_changed">bluetooth_set_callback_state_changed</a> receives.</p>
+<p>These constants are referenced by the following functions:</p>
+<ul>
+<li><a href="core.html#bluetooth_set_callback_state_changed">bluetooth_set_callback_state_changed</a></li>
+</ul>
+<p><br></p>
+<table>
+<thead>
+<tr>
+<th>Member</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Unknown</code></td>
+<td>The state is not known yet, for example before <a href="core.html#bluetooth_initialize">bluetooth_initialize</a> or while the platform is starting.</td>
+</tr>
+<tr>
+<td><code>Resetting</code></td>
+<td>The adapter is changing state, for example turning on or off.</td>
+</tr>
+<tr>
+<td><code>Unsupported</code></td>
+<td>The device has no Bluetooth hardware the extension can use.</td>
+</tr>
+<tr>
+<td><code>Unauthorized</code></td>
+<td>The game is not allowed to use Bluetooth: the permission has not been granted yet or was refused.</td>
+</tr>
+<tr>
+<td><code>PoweredOff</code></td>
+<td>The Bluetooth radio is off or disabled.</td>
+</tr>
+<tr>
+<td><code>PoweredOn</code></td>
+<td>The Bluetooth radio is on and the game can use it.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetoothpermissionstatus">BluetoothPermissionStatus<a class="headerlink" href="#bluetoothpermissionstatus" title="Permanent link">&para;</a></h1>
+<p>This enum holds the permission states that <a href="core.html#bluetooth_permission_get_status">bluetooth_permission_get_status</a> returns and the callback of <a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a> receives.</p>
+<p>These constants are referenced by the following functions:</p>
+<ul>
+<li><a href="core.html#bluetooth_permission_get_status">bluetooth_permission_get_status</a></li>
+<li><a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a></li>
+</ul>
+<p><br></p>
+<table>
+<thead>
+<tr>
+<th>Member</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Unknown</code></td>
+<td>The user has not been asked yet, or the extension is not running.</td>
+</tr>
+<tr>
+<td><code>Granted</code></td>
+<td>The game has every Bluetooth permission the platform needs.</td>
+</tr>
+<tr>
+<td><code>Denied</code></td>
+<td>The user refused a permission the game needs, or it is restricted on the device.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetoothfeature">BluetoothFeature<a class="headerlink" href="#bluetoothfeature" title="Permanent link">&para;</a></h1>
+<p>This enum holds the features that <a href="core.html#bluetooth_feature_is_supported">bluetooth_feature_is_supported</a> can be asked about. See that function for which platforms support each one.</p>
+<p>These constants are referenced by the following functions:</p>
+<ul>
+<li><a href="core.html#bluetooth_feature_is_supported">bluetooth_feature_is_supported</a></li>
+</ul>
+<p><br></p>
+<table>
+<thead>
+<tr>
+<th>Member</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>LeCentral</code></td>
+<td>The game can scan for LE devices and connect to them, as <a href="le_client.html#bluetooth_le_is_supported">bluetooth_le_is_supported</a> reports.</td>
+</tr>
+<tr>
+<td><code>LePassiveScan</code></td>
+<td><a href="le_client.html#bluetooth_le_scan_start">bluetooth_le_scan_start</a> with <code>active</code> set to <code>false</code> really scans passively; elsewhere the argument is ignored.</td>
+</tr>
+<tr>
+<td><code>LeAdvertise</code></td>
+<td>The game can advertise, as <a href="le_server.html#bluetooth_le_advertise_is_supported">bluetooth_le_advertise_is_supported</a> reports.</td>
+</tr>
+<tr>
+<td><code>LeAdvertiseName</code></td>
+<td>An advertisement can carry the device name.</td>
+</tr>
+<tr>
+<td><code>LeAdvertiseServiceUuids</code></td>
+<td>An advertisement can carry service UUIDs.</td>
+</tr>
+<tr>
+<td><code>LeAdvertiseServiceData</code></td>
+<td>An advertisement can carry service data.</td>
+</tr>
+<tr>
+<td><code>LeAdvertiseManufacturerData</code></td>
+<td>An advertisement can carry manufacturer data.</td>
+</tr>
+<tr>
+<td><code>LeAdvertiseTxPower</code></td>
+<td>The advertising transmit power can be chosen.</td>
+</tr>
+<tr>
+<td><code>LeAdvertiseIncludeTxPower</code></td>
+<td>An advertisement can carry its transmit power level.</td>
+</tr>
+<tr>
+<td><code>LeAdvertiseNonConnectable</code></td>
+<td>An advertisement can be non-connectable.</td>
+</tr>
+<tr>
+<td><code>LeServer</code></td>
+<td>The game can run an LE GATT server, as <a href="le_server.html#bluetooth_le_server_is_supported">bluetooth_le_server_is_supported</a> reports.</td>
+</tr>
+<tr>
+<td><code>LeServerDescriptorRequests</code></td>
+<td>Reads and writes of a server descriptor reach the read and write request callbacks.</td>
+</tr>
+<tr>
+<td><code>LeServerSignedWrite</code></td>
+<td>A server attribute can use the signed write permissions.</td>
+</tr>
+<tr>
+<td><code>LeServerConnectionEvents</code></td>
+<td>The server connection callback reports a central's connect and disconnect as they happen, not only around its requests and subscriptions.</td>
+</tr>
+<tr>
+<td><code>LePairing</code></td>
+<td><a href="devices.html#bluetooth_pair">bluetooth_pair</a> can pair an LE device.</td>
+</tr>
+<tr>
+<td><code>Classic</code></td>
+<td>The game can scan for and connect to Classic devices, as <a href="classic.html#bluetooth_classic_is_supported">bluetooth_classic_is_supported</a> reports.</td>
+</tr>
+<tr>
+<td><code>ClassicServer</code></td>
+<td>The game can run a Classic server, as <a href="classic.html#bluetooth_classic_server_is_supported">bluetooth_classic_server_is_supported</a> reports.</td>
+</tr>
+<tr>
+<td><code>ClassicPairing</code></td>
+<td><a href="devices.html#bluetooth_pair">bluetooth_pair</a> can pair a Classic device.</td>
+</tr>
+<tr>
+<td><code>ClassicDiscoverable</code></td>
+<td><a href="classic.html#bluetooth_classic_discoverable_start">bluetooth_classic_discoverable_start</a> can make the device discoverable.</td>
+</tr>
+<tr>
+<td><code>ClassicDiscoverableStop</code></td>
+<td><a href="classic.html#bluetooth_classic_discoverable_stop">bluetooth_classic_discoverable_stop</a> can end discoverability early.</td>
+</tr>
+<tr>
+<td><code>PermissionRequest</code></td>
+<td><a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a> shows a system prompt.</td>
+</tr>
+<tr>
+<td><code>LeMtuRequest</code></td>
+<td><a href="le_client.html#bluetooth_le_connection_request_mtu">bluetooth_le_connection_request_mtu</a> negotiates the MTU asked for; elsewhere the platform negotiates it and the request reports that value.</td>
+</tr>
+<tr>
+<td><code>LeReadRssi</code></td>
+<td><a href="le_client.html#bluetooth_le_connection_read_rssi">bluetooth_le_connection_read_rssi</a> can read the signal strength of a connection.</td>
+</tr>
+<tr>
+<td><code>LeConnectionPriority</code></td>
+<td><a href="le_client.html#bluetooth_le_connection_request_priority">bluetooth_le_connection_request_priority</a> can change a connection's priority.</td>
+</tr>
+<tr>
+<td><code>RequestEnable</code></td>
+<td><a href="core.html#bluetooth_request_enable">bluetooth_request_enable</a> can turn the Bluetooth radio on.</td>
+</tr>
+<tr>
+<td><code>PairedDevicesQuery</code></td>
+<td><a href="devices.html#bluetooth_paired_devices_query">bluetooth_paired_devices_query</a> can list the paired devices.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetoothtransport">BluetoothTransport<a class="headerlink" href="#bluetoothtransport" title="Permanent link">&para;</a></h1>
+<p>This enum holds the Bluetooth transports a device or a scan can use.</p>
+<p>These constants are referenced by the following functions:</p>
+<ul>
+<li><a href="devices.html#bluetooth_device_get_transport">bluetooth_device_get_transport</a></li>
+<li><a href="devices.html#bluetooth_set_callback_scan_stopped">bluetooth_set_callback_scan_stopped</a></li>
+</ul>
+<p><br></p>
+<table>
+<thead>
+<tr>
+<th>Member</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Unknown</code></td>
+<td>The transport is not known, for example for a device handle that is not valid.</td>
+</tr>
+<tr>
+<td><code>Classic</code></td>
+<td>Bluetooth Classic (BR/EDR), which the <code>bluetooth_classic_*</code> functions use.</td>
+</tr>
+<tr>
+<td><code>LowEnergy</code></td>
+<td>Bluetooth Low Energy, which the <code>bluetooth_le_*</code> functions use.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<hr />
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      <p align="center">GameMaker 2026</p>
+    </div>
+  
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": ".", "features": ["navigation.top", "navigation.tracking", "toc.follow", "content.code.copy"], "search": "assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/gml.min.js"></script>
+      
+        <script src="assets/js/hljs-init.js"></script>
+      
+        <script src="assets/js/resize-columns.js"></script>
+      
+    
+  </body>
+</html>

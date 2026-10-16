@@ -26,7 +26,7 @@
   ],
   "ForcedPrefabProjectReferences":[],
   "IncludedFiles":[
-    {"$GMIncludedFile":"","%Name":"documentation.html","CopyToMask":0,"filePath":"datafiles","name":"documentation.html","resourceType":"GMIncludedFile","resourceVersion":"2.0",},
+    {"$GMIncludedFile":"","%Name":"GMEXT-Bluetooth.html","CopyToMask":0,"filePath":"datafiles","name":"GMEXT-Bluetooth.html","resourceType":"GMIncludedFile","resourceVersion":"2.0",},
   ],
   "isEcma":false,
   "LibraryEmitters":[],

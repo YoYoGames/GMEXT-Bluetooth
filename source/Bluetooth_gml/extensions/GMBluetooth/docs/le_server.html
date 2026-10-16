@@ -1,0 +1,3003 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+      
+        <link rel="prev" href="le_client.html">
+      
+      
+        <link rel="next" href="classic.html">
+      
+      
+        
+      
+      
+      <link rel="icon" href="assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>LE Server - GMEXT-Bluetooth</title>
+      
+    
+    
+      <link rel="stylesheet" href="assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+    
+      <link rel="stylesheet" href="assets/css/extra.css">
+    
+    <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  <script>(function(){try{var w=["--gm-nav-width","--gm-toc-width"],i,v;for(i=0;i<w.length;i++){v=localStorage.getItem(w[i]);if(v)document.documentElement.style.setProperty(w[i],v)}}catch(e){}})()</script></head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#le-server" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="home.html" title="GMEXT-Bluetooth" class="md-header__button md-logo" aria-label="GMEXT-Bluetooth" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            GMEXT-Bluetooth
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              LE Server
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/YoYoGames/GMEXT-Bluetooth" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="home.html" title="GMEXT-Bluetooth" class="md-nav__button md-logo" aria-label="GMEXT-Bluetooth" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    GMEXT-Bluetooth
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/YoYoGames/GMEXT-Bluetooth" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="home.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Bluetooth Extension
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="getting_started.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="platform_setup.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Platform Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="extension_options.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extension Options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Modules
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Modules
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="core.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="devices.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Devices
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="le_client.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LE Client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LE Server
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="le_server.html" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LE Server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#le-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LE Server
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="LE Server">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Functions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#structs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Structs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#constants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Constants
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_le_advertise_is_supported" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_le_advertise_is_supported
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_le_server_is_supported" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_le_server_is_supported
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_le_advertise_start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_le_advertise_start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_le_advertise_stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_le_advertise_stop
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_le_advertise_is_running" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_le_advertise_is_running
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_le_server_start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_le_server_start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_le_server_stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_le_server_stop
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_le_server_is_running" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_le_server_is_running
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_le_server_add_service" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_le_server_add_service
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_le_server_clear_services" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_le_server_clear_services
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_le_server_respond_read" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_le_server_respond_read
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_le_server_respond_write" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_le_server_respond_write
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_le_server_notify_value" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_le_server_notify_value
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_set_callback_le_server_connection_state_changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_set_callback_le_server_connection_state_changed
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_remove_callback_le_server_connection_state_changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_remove_callback_le_server_connection_state_changed
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_set_callback_le_server_read_request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_set_callback_le_server_read_request
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_remove_callback_le_server_read_request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_remove_callback_le_server_read_request
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_set_callback_le_server_write_request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_set_callback_le_server_write_request
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_remove_callback_le_server_write_request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_remove_callback_le_server_write_request
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothatterror" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothAttError
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothleattributepermission" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothLeAttributePermission
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothleadvertisetxpower" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothLeAdvertiseTxPower
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothledescriptordefinition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothLeDescriptorDefinition
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothleadvertisesettings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothLeAdvertiseSettings
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothleadvertiseservicedata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothLeAdvertiseServiceData
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothleadvertisemanufacturerdata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothLeAdvertiseManufacturerData
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothlecharacteristicdefinition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothLeCharacteristicDefinition
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothleadvertisedata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothLeAdvertiseData
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothleservicedefinition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothLeServiceDefinition
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="classic.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Classic
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#le-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LE Server
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="LE Server">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Functions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#structs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Structs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#constants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Constants
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_le_advertise_is_supported" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_le_advertise_is_supported
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_le_server_is_supported" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_le_server_is_supported
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_le_advertise_start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_le_advertise_start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_le_advertise_stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_le_advertise_stop
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_le_advertise_is_running" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_le_advertise_is_running
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_le_server_start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_le_server_start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_le_server_stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_le_server_stop
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_le_server_is_running" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_le_server_is_running
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_le_server_add_service" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_le_server_add_service
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_le_server_clear_services" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_le_server_clear_services
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_le_server_respond_read" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_le_server_respond_read
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_le_server_respond_write" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_le_server_respond_write
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_le_server_notify_value" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_le_server_notify_value
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_set_callback_le_server_connection_state_changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_set_callback_le_server_connection_state_changed
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_remove_callback_le_server_connection_state_changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_remove_callback_le_server_connection_state_changed
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_set_callback_le_server_read_request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_set_callback_le_server_read_request
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_remove_callback_le_server_read_request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_remove_callback_le_server_read_request
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_set_callback_le_server_write_request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_set_callback_le_server_write_request
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_remove_callback_le_server_write_request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_remove_callback_le_server_write_request
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothatterror" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothAttError
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothleattributepermission" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothLeAttributePermission
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothleadvertisetxpower" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothLeAdvertiseTxPower
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothledescriptordefinition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothLeDescriptorDefinition
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothleadvertisesettings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothLeAdvertiseSettings
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothleadvertiseservicedata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothLeAdvertiseServiceData
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothleadvertisemanufacturerdata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothLeAdvertiseManufacturerData
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothlecharacteristicdefinition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothLeCharacteristicDefinition
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothleadvertisedata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothLeAdvertiseData
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothleservicedefinition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothLeServiceDefinition
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<p><a id="top"></a></p>
+<h1 id="le-server"><strong>LE Server</strong><a class="headerlink" href="#le-server" title="Permanent link">&para;</a></h1>
+<p>The functions to run a GATT server, so that this device acts as an LE peripheral that centrals connect to, read and write, and to advertise it.</p>
+<h2 id="functions">Functions<a class="headerlink" href="#functions" title="Permanent link">&para;</a></h2>
+<p>These are the functions of the GATT server and of advertising.</p>
+<ul>
+<li><a href="le_server.html#bluetooth_le_server_start">bluetooth_le_server_start</a></li>
+<li><a href="le_server.html#bluetooth_le_server_stop">bluetooth_le_server_stop</a></li>
+<li><a href="le_server.html#bluetooth_le_server_add_service">bluetooth_le_server_add_service</a></li>
+<li><a href="le_server.html#bluetooth_le_server_clear_services">bluetooth_le_server_clear_services</a></li>
+<li><a href="le_server.html#bluetooth_le_server_respond_read">bluetooth_le_server_respond_read</a></li>
+<li><a href="le_server.html#bluetooth_le_server_respond_write">bluetooth_le_server_respond_write</a></li>
+<li><a href="le_server.html#bluetooth_le_server_notify_value">bluetooth_le_server_notify_value</a></li>
+<li><a href="le_server.html#bluetooth_le_advertise_start">bluetooth_le_advertise_start</a></li>
+<li><a href="le_server.html#bluetooth_le_advertise_stop">bluetooth_le_advertise_stop</a></li>
+<li><a href="le_server.html#bluetooth_le_server_is_supported">bluetooth_le_server_is_supported</a></li>
+<li><a href="le_server.html#bluetooth_le_server_is_running">bluetooth_le_server_is_running</a></li>
+<li><a href="le_server.html#bluetooth_le_advertise_is_supported">bluetooth_le_advertise_is_supported</a></li>
+<li><a href="le_server.html#bluetooth_le_advertise_is_running">bluetooth_le_advertise_is_running</a></li>
+<li><a href="le_server.html#bluetooth_set_callback_le_server_connection_state_changed">bluetooth_set_callback_le_server_connection_state_changed</a></li>
+<li><a href="le_server.html#bluetooth_remove_callback_le_server_connection_state_changed">bluetooth_remove_callback_le_server_connection_state_changed</a></li>
+<li><a href="le_server.html#bluetooth_set_callback_le_server_read_request">bluetooth_set_callback_le_server_read_request</a></li>
+<li><a href="le_server.html#bluetooth_remove_callback_le_server_read_request">bluetooth_remove_callback_le_server_read_request</a></li>
+<li><a href="le_server.html#bluetooth_set_callback_le_server_write_request">bluetooth_set_callback_le_server_write_request</a></li>
+<li><a href="le_server.html#bluetooth_remove_callback_le_server_write_request">bluetooth_remove_callback_le_server_write_request</a></li>
+</ul>
+<h2 id="structs">Structs<a class="headerlink" href="#structs" title="Permanent link">&para;</a></h2>
+<p>These are the structs that define the services of the GATT server and the advertisement.</p>
+<ul>
+<li><a href="le_server.html#bluetoothleservicedefinition">BluetoothLeServiceDefinition</a></li>
+<li><a href="le_server.html#bluetoothlecharacteristicdefinition">BluetoothLeCharacteristicDefinition</a></li>
+<li><a href="le_server.html#bluetoothledescriptordefinition">BluetoothLeDescriptorDefinition</a></li>
+<li><a href="le_server.html#bluetoothleadvertisesettings">BluetoothLeAdvertiseSettings</a></li>
+<li><a href="le_server.html#bluetoothleadvertisedata">BluetoothLeAdvertiseData</a></li>
+<li><a href="le_server.html#bluetoothleadvertiseservicedata">BluetoothLeAdvertiseServiceData</a></li>
+<li><a href="le_server.html#bluetoothleadvertisemanufacturerdata">BluetoothLeAdvertiseManufacturerData</a></li>
+</ul>
+<h2 id="constants">Constants<a class="headerlink" href="#constants" title="Permanent link">&para;</a></h2>
+<p>These are the constants used by the GATT server and by advertising.</p>
+<ul>
+<li><a href="le_server.html#bluetoothatterror">BluetoothAttError</a></li>
+<li><a href="le_server.html#bluetoothleattributepermission">BluetoothLeAttributePermission</a></li>
+<li><a href="le_server.html#bluetoothleadvertisetxpower">BluetoothLeAdvertiseTxPower</a></li>
+</ul>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_le_advertise_is_supported">bluetooth_le_advertise_is_supported<a class="headerlink" href="#bluetooth_le_advertise_is_supported" title="Permanent link">&para;</a></h1>
+<p>This function checks whether this device can advertise. It returns <code>false</code> before <a href="core.html#bluetooth_initialize">bluetooth_initialize</a> and on a device with no Bluetooth LE. Which parts of an advertisement the device can send is a separate question for <a href="core.html#bluetooth_feature_is_supported">bluetooth_feature_is_supported</a> (see <a href="le_server.html#bluetooth_le_advertise_start">bluetooth_le_advertise_start</a>).</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Windows the adapter must support the peripheral role, and on Android it must support multiple advertisement.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_le_advertise_is_supported()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p><code>true</code> if the device can advertise, otherwise <code>false</code>.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">can_advertise = bluetooth_le_advertise_is_supported();</code></pre>
+The above code stores whether the device can advertise in the instance variable <code>can_advertise</code>.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_le_server_is_supported">bluetooth_le_server_is_supported<a class="headerlink" href="#bluetooth_le_server_is_supported" title="Permanent link">&para;</a></h1>
+<p>This function checks whether this device can run a GATT server. It returns <code>false</code> before <a href="core.html#bluetooth_initialize">bluetooth_initialize</a> and on a device with no Bluetooth LE.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Windows the answer comes from the adapter, which must support the peripheral role.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_le_server_is_supported()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p><code>true</code> if the device can run a GATT server, otherwise <code>false</code>.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">if (!bluetooth_le_server_is_supported())
+{
+    show_debug_message("This device cannot act as a peripheral");
+}</code></pre>
+The above code reports when the device cannot run a GATT server.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_le_advertise_start">bluetooth_le_advertise_start<a class="headerlink" href="#bluetooth_le_advertise_start" title="Permanent link">&para;</a></h1>
+<p>This function starts advertising this device, with the given settings and data, so that scanning centrals can find it. It returns straight away, and the callback is called once when the advertisement has started or has failed. Only one advertisement runs at a time: stop it with <a href="le_server.html#bluetooth_le_advertise_stop">bluetooth_le_advertise_stop</a> before you start another one. Stopping it before it has started makes the start fail with <a href="core.html#bluetootherror">BluetoothError</a>.OperationFailed.</p>
+<p>The function returns <a href="core.html#bluetootherror">BluetoothError</a>.Ok when the start has begun. Otherwise it returns the reason, which is also in <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>, and the callback is never called:</p>
+<ul>
+<li>NotInitialized before <a href="core.html#bluetooth_initialize">bluetooth_initialize</a>.</li>
+<li>InvalidArgument for a <code>tx_power</code> that is not a <a href="le_server.html#bluetoothleadvertisetxpower">BluetoothLeAdvertiseTxPower</a> member, a UUID that is not valid, service data whose UUID is not also in <code>service_uuids</code>, or a <code>company_id</code> outside 0-65535.</li>
+<li>PermissionDenied when the Bluetooth permission is missing or was refused, or BluetoothDisabled when the radio is off.</li>
+<li>Busy while an advertisement is starting or running.</li>
+<li>NotSupported for a part of the settings or data that the platform cannot send. You can ask <a href="core.html#bluetooth_feature_is_supported">bluetooth_feature_is_supported</a> about each part beforehand: <a href="core.html#bluetoothfeature">BluetoothFeature</a>.LeAdvertiseName, LeAdvertiseServiceUuids, LeAdvertiseServiceData, LeAdvertiseManufacturerData, LeAdvertiseTxPower, LeAdvertiseIncludeTxPower and LeAdvertiseNonConnectable.</li>
+</ul>
+<p>Advertising differs a lot between platforms:</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On macOS and iOS the advertisement carries only the local name and the service UUIDs, and is always connectable. <code>connectable</code> set to <code>false</code>, a <code>tx_power</code>, <code>include_tx_power</code> set to <code>true</code>, service data and manufacturer data each return NotSupported. The name is the computer's name on macOS and the device's name on iOS.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Windows a service UUID, its service data and the name are advertised only through a GATT service that the server already holds, so every UUID in <code>service_uuids</code> must be a service added with <a href="le_server.html#bluetooth_le_server_add_service">bluetooth_le_server_add_service</a>, and <code>include_name</code> needs at least one such UUID; otherwise the call returns NotSupported. Manufacturer data, <code>include_tx_power</code> and <code>tx_power</code> go out in a separate advertisement. An advertisement with neither a service UUID nor one of these returns NotSupported.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Android the advertisement is one legacy advertising packet, with no scan response, and must fit in its 31 bytes: data that does not fit fails in the callback with <a href="core.html#bluetootherror">BluetoothError</a>.InvalidArgument. Android 12 and later need the <code>BLUETOOTH_ADVERTISE</code> permission.</p>
+</div>
+<p>This function operates asynchronously, which means that it does not immediately return the requested result. Instead, upon completion of the task, it will trigger the <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a>.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_le_advertise_start(settings, data, callback)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>settings</td>
+<td><a href="le_server.html#bluetoothleadvertisesettings">BluetoothLeAdvertiseSettings</a></td>
+<td>How the advertisement is sent.</td>
+</tr>
+<tr>
+<td>data</td>
+<td><a href="le_server.html#bluetoothleadvertisedata">BluetoothLeAdvertiseData</a></td>
+<td>What the advertisement carries.</td>
+</tr>
+<tr>
+<td>callback</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Script_Functions.htm">Function</a></td>
+<td>The function to call once the advertisement has started or has failed.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a></p>
+</blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the start has begun, otherwise the reason it did not.</p>
+<p><br></p>
+<p><strong>Triggers:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a></p>
+</blockquote>
+<p>Called once, when the advertisement has started, has failed or was stopped before it started.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>error_code</td>
+<td><a href="core.html#bluetootherror">BluetoothError</a></td>
+<td><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the device is advertising, otherwise the reason it is not.</td>
+</tr>
+<tr>
+<td>message</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></td>
+<td>A description of the failure, or an empty string on success.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">var _settings = new BluetoothLeAdvertiseSettings();
+_settings.connectable = true;
+
+var _data = new BluetoothLeAdvertiseData();
+_data.include_name = false;
+_data.include_tx_power = false;
+_data.service_uuids = ["6e400001-b5a3-f393-e0a9-e50e24dcca9e"];
+_data.service_data = [];
+_data.manufacturer_data = [];
+
+var _result = bluetooth_le_advertise_start(_settings, _data, function(_error_code, _message)
+{
+    if (_error_code != BluetoothError.Ok)
+    {
+        show_debug_message($"Advertising failed: {_message}");
+        exit;
+    }
+    show_debug_message("Advertising");
+});
+
+if (_result != BluetoothError.Ok)
+{
+    show_debug_message($"Advertising did not start: {bluetooth_last_error_message()}");
+}</code></pre>
+The above code advertises the UUID of the service that the server holds, as a connectable advertisement at the platform's default power, since <code>tx_power</code> is left undefined. The name is left out, which keeps the advertisement within the 31 bytes Android allows, and the service has been added first, as Windows requires, so this advertisement can be sent on every platform. The callback reports whether the advertisement started; if the call itself fails, the reason is read with <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a> and the callback is never called.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_le_advertise_stop">bluetooth_le_advertise_stop<a class="headerlink" href="#bluetooth_le_advertise_stop" title="Permanent link">&para;</a></h1>
+<p>This function stops advertising. A start that is still in progress fails, and its callback is called with <a href="core.html#bluetootherror">BluetoothError</a>.OperationFailed. Stopping when nothing is advertising returns <a href="core.html#bluetootherror">BluetoothError</a>.Ok and does nothing.</p>
+<p>The function returns NotInitialized before <a href="core.html#bluetooth_initialize">bluetooth_initialize</a>, and OperationFailed when the platform could not stop the advertisement, with the reason in <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_le_advertise_stop()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a></p>
+</blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a>.Ok if advertising has stopped, otherwise the reason it has not.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">if (bluetooth_le_advertise_is_running())
+{
+    bluetooth_le_advertise_stop();
+}</code></pre>
+The above code stops advertising when an advertisement is starting or running.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_le_advertise_is_running">bluetooth_le_advertise_is_running<a class="headerlink" href="#bluetooth_le_advertise_is_running" title="Permanent link">&para;</a></h1>
+<p>This function checks whether an advertisement is starting or running. It returns <code>true</code> from a successful <a href="le_server.html#bluetooth_le_advertise_start">bluetooth_le_advertise_start</a>, while the start is still in progress, until the advertisement fails to start or is stopped.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_le_advertise_is_running()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p><code>true</code> if an advertisement is starting or running, otherwise <code>false</code>.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">draw_text(16, 16, bluetooth_le_advertise_is_running() ? "Advertising" : "Not advertising");</code></pre>
+The above code, in a Draw Event, shows whether the device is advertising.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_le_server_start">bluetooth_le_server_start<a class="headerlink" href="#bluetooth_le_server_start" title="Permanent link">&para;</a></h1>
+<p>This function starts the local GATT server, so that this device can act as an LE peripheral and remote centrals can connect to it. There is one server: calling this function while it is already running returns <a href="core.html#bluetootherror">BluetoothError</a>.Ok and starts nothing new. Once the server runs, you add its services with <a href="le_server.html#bluetooth_le_server_add_service">bluetooth_le_server_add_service</a>.</p>
+<p>The function returns <a href="core.html#bluetootherror">BluetoothError</a>.Ok when the server is running. Otherwise it returns the reason, which is also in <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>: NotInitialized before <a href="core.html#bluetooth_initialize">bluetooth_initialize</a>, NotSupported when the device cannot act as a peripheral (see <a href="le_server.html#bluetooth_le_server_is_supported">bluetooth_le_server_is_supported</a>), PermissionDenied when the Bluetooth permission is missing or was refused, or BluetoothDisabled when the radio is off.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Android 12 and later the server needs the <code>BLUETOOTH_CONNECT</code> permission, and the call returns PermissionDenied without it.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_le_server_start()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a></p>
+</blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the server is running, otherwise the reason it could not start.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">var _result = bluetooth_le_server_start();
+if (_result != BluetoothError.Ok)
+{
+    show_debug_message($"Server did not start: {bluetooth_last_error_message()}");
+}
+else
+{
+    show_debug_message("Server running, adding the services");
+    add_services();
+}</code></pre>
+The above code starts the GATT server. If the call fails, the reason is read with <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>; otherwise the instance's own <code>add_services</code> method is called to add the services with <a href="le_server.html#bluetooth_le_server_add_service">bluetooth_le_server_add_service</a>.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_le_server_stop">bluetooth_le_server_stop<a class="headerlink" href="#bluetooth_le_server_stop" title="Permanent link">&para;</a></h1>
+<p>This function stops the GATT server and removes every service it holds.</p>
+<p>Before the server stops, every read and write request still waiting for an answer is answered with <a href="le_server.html#bluetoothatterror">BluetoothAttError</a>.UnlikelyError, and every <a href="le_server.html#bluetooth_le_server_add_service">bluetooth_le_server_add_service</a> still in progress calls its callback with <a href="core.html#bluetootherror">BluetoothError</a>.OperationFailed. The server connection callback (see <a href="le_server.html#bluetooth_set_callback_le_server_connection_state_changed">bluetooth_set_callback_le_server_connection_state_changed</a>) is then called with a disconnect for each central still connected, and every service, characteristic and descriptor handle stops being valid.</p>
+<p>Stopping a server that is not running returns <a href="core.html#bluetootherror">BluetoothError</a>.Ok and does nothing. The function returns NotInitialized before <a href="core.html#bluetooth_initialize">bluetooth_initialize</a>, with the reason in <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On macOS and iOS stopping the server also stops advertising.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_le_server_stop()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a></p>
+</blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the server is stopped, otherwise the reason it could not stop.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">bluetooth_le_server_stop();
+service = 0;
+characteristic_status = 0;</code></pre>
+The above code stops the GATT server and clears the instance variables that held its service and characteristic handles, since they are no longer valid.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_le_server_is_running">bluetooth_le_server_is_running<a class="headerlink" href="#bluetooth_le_server_is_running" title="Permanent link">&para;</a></h1>
+<p>This function checks whether the GATT server is running, from a successful <a href="le_server.html#bluetooth_le_server_start">bluetooth_le_server_start</a> until <a href="le_server.html#bluetooth_le_server_stop">bluetooth_le_server_stop</a> or <a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a>.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_le_server_is_running()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p><code>true</code> if the server is running, otherwise <code>false</code>.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">if (!bluetooth_le_server_is_running())
+{
+    bluetooth_le_server_start();
+}</code></pre>
+The above code starts the GATT server when it is not running yet.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_le_server_add_service">bluetooth_le_server_add_service<a class="headerlink" href="#bluetooth_le_server_add_service" title="Permanent link">&para;</a></h1>
+<p>This function adds a primary GATT service, described by the given <a href="le_server.html#bluetoothleservicedefinition">BluetoothLeServiceDefinition</a>, to the running GATT server. The service is added in the background, and the callback is called once when it has been added or has failed.</p>
+<p>The function returns <a href="core.html#bluetootherror">BluetoothError</a>.Ok when the add has started. Otherwise it returns the reason, which is also in <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>, and the callback is never called:</p>
+<ul>
+<li>NotInitialized before <a href="core.html#bluetooth_initialize">bluetooth_initialize</a>.</li>
+<li>InvalidArgument for a UUID that is not valid, characteristic <code>properties</code> with bits that are not <a href="le_client.html#bluetoothlecharacteristicproperty">BluetoothLeCharacteristicProperty</a> flags, <code>permissions</code> with bits that are not <a href="le_server.html#bluetoothleattributepermission">BluetoothLeAttributePermission</a> flags, or an initial <code>value</code> longer than 512 bytes.</li>
+<li>OperationFailed when the server is not running: call <a href="le_server.html#bluetooth_le_server_start">bluetooth_le_server_start</a> first.</li>
+<li>Busy when a service with the same UUID has already been added.</li>
+<li>NotSupported for a permission or a descriptor the platform cannot host (see the notes below).</li>
+</ul>
+<p>On success the callback receives the handle of the new server service. You walk it with the LE client getters: <a href="le_client.html#bluetooth_le_characteristic_get_count">bluetooth_le_characteristic_get_count</a> and <a href="le_client.html#bluetooth_le_characteristic_get_at">bluetooth_le_characteristic_get_at</a> list its characteristics, and <a href="le_client.html#bluetooth_le_descriptor_get_count">bluetooth_le_descriptor_get_count</a> and <a href="le_client.html#bluetooth_le_descriptor_get_at">bluetooth_le_descriptor_get_at</a> the descriptors of each characteristic, while <a href="le_client.html#bluetooth_le_characteristic_get_uuid">bluetooth_le_characteristic_get_uuid</a>, <a href="le_client.html#bluetooth_le_characteristic_get_properties">bluetooth_le_characteristic_get_properties</a> and <a href="le_client.html#bluetooth_le_descriptor_get_uuid">bluetooth_le_descriptor_get_uuid</a> read them. They are listed in definition order, so the characteristic at index 0 is the first entry of the definition's <code>characteristics</code> array, and two attributes with the same UUID each get their own handle. A Client Characteristic Configuration descriptor (0x2902) is managed by the platform: it gets no handle and is left out of the list, even when the definition names it, so the descriptor indices count only the other descriptors.</p>
+<p>These are the handles that <a href="le_server.html#bluetooth_le_server_notify_value">bluetooth_le_server_notify_value</a> takes and that the read and write request callbacks report. They stay valid until <a href="le_server.html#bluetooth_le_server_clear_services">bluetooth_le_server_clear_services</a>, <a href="le_server.html#bluetooth_le_server_stop">bluetooth_le_server_stop</a> or <a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a>, and a client call (read, write, subscribe or discover) given one returns InvalidHandle.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Windows the system publishes the Characteristic User Description descriptor (0x2901) itself, and a definition that names it makes the whole add fail in the callback with <a href="core.html#bluetootherror">BluetoothError</a>.OperationFailed ("The provided descriptor uuid is reserved and will be automatically published by the system."). Use a custom 128-bit descriptor UUID there instead.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On macOS and iOS the only descriptor a server can host is the Characteristic User Description (0x2901), which is served with an empty value; any other descriptor returns NotSupported. Windows, macOS and iOS have no signed write permission, so <a href="le_server.html#bluetoothleattributepermission">BluetoothLeAttributePermission</a>.WriteSigned and WriteSignedMitm return NotSupported there.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On macOS and iOS the platform drops every service when the Bluetooth radio turns off. Their handles stop being valid, and you must add the services again once the state callback (see <a href="core.html#bluetooth_set_callback_state_changed">bluetooth_set_callback_state_changed</a>) reports <a href="core.html#bluetoothstate">BluetoothState</a>.PoweredOn.</p>
+</div>
+<p>This function operates asynchronously, which means that it does not immediately return the requested result. Instead, upon completion of the task, it will trigger the <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a>.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_le_server_add_service(service, callback)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>service</td>
+<td><a href="le_server.html#bluetoothleservicedefinition">BluetoothLeServiceDefinition</a></td>
+<td>The definition of the service to add.</td>
+</tr>
+<tr>
+<td>callback</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Script_Functions.htm">Function</a></td>
+<td>The function to call once the service has been added or has failed.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a></p>
+</blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the add has started, otherwise the reason it did not.</p>
+<p><br></p>
+<p><strong>Triggers:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a></p>
+</blockquote>
+<p>Called once, when the service has been added or the add has failed.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>error_code</td>
+<td><a href="core.html#bluetootherror">BluetoothError</a></td>
+<td><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the service was added, otherwise the reason it was not.</td>
+</tr>
+<tr>
+<td>message</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></td>
+<td>A description of the failure, or an empty string on success.</td>
+</tr>
+<tr>
+<td>service</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the new server service, or 0 on failure.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">var _characteristic = new BluetoothLeCharacteristicDefinition();
+_characteristic.uuid = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+_characteristic.properties = BluetoothLeCharacteristicProperty.Read | BluetoothLeCharacteristicProperty.Notify;
+_characteristic.permissions = BluetoothLeAttributePermission.Read;
+_characteristic.value = [];
+_characteristic.descriptors = [];
+
+var _definition = new BluetoothLeServiceDefinition();
+_definition.uuid = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+_definition.characteristics = [_characteristic];
+
+var _result = bluetooth_le_server_add_service(_definition, function(_error_code, _message, _service)
+{
+    if (_error_code != BluetoothError.Ok)
+    {
+        show_debug_message($"Service not added: {_message}");
+        exit;
+    }
+    service = _service;
+    characteristic_status = bluetooth_le_characteristic_get_at(_service, 0);
+    show_debug_message($"Service added with {bluetooth_le_characteristic_get_count(_service)} characteristic(s)");
+});
+
+if (_result != BluetoothError.Ok)
+{
+    show_debug_message($"Add did not start: {bluetooth_last_error_message()}");
+}</code></pre>
+The above code defines a service with one characteristic that can be read and notified, and has no initial value, so its reads reach the read request callback. The definition is passed to <a href="le_server.html#bluetooth_le_server_add_service">bluetooth_le_server_add_service</a>. When the callback reports success, the service handle is kept in <code>service</code> and the handle of its first (and only) characteristic, read with <a href="le_client.html#bluetooth_le_characteristic_get_at">bluetooth_le_characteristic_get_at</a>, in <code>characteristic_status</code>. If the add could not start, the reason is read with <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_le_server_clear_services">bluetooth_le_server_clear_services<a class="headerlink" href="#bluetooth_le_server_clear_services" title="Permanent link">&para;</a></h1>
+<p>This function removes every service from the running GATT server, which keeps running.</p>
+<p>Every read and write request still waiting for an answer is answered with <a href="le_server.html#bluetoothatterror">BluetoothAttError</a>.UnlikelyError, every <a href="le_server.html#bluetooth_le_server_add_service">bluetooth_le_server_add_service</a> still in progress calls its callback with <a href="core.html#bluetootherror">BluetoothError</a>.OperationFailed, and every service, characteristic and descriptor handle stops being valid. A service UUID is free to be added again afterwards.</p>
+<p>Clearing a server that is not running returns <a href="core.html#bluetootherror">BluetoothError</a>.Ok and does nothing. The function returns NotInitialized before <a href="core.html#bluetooth_initialize">bluetooth_initialize</a>, with the reason in <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Windows a service UUID that was advertised through one of the cleared services is no longer advertised.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_le_server_clear_services()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a></p>
+</blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the services were cleared, otherwise the reason they were not.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">if (bluetooth_le_server_clear_services() == BluetoothError.Ok)
+{
+    service = 0;
+    add_services();
+}</code></pre>
+The above code removes every service from the server, clears the stored service handle and calls the instance's own <code>add_services</code> method to add the services again.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_le_server_respond_read">bluetooth_le_server_respond_read<a class="headerlink" href="#bluetooth_le_server_respond_read" title="Permanent link">&para;</a></h1>
+<p>This function answers a read request that the read request callback (see <a href="le_server.html#bluetooth_set_callback_le_server_read_request">bluetooth_set_callback_le_server_read_request</a>) reported. With <a href="le_server.html#bluetoothatterror">BluetoothAttError</a>.Success it sends <code>size</code> bytes of the given buffer, starting at <code>offset</code>, as the value read; any other code refuses the read, and the buffer, offset and size are then ignored. Answer with the bytes of the value from the request's own offset onwards, or with <a href="le_server.html#bluetoothatterror">BluetoothAttError</a>.InvalidOffset when that offset is past the end of the value.</p>
+<p>You must answer every read request, once. The request is checked before anything is sent, so a call that fails can be retried. The function returns <a href="core.html#bluetootherror">BluetoothError</a>.Ok when the answer was sent, otherwise the reason, which is also in <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>: NotInitialized before <a href="core.html#bluetooth_initialize">bluetooth_initialize</a>, InvalidHandle for a request id that is unknown, already answered or expired, InvalidArgument for an <code>error_code</code> that is not a <a href="le_server.html#bluetoothatterror">BluetoothAttError</a> member, for the id of a write request (answer it with <a href="le_server.html#bluetooth_le_server_respond_write">bluetooth_le_server_respond_write</a>), or for an offset and size outside the buffer when sending a value, and OperationFailed when the platform could not send the answer.</p>
+<p>A request you do not answer expires 30 seconds after it arrived, which is the ATT transaction timeout: by then the central has usually given up on the link, and a call with its id returns InvalidHandle. Expired requests are swept when the next request arrives. Stopping the server or clearing its services answers every waiting request with <a href="le_server.html#bluetoothatterror">BluetoothAttError</a>.UnlikelyError.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Windows, macOS and iOS the extension answers an expired request with <a href="le_server.html#bluetoothatterror">BluetoothAttError</a>.UnlikelyError when it sweeps it. On Android an expired request is dropped without an answer, and so is every request of a central that disconnects.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The <code>data</code> argument must be an existing buffer even when you refuse the read.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_le_server_respond_read(request_id, error_code, data, offset, size)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>request_id</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The id of the request, as the read request callback reported it.</td>
+</tr>
+<tr>
+<td>error_code</td>
+<td><a href="le_server.html#bluetoothatterror">BluetoothAttError</a></td>
+<td><a href="le_server.html#bluetoothatterror">BluetoothAttError</a>.Success to send the value, or the ATT error to refuse the read with.</td>
+</tr>
+<tr>
+<td>data</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/Buffers.htm">Buffer</a></td>
+<td>The buffer holding the value to send.</td>
+</tr>
+<tr>
+<td>offset</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The position in the buffer of the first byte to send (in bytes).</td>
+</tr>
+<tr>
+<td>size</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The number of bytes to send.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a></p>
+</blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the answer was sent, otherwise the reason it was not.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">bluetooth_set_callback_le_server_read_request(function(_request_id, _connection, _characteristic, _descriptor, _offset)
+{
+    if (_characteristic != characteristic_status || _descriptor != 0)
+    {
+        bluetooth_le_server_respond_read(_request_id, BluetoothAttError.ReadNotPermitted, reply_buffer, 0, 0);
+        exit;
+    }
+
+    buffer_seek(reply_buffer, buffer_seek_start, 0);
+    buffer_write(reply_buffer, buffer_text, status_text);
+    var _length = buffer_tell(reply_buffer);
+    if (_offset &gt; _length)
+    {
+        bluetooth_le_server_respond_read(_request_id, BluetoothAttError.InvalidOffset, reply_buffer, 0, 0);
+        exit;
+    }
+
+    bluetooth_le_server_respond_read(_request_id, BluetoothAttError.Success, reply_buffer, _offset, _length - _offset);
+});</code></pre>
+The above code answers read requests. A request for any attribute other than the characteristic stored in <code>characteristic_status</code> is refused with <a href="le_server.html#bluetoothatterror">BluetoothAttError</a>.ReadNotPermitted. Otherwise the text in <code>status_text</code> is written to <code>reply_buffer</code>, a fixed buffer the instance created earlier, and the bytes from the requested offset onwards are sent; an offset past the end of the text is refused with <a href="le_server.html#bluetoothatterror">BluetoothAttError</a>.InvalidOffset.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_le_server_respond_write">bluetooth_le_server_respond_write<a class="headerlink" href="#bluetooth_le_server_respond_write" title="Permanent link">&para;</a></h1>
+<p>This function answers a write request that the write request callback (see <a href="le_server.html#bluetooth_set_callback_le_server_write_request">bluetooth_set_callback_le_server_write_request</a>) reported. <a href="le_server.html#bluetoothatterror">BluetoothAttError</a>.Success accepts the write; any other code refuses it with that ATT error.</p>
+<p>You must call this function for every write request, once, including a write without response (<code>response_needed</code> is <code>false</code>): nothing is sent to the central then, but the request is released. The request's value is freed with it, so you must copy the value with <a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a> before you answer. A write without response that you do not answer is dropped 5 seconds after it arrived, and any other write request expires after 30 seconds, as described for <a href="le_server.html#bluetooth_le_server_respond_read">bluetooth_le_server_respond_read</a>.</p>
+<p>The function returns <a href="core.html#bluetootherror">BluetoothError</a>.Ok when the answer was sent or the request released, otherwise the reason, which is also in <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>: NotInitialized before <a href="core.html#bluetooth_initialize">bluetooth_initialize</a>, InvalidHandle for a request id that is unknown, already answered or expired, InvalidArgument for an <code>error_code</code> that is not a <a href="le_server.html#bluetoothatterror">BluetoothAttError</a> member or for the id of a read request (answer it with <a href="le_server.html#bluetooth_le_server_respond_read">bluetooth_le_server_respond_read</a>), and OperationFailed when the platform could not send the answer. A call that fails a check can be retried.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>A long write, or a central writing several attributes in one go, is answered once on Android, macOS and iOS: when the last of its requests has been answered, with the first error code given, or Success.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_le_server_respond_write(request_id, error_code)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>request_id</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The id of the request, as the write request callback reported it.</td>
+</tr>
+<tr>
+<td>error_code</td>
+<td><a href="le_server.html#bluetoothatterror">BluetoothAttError</a></td>
+<td><a href="le_server.html#bluetoothatterror">BluetoothAttError</a>.Success to accept the write, or the ATT error to refuse it with.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a></p>
+</blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the answer was sent or the request released, otherwise the reason it was not.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">var _result = bluetooth_le_server_respond_write(_request_id, BluetoothAttError.Success);
+if (_result != BluetoothError.Ok)
+{
+    show_debug_message($"Write not answered: {bluetooth_last_error_message()}");
+}</code></pre>
+The above code, run inside the write request callback after the value has been fetched, accepts the write with the given request id and reports the reason if the answer could not be sent.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_le_server_notify_value">bluetooth_le_server_notify_value<a class="headerlink" href="#bluetooth_le_server_notify_value" title="Permanent link">&para;</a></h1>
+<p>This function pushes a new value of a server characteristic to the centrals subscribed to it, as a notification or an indication, whichever each central subscribed with. The characteristic is a handle from a service that <a href="le_server.html#bluetooth_le_server_add_service">bluetooth_le_server_add_service</a> added. With a connection of 0 the value goes to every subscriber; with a server connection handle (from the read, write or connection callbacks) it goes to that central only. A call with no subscriber to send to returns <a href="core.html#bluetootherror">BluetoothError</a>.Ok and sends nothing.</p>
+<p>The value is copied, so you can free the buffer as soon as the function returns. It is queued and sent as the link allows: while 64 values are waiting to be sent the function returns Busy, and you should try again later, for example on the next step.</p>
+<p>The function returns <a href="core.html#bluetootherror">BluetoothError</a>.Ok when the value was queued, otherwise the reason, which is also in <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>: NotInitialized before <a href="core.html#bluetooth_initialize">bluetooth_initialize</a>, InvalidHandle for a characteristic that is not a live server characteristic or a connection that is not a connected server connection, InvalidArgument for an offset and size outside the buffer, NotFound when the given central is not subscribed to the characteristic, or Busy.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Android the limit of 64 counts one value per subscriber, so a value sent to every subscriber takes one place for each of them.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_le_server_notify_value(characteristic, connection, data, offset, size)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>characteristic</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the server characteristic whose value changed.</td>
+</tr>
+<tr>
+<td>connection</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The server connection handle of the central to send to, or 0 for every subscriber.</td>
+</tr>
+<tr>
+<td>data</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/Buffers.htm">Buffer</a></td>
+<td>The buffer holding the new value.</td>
+</tr>
+<tr>
+<td>offset</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The position in the buffer of the first byte to send (in bytes).</td>
+</tr>
+<tr>
+<td>size</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The number of bytes to send.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a></p>
+</blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the value was queued, otherwise the reason it was not.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">var _buffer = buffer_create(4, buffer_fixed, 1);
+buffer_write(_buffer, buffer_u32, score);
+var _result = bluetooth_le_server_notify_value(characteristic_status, 0, _buffer, 0, 4);
+buffer_delete(_buffer);
+
+if (_result == BluetoothError.Busy)
+{
+    notify_pending = true;
+}
+else if (_result != BluetoothError.Ok)
+{
+    show_debug_message($"Notify failed: {bluetooth_last_error_message()}");
+}</code></pre>
+The above code writes the instance's <code>score</code> to a new buffer as a 32-bit value and sends it to every central subscribed to the characteristic in <code>characteristic_status</code>. The buffer is deleted straight away, since the value has been copied. When too many values are waiting the instance sets <code>notify_pending</code> to try again later; any other failure is reported with <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_set_callback_le_server_connection_state_changed">bluetooth_set_callback_le_server_connection_state_changed<a class="headerlink" href="#bluetooth_set_callback_le_server_connection_state_changed" title="Permanent link">&para;</a></h1>
+<p>This function sets the function to call when a remote central connects to or disconnects from the GATT server. Setting a callback replaces the one set before, and it stays set across <a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a>.</p>
+<p>The connection handle it reports is the server connection that the read and write request callbacks carry and that <a href="le_server.html#bluetooth_le_server_notify_value">bluetooth_le_server_notify_value</a> takes to send to that central only. It is retired on the disconnect, and a central that comes back gets a new one. A server connection is not a client connection: <a href="le_client.html#bluetooth_le_disconnect">bluetooth_le_disconnect</a> given one returns InvalidHandle, since it ends when the central disconnects. <a href="le_server.html#bluetooth_le_server_stop">bluetooth_le_server_stop</a> reports a disconnect for each central still connected.</p>
+<p>The device is the central as a device handle. It enters the device cache without the device found callback being called (see <a href="devices.html#bluetooth_set_callback_device_found">bluetooth_set_callback_device_found</a>).</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Only Android reports a central's connect and disconnect as they happen (<a href="core.html#bluetoothfeature">BluetoothFeature</a>.LeServerConnectionEvents). Windows reports a central on its first request or subscription, and when its session closes. macOS and iOS have no peripheral-side connection event: they report a central on its first request or subscription, and its disconnect when its last subscription ends, so a central that never subscribes is never reported disconnected.</p>
+</div>
+<p>This function operates asynchronously, which means that it does not immediately return the requested result. Instead, upon completion of the task, it will trigger the <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a>.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_set_callback_le_server_connection_state_changed(callback)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>callback</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Script_Functions.htm">Function</a></td>
+<td>The function to call when a central connects or disconnects.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p><code>true</code> once the callback is set.</p>
+<p><br></p>
+<p><strong>Triggers:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a></p>
+</blockquote>
+<p>Called each time a central connects to or disconnects from the GATT server.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>connection</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The server connection handle of the central.</td>
+</tr>
+<tr>
+<td>connected</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></td>
+<td><code>true</code> if the central connected, <code>false</code> if it disconnected.</td>
+</tr>
+<tr>
+<td>device</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The device handle of the central.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">bluetooth_set_callback_le_server_connection_state_changed(function(_connection, _connected, _device)
+{
+    if (_connected)
+    {
+        show_debug_message($"Central {bluetooth_device_get_id(_device)} connected");
+        array_push(centrals, _connection);
+    }
+    else
+    {
+        var _index = array_get_index(centrals, _connection);
+        if (_index &gt;= 0)
+        {
+            array_delete(centrals, _index, 1);
+        }
+    }
+});</code></pre>
+The above code keeps the server connections of the connected centrals in the instance's <code>centrals</code> array. A central that connects is logged with its device id, read with <a href="devices.html#bluetooth_device_get_id">bluetooth_device_get_id</a>, and its connection is added to the array; one that disconnects is removed from it.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_remove_callback_le_server_connection_state_changed">bluetooth_remove_callback_le_server_connection_state_changed<a class="headerlink" href="#bluetooth_remove_callback_le_server_connection_state_changed" title="Permanent link">&para;</a></h1>
+<p>This function removes the function set with <a href="le_server.html#bluetooth_set_callback_le_server_connection_state_changed">bluetooth_set_callback_le_server_connection_state_changed</a>. Centrals keep connecting and disconnecting, but the game is no longer told.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_remove_callback_le_server_connection_state_changed()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p><code>true</code> once the callback is removed.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">bluetooth_remove_callback_le_server_connection_state_changed();</code></pre>
+The above code stops the server connection callback from being called.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_set_callback_le_server_read_request">bluetooth_set_callback_le_server_read_request<a class="headerlink" href="#bluetooth_set_callback_le_server_read_request" title="Permanent link">&para;</a></h1>
+<p>This function sets the function to call when a remote central reads an attribute of the GATT server. Setting a callback replaces the one set before, and it stays set across <a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a>.</p>
+<p>The callback reports the server characteristic read, or the one the descriptor belongs to; <code>descriptor</code> is 0 for a read of the characteristic's value. <code>offset</code> is where in the value the central reads from: a central reading a long value asks again at later offsets, and you answer each request with the bytes from its offset onwards. You must answer every request with <a href="le_server.html#bluetooth_le_server_respond_read">bluetooth_le_server_respond_read</a>; a request that is not answered expires after 30 seconds, as described there.</p>
+<p>Some reads never reach the callback. A characteristic defined with an initial <code>value</code> is answered by the platform, on every platform. The Client Characteristic Configuration descriptor (0x2902) is answered by the platform too. While no callback is set, every read request is refused at once with <a href="le_server.html#bluetoothatterror">BluetoothAttError</a>.RequestNotSupported.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>macOS and iOS never report a descriptor read (<a href="core.html#bluetoothfeature">BluetoothFeature</a>.LeServerDescriptorRequests), and serve the User Description descriptor they can host with an empty value.</p>
+</div>
+<p>This function operates asynchronously, which means that it does not immediately return the requested result. Instead, upon completion of the task, it will trigger the <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a>.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_set_callback_le_server_read_request(callback)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>callback</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Script_Functions.htm">Function</a></td>
+<td>The function to call for each read request.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p><code>true</code> once the callback is set.</p>
+<p><br></p>
+<p><strong>Triggers:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a></p>
+</blockquote>
+<p>Called once for each read request a central makes.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>request_id</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The id to answer the request with, using <a href="le_server.html#bluetooth_le_server_respond_read">bluetooth_le_server_respond_read</a>.</td>
+</tr>
+<tr>
+<td>connection</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The server connection handle of the central.</td>
+</tr>
+<tr>
+<td>characteristic</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the server characteristic read, or of the one the descriptor belongs to.</td>
+</tr>
+<tr>
+<td>descriptor</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the server descriptor read, or 0 for a read of the characteristic.</td>
+</tr>
+<tr>
+<td>offset</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The position in the value that the central reads from (in bytes).</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">bluetooth_set_callback_le_server_read_request(function(_request_id, _connection, _characteristic, _descriptor, _offset)
+{
+    buffer_seek(reply_buffer, buffer_seek_start, 0);
+    buffer_write(reply_buffer, buffer_u32, score);
+    if (_offset &gt; 4)
+    {
+        bluetooth_le_server_respond_read(_request_id, BluetoothAttError.InvalidOffset, reply_buffer, 0, 0);
+        exit;
+    }
+    bluetooth_le_server_respond_read(_request_id, BluetoothAttError.Success, reply_buffer, _offset, 4 - _offset);
+});</code></pre>
+The above code answers every read request with the instance's <code>score</code> as a 32-bit value. The value is written to <code>reply_buffer</code>, a fixed buffer the instance created earlier, and the bytes from the requested offset onwards are sent with <a href="le_server.html#bluetooth_le_server_respond_read">bluetooth_le_server_respond_read</a>; an offset past the end of the value is refused with <a href="le_server.html#bluetoothatterror">BluetoothAttError</a>.InvalidOffset.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_remove_callback_le_server_read_request">bluetooth_remove_callback_le_server_read_request<a class="headerlink" href="#bluetooth_remove_callback_le_server_read_request" title="Permanent link">&para;</a></h1>
+<p>This function removes the function set with <a href="le_server.html#bluetooth_set_callback_le_server_read_request">bluetooth_set_callback_le_server_read_request</a>. From then on every read request that reaches the game is refused at once with <a href="le_server.html#bluetoothatterror">BluetoothAttError</a>.RequestNotSupported.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_remove_callback_le_server_read_request()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p><code>true</code> once the callback is removed.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">bluetooth_remove_callback_le_server_read_request();</code></pre>
+The above code stops the read request callback from being called.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_set_callback_le_server_write_request">bluetooth_set_callback_le_server_write_request<a class="headerlink" href="#bluetooth_set_callback_le_server_write_request" title="Permanent link">&para;</a></h1>
+<p>This function sets the function to call when a remote central writes an attribute of the GATT server. Setting a callback replaces the one set before, and it stays set across <a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a>.</p>
+<p>The callback reports the attribute written as the read request callback does (see <a href="le_server.html#bluetooth_set_callback_le_server_read_request">bluetooth_set_callback_le_server_read_request</a>): <code>descriptor</code> is 0 for a write of the characteristic's value. <code>offset</code> is where the bytes go in the attribute's value; a long write that the central sends in parts arrives assembled, at the offset of its first part. <code>response_needed</code> is <code>false</code> for a write without response.</p>
+<p><code>value</code> is a value handle holding the <code>size</code> bytes written. You copy them into a buffer with <a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a>, then answer the request with <a href="le_server.html#bluetooth_le_server_respond_write">bluetooth_le_server_respond_write</a>, which frees the value. You must answer every request, a write without response included; one that is not answered is dropped after 5 seconds for a write without response and expires after 30 seconds otherwise, and its value is freed with it.</p>
+<p>A write of the Client Characteristic Configuration descriptor (0x2902) is a subscription, which the platform handles, and never reaches the callback. While no callback is set, every write request that needs a response is refused at once with <a href="le_server.html#bluetoothatterror">BluetoothAttError</a>.RequestNotSupported.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>macOS and iOS never report a descriptor write, and do not say whether the central asked for a response, so <code>response_needed</code> is always <code>true</code> there.</p>
+</div>
+<p>This function operates asynchronously, which means that it does not immediately return the requested result. Instead, upon completion of the task, it will trigger the <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a>.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_set_callback_le_server_write_request(callback)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>callback</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Script_Functions.htm">Function</a></td>
+<td>The function to call for each write request.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p><code>true</code> once the callback is set.</p>
+<p><br></p>
+<p><strong>Triggers:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a></p>
+</blockquote>
+<p>Called once for each write request a central makes.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>request_id</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The id to answer the request with, using <a href="le_server.html#bluetooth_le_server_respond_write">bluetooth_le_server_respond_write</a>.</td>
+</tr>
+<tr>
+<td>connection</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The server connection handle of the central.</td>
+</tr>
+<tr>
+<td>characteristic</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the server characteristic written, or of the one the descriptor belongs to.</td>
+</tr>
+<tr>
+<td>descriptor</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the server descriptor written, or 0 for a write of the characteristic.</td>
+</tr>
+<tr>
+<td>offset</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The position in the attribute's value where the bytes go (in bytes).</td>
+</tr>
+<tr>
+<td>response_needed</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></td>
+<td><code>true</code> if the central waits for an answer, <code>false</code> for a write without response.</td>
+</tr>
+<tr>
+<td>value</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The value handle holding the bytes written, to copy with <a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a>.</td>
+</tr>
+<tr>
+<td>size</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The number of bytes written.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">bluetooth_set_callback_le_server_write_request(function(_request_id, _connection, _characteristic, _descriptor, _offset, _response_needed, _value, _size)
+{
+    var _buffer = buffer_create(max(_size, 1), buffer_fixed, 1);
+    var _copied = bluetooth_value_fetch(_value, _buffer, 0);
+
+    if (_copied &lt; 1 || _characteristic != characteristic_command)
+    {
+        bluetooth_le_server_respond_write(_request_id, BluetoothAttError.WriteNotPermitted);
+    }
+    else
+    {
+        var _command = buffer_peek(_buffer, 0, buffer_u8);
+        show_debug_message($"Command {_command} from connection {_connection}");
+        bluetooth_le_server_respond_write(_request_id, BluetoothAttError.Success);
+    }
+
+    buffer_delete(_buffer);
+});</code></pre>
+The above code handles write requests. The bytes written are copied with <a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a> into a new buffer of the reported size. A write that holds no bytes, or that is not for the characteristic stored in <code>characteristic_command</code>, is refused with <a href="le_server.html#bluetoothatterror">BluetoothAttError</a>.WriteNotPermitted; otherwise its first byte is read as a command and the write is accepted with <a href="le_server.html#bluetooth_le_server_respond_write">bluetooth_le_server_respond_write</a>. Every request is answered, and the buffer is deleted at the end.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_remove_callback_le_server_write_request">bluetooth_remove_callback_le_server_write_request<a class="headerlink" href="#bluetooth_remove_callback_le_server_write_request" title="Permanent link">&para;</a></h1>
+<p>This function removes the function set with <a href="le_server.html#bluetooth_set_callback_le_server_write_request">bluetooth_set_callback_le_server_write_request</a>. From then on every write request that needs a response is refused at once with <a href="le_server.html#bluetoothatterror">BluetoothAttError</a>.RequestNotSupported, and a write without response is dropped.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_remove_callback_le_server_write_request()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p><code>true</code> once the callback is removed.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">bluetooth_remove_callback_le_server_write_request();</code></pre>
+The above code stops the write request callback from being called.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetoothatterror">BluetoothAttError<a class="headerlink" href="#bluetoothatterror" title="Permanent link">&para;</a></h1>
+<p>This enum holds the ATT error codes (Bluetooth Core Specification, Vol 3, Part F, 3.4.1.1) that answer a read request with <a href="le_server.html#bluetooth_le_server_respond_read">bluetooth_le_server_respond_read</a> or a write request with <a href="le_server.html#bluetooth_le_server_respond_write">bluetooth_le_server_respond_write</a>. Each code is sent to the central as it is.</p>
+<p>These constants are referenced by the following functions:</p>
+<ul>
+<li><a href="le_server.html#bluetooth_le_server_respond_read">bluetooth_le_server_respond_read</a></li>
+<li><a href="le_server.html#bluetooth_le_server_respond_write">bluetooth_le_server_respond_write</a></li>
+</ul>
+<p><br></p>
+<table>
+<thead>
+<tr>
+<th>Member</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Success</code></td>
+<td>The request succeeded (0x00).</td>
+</tr>
+<tr>
+<td><code>InvalidHandle</code></td>
+<td>The attribute handle is not valid (0x01).</td>
+</tr>
+<tr>
+<td><code>ReadNotPermitted</code></td>
+<td>The attribute cannot be read (0x02).</td>
+</tr>
+<tr>
+<td><code>WriteNotPermitted</code></td>
+<td>The attribute cannot be written (0x03).</td>
+</tr>
+<tr>
+<td><code>InvalidPdu</code></td>
+<td>The request is malformed (0x04).</td>
+</tr>
+<tr>
+<td><code>InsufficientAuthentication</code></td>
+<td>The link must be authenticated (paired) first (0x05).</td>
+</tr>
+<tr>
+<td><code>RequestNotSupported</code></td>
+<td>The server does not support the request (0x06).</td>
+</tr>
+<tr>
+<td><code>InvalidOffset</code></td>
+<td>The offset is past the end of the value (0x07).</td>
+</tr>
+<tr>
+<td><code>InsufficientAuthorization</code></td>
+<td>The central is not authorised to access the attribute (0x08).</td>
+</tr>
+<tr>
+<td><code>PrepareQueueFull</code></td>
+<td>Too many writes are prepared (0x09).</td>
+</tr>
+<tr>
+<td><code>AttributeNotFound</code></td>
+<td>No attribute was found (0x0A).</td>
+</tr>
+<tr>
+<td><code>AttributeNotLong</code></td>
+<td>The attribute cannot be read or written in parts (0x0B).</td>
+</tr>
+<tr>
+<td><code>InsufficientEncryptionKeySize</code></td>
+<td>The encryption key of the link is too short (0x0C).</td>
+</tr>
+<tr>
+<td><code>InvalidAttributeValueLength</code></td>
+<td>The value has a length the attribute does not accept (0x0D).</td>
+</tr>
+<tr>
+<td><code>UnlikelyError</code></td>
+<td>The request failed for a reason no other code covers (0x0E).</td>
+</tr>
+<tr>
+<td><code>InsufficientEncryption</code></td>
+<td>The link must be encrypted first (0x0F).</td>
+</tr>
+<tr>
+<td><code>UnsupportedGroupType</code></td>
+<td>The attribute type is not a supported grouping type (0x10).</td>
+</tr>
+<tr>
+<td><code>InsufficientResources</code></td>
+<td>The server does not have the resources to complete the request (0x11).</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetoothleattributepermission">BluetoothLeAttributePermission<a class="headerlink" href="#bluetoothleattributepermission" title="Permanent link">&para;</a></h1>
+<p>This enum holds the permission flags of a server characteristic, set in the <code>permissions</code> of a <a href="le_server.html#bluetoothlecharacteristicdefinition">BluetoothLeCharacteristicDefinition</a> and combined with <code>|</code>. The values are those of Android's attribute permissions.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Windows, macOS and iOS have no signed write permission: WriteSigned and WriteSignedMitm make <a href="le_server.html#bluetooth_le_server_add_service">bluetooth_le_server_add_service</a> return NotSupported there. macOS and iOS also have no separate MITM protection, so ReadEncryptedMitm and WriteEncryptedMitm only require encryption there.</p>
+</div>
+<p><br></p>
+<table>
+<thead>
+<tr>
+<th>Member</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>None</code></td>
+<td>No access.</td>
+</tr>
+<tr>
+<td><code>Read</code></td>
+<td>The attribute can be read.</td>
+</tr>
+<tr>
+<td><code>ReadEncrypted</code></td>
+<td>The attribute can be read over an encrypted link.</td>
+</tr>
+<tr>
+<td><code>ReadEncryptedMitm</code></td>
+<td>The attribute can be read over an encrypted link with MITM protection (an authenticated pairing).</td>
+</tr>
+<tr>
+<td><code>Write</code></td>
+<td>The attribute can be written.</td>
+</tr>
+<tr>
+<td><code>WriteEncrypted</code></td>
+<td>The attribute can be written over an encrypted link.</td>
+</tr>
+<tr>
+<td><code>WriteEncryptedMitm</code></td>
+<td>The attribute can be written over an encrypted link with MITM protection (an authenticated pairing).</td>
+</tr>
+<tr>
+<td><code>WriteSigned</code></td>
+<td>The attribute can be written with a signed write.</td>
+</tr>
+<tr>
+<td><code>WriteSignedMitm</code></td>
+<td>The attribute can be written with a signed write with MITM protection.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetoothleadvertisetxpower">BluetoothLeAdvertiseTxPower<a class="headerlink" href="#bluetoothleadvertisetxpower" title="Permanent link">&para;</a></h1>
+<p>This enum holds the transmit power levels that the <code>tx_power</code> of a <a href="le_server.html#bluetoothleadvertisesettings">BluetoothLeAdvertiseSettings</a> can ask for. They are Android's advertising power levels; Windows sends them as -21, -15, -7 and 1 dBm, and macOS and iOS cannot set the power at all.</p>
+<p>These constants are referenced by the following structs:</p>
+<ul>
+<li><a href="le_server.html#bluetoothleadvertisesettings">BluetoothLeAdvertiseSettings</a></li>
+</ul>
+<p><br></p>
+<table>
+<thead>
+<tr>
+<th>Member</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>UltraLow</code></td>
+<td>The lowest power and the shortest range.</td>
+</tr>
+<tr>
+<td><code>Low</code></td>
+<td>A low power.</td>
+</tr>
+<tr>
+<td><code>Medium</code></td>
+<td>A medium power, the default on Android.</td>
+</tr>
+<tr>
+<td><code>High</code></td>
+<td>The highest power and the longest range.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetoothledescriptordefinition">BluetoothLeDescriptorDefinition<a class="headerlink" href="#bluetoothledescriptordefinition" title="Permanent link">&para;</a></h1>
+<p>This struct describes one descriptor of a <a href="le_server.html#bluetoothlecharacteristicdefinition">BluetoothLeCharacteristicDefinition</a>. You create it with <code>new BluetoothLeDescriptorDefinition()</code>. The descriptor has no initial value: its reads and writes reach the request callbacks, on the platforms that report them (<a href="core.html#bluetoothfeature">BluetoothFeature</a>.LeServerDescriptorRequests). A Client Characteristic Configuration descriptor (0x2902) in a definition is left out, since the platform manages it.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Windows refuses the User Description descriptor (0x2901), while macOS and iOS can host only that one (see <a href="le_server.html#bluetooth_le_server_add_service">bluetooth_le_server_add_service</a>).</p>
+</div>
+<p>This struct is referenced by the following structs:</p>
+<ul>
+<li><a href="le_server.html#bluetoothlecharacteristicdefinition">BluetoothLeCharacteristicDefinition</a></li>
+</ul>
+<p><br></p>
+<table>
+<thead>
+<tr>
+<th>Member</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>uuid</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></td>
+<td>The UUID of the descriptor, 16-bit or 128-bit.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetoothleadvertisesettings">BluetoothLeAdvertiseSettings<a class="headerlink" href="#bluetoothleadvertisesettings" title="Permanent link">&para;</a></h1>
+<p>This struct says how <a href="le_server.html#bluetooth_le_advertise_start">bluetooth_le_advertise_start</a> sends the advertisement. You create it with <code>new BluetoothLeAdvertiseSettings()</code>.</p>
+<p>This struct is referenced by the following functions:</p>
+<ul>
+<li><a href="le_server.html#bluetooth_le_advertise_start">bluetooth_le_advertise_start</a></li>
+</ul>
+<p><br></p>
+<table>
+<thead>
+<tr>
+<th>Member</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>connectable</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></td>
+<td>Whether centrals can connect to the device from the advertisement. macOS and iOS always advertise as connectable.</td>
+</tr>
+<tr>
+<td>tx_power</td>
+<td><a href="le_server.html#bluetoothleadvertisetxpower">BluetoothLeAdvertiseTxPower</a></td>
+<td>The transmit power to advertise at. Leave it undefined for the platform's default.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetoothleadvertiseservicedata">BluetoothLeAdvertiseServiceData<a class="headerlink" href="#bluetoothleadvertiseservicedata" title="Permanent link">&para;</a></h1>
+<p>This struct holds the data advertised for one service. You create it with <code>new BluetoothLeAdvertiseServiceData()</code> to advertise it in a <a href="le_server.html#bluetoothleadvertisedata">BluetoothLeAdvertiseData</a>, and <a href="devices.html#bluetooth_device_get_advertisement">bluetooth_device_get_advertisement</a> returns it as part of what a scanned device advertised.</p>
+<p>This struct is referenced by the following structs:</p>
+<ul>
+<li><a href="devices.html#bluetoothleadvertisement">BluetoothLeAdvertisement</a></li>
+<li><a href="le_server.html#bluetoothleadvertisedata">BluetoothLeAdvertiseData</a></li>
+</ul>
+<p><br></p>
+<table>
+<thead>
+<tr>
+<th>Member</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>uuid</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></td>
+<td>The UUID of the service the data belongs to. When advertising, it must also be in the data's <code>service_uuids</code>.</td>
+</tr>
+<tr>
+<td>data</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Arrays.htm">Array</a> of <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The service data, each entry a byte (0-255).</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetoothleadvertisemanufacturerdata">BluetoothLeAdvertiseManufacturerData<a class="headerlink" href="#bluetoothleadvertisemanufacturerdata" title="Permanent link">&para;</a></h1>
+<p>This struct holds manufacturer-specific data, under a company identifier assigned by the Bluetooth SIG. You create it with <code>new BluetoothLeAdvertiseManufacturerData()</code> to advertise it in a <a href="le_server.html#bluetoothleadvertisedata">BluetoothLeAdvertiseData</a>, and <a href="devices.html#bluetooth_device_get_advertisement">bluetooth_device_get_advertisement</a> returns it as part of what a scanned device advertised.</p>
+<p>This struct is referenced by the following structs:</p>
+<ul>
+<li><a href="devices.html#bluetoothleadvertisement">BluetoothLeAdvertisement</a></li>
+<li><a href="le_server.html#bluetoothleadvertisedata">BluetoothLeAdvertiseData</a></li>
+</ul>
+<p><br></p>
+<table>
+<thead>
+<tr>
+<th>Member</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>company_id</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The Bluetooth SIG company identifier (0-65535).</td>
+</tr>
+<tr>
+<td>data</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Arrays.htm">Array</a> of <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The manufacturer-specific data, each entry a byte (0-255).</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetoothlecharacteristicdefinition">BluetoothLeCharacteristicDefinition<a class="headerlink" href="#bluetoothlecharacteristicdefinition" title="Permanent link">&para;</a></h1>
+<p>This struct describes one characteristic of a <a href="le_server.html#bluetoothleservicedefinition">BluetoothLeServiceDefinition</a>. You create it with <code>new BluetoothLeCharacteristicDefinition()</code> and must set every variable: one left undefined is a runtime error when the struct is passed. A characteristic with the Notify or Indicate property gets its Client Characteristic Configuration descriptor (0x2902) from the platform, so you do not list it.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Windows ignores the Broadcast property of a server characteristic, and macOS and iOS ignore both Broadcast and ExtendedProperties.</p>
+</div>
+<p>This struct is referenced by the following structs:</p>
+<ul>
+<li><a href="le_server.html#bluetoothleservicedefinition">BluetoothLeServiceDefinition</a></li>
+</ul>
+<p><br></p>
+<table>
+<thead>
+<tr>
+<th>Member</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>uuid</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></td>
+<td>The UUID of the characteristic, 16-bit or 128-bit.</td>
+</tr>
+<tr>
+<td>properties</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The <a href="le_client.html#bluetoothlecharacteristicproperty">BluetoothLeCharacteristicProperty</a> flags of the characteristic, combined with <code>|</code>.</td>
+</tr>
+<tr>
+<td>permissions</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The <a href="le_server.html#bluetoothleattributepermission">BluetoothLeAttributePermission</a> flags of the characteristic, combined with <code>|</code>.</td>
+</tr>
+<tr>
+<td>value</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Arrays.htm">Array</a> of <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The initial value, each entry a byte (0-255), at most 512 bytes, or an empty array for none. A characteristic with an initial value is read from it by the platform, and its reads never reach the read request callback.</td>
+</tr>
+<tr>
+<td>descriptors</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Arrays.htm">Array</a> of <a href="le_server.html#bluetoothledescriptordefinition">BluetoothLeDescriptorDefinition</a></td>
+<td>The descriptors of the characteristic, or an empty array for none.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetoothleadvertisedata">BluetoothLeAdvertiseData<a class="headerlink" href="#bluetoothleadvertisedata" title="Permanent link">&para;</a></h1>
+<p>This struct says what the advertisement of <a href="le_server.html#bluetooth_le_advertise_start">bluetooth_le_advertise_start</a> carries. You create it with <code>new BluetoothLeAdvertiseData()</code> and must set every variable: one left undefined is a runtime error when the struct is passed. A platform that cannot send a part you ask for makes the call return NotSupported (see <a href="le_server.html#bluetooth_le_advertise_start">bluetooth_le_advertise_start</a>).</p>
+<p>This struct is referenced by the following functions:</p>
+<ul>
+<li><a href="le_server.html#bluetooth_le_advertise_start">bluetooth_le_advertise_start</a></li>
+</ul>
+<p><br></p>
+<table>
+<thead>
+<tr>
+<th>Member</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>include_name</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></td>
+<td>Whether the advertisement carries the device's name.</td>
+</tr>
+<tr>
+<td>include_tx_power</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></td>
+<td>Whether the advertisement carries the transmit power level.</td>
+</tr>
+<tr>
+<td>service_uuids</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Arrays.htm">Array</a> of <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></td>
+<td>The UUIDs of the services to advertise, or an empty array for none.</td>
+</tr>
+<tr>
+<td>service_data</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Arrays.htm">Array</a> of <a href="le_server.html#bluetoothleadvertiseservicedata">BluetoothLeAdvertiseServiceData</a></td>
+<td>The service data to advertise, or an empty array for none. Each entry's UUID must also be in <code>service_uuids</code>.</td>
+</tr>
+<tr>
+<td>manufacturer_data</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Arrays.htm">Array</a> of <a href="le_server.html#bluetoothleadvertisemanufacturerdata">BluetoothLeAdvertiseManufacturerData</a></td>
+<td>The manufacturer-specific data to advertise, or an empty array for none.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetoothleservicedefinition">BluetoothLeServiceDefinition<a class="headerlink" href="#bluetoothleservicedefinition" title="Permanent link">&para;</a></h1>
+<p>This struct describes a primary GATT service for <a href="le_server.html#bluetooth_le_server_add_service">bluetooth_le_server_add_service</a>. You create it with <code>new BluetoothLeServiceDefinition()</code> and must set every variable: one left undefined is a runtime error when the struct is passed.</p>
+<p>This struct is referenced by the following functions:</p>
+<ul>
+<li><a href="le_server.html#bluetooth_le_server_add_service">bluetooth_le_server_add_service</a></li>
+</ul>
+<p><br></p>
+<table>
+<thead>
+<tr>
+<th>Member</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>uuid</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></td>
+<td>The UUID of the service, 16-bit or 128-bit.</td>
+</tr>
+<tr>
+<td>characteristics</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Arrays.htm">Array</a> of <a href="le_server.html#bluetoothlecharacteristicdefinition">BluetoothLeCharacteristicDefinition</a></td>
+<td>The characteristics of the service, in the order their handles are listed. An empty array is a service with none.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<hr />
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      <p align="center">GameMaker 2026</p>
+    </div>
+  
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": ".", "features": ["navigation.top", "navigation.tracking", "toc.follow", "content.code.copy"], "search": "assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/gml.min.js"></script>
+      
+        <script src="assets/js/hljs-init.js"></script>
+      
+        <script src="assets/js/resize-columns.js"></script>
+      
+    
+  </body>
+</html>

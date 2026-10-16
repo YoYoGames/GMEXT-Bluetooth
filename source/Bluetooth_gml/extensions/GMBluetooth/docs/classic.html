@@ -1,0 +1,2580 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+      
+        <link rel="prev" href="le_server.html">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Classic - GMEXT-Bluetooth</title>
+      
+    
+    
+      <link rel="stylesheet" href="assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+    
+      <link rel="stylesheet" href="assets/css/extra.css">
+    
+    <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  <script>(function(){try{var w=["--gm-nav-width","--gm-toc-width"],i,v;for(i=0;i<w.length;i++){v=localStorage.getItem(w[i]);if(v)document.documentElement.style.setProperty(w[i],v)}}catch(e){}})()</script></head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#classic" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="home.html" title="GMEXT-Bluetooth" class="md-header__button md-logo" aria-label="GMEXT-Bluetooth" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            GMEXT-Bluetooth
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Classic
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/YoYoGames/GMEXT-Bluetooth" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="home.html" title="GMEXT-Bluetooth" class="md-nav__button md-logo" aria-label="GMEXT-Bluetooth" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    GMEXT-Bluetooth
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/YoYoGames/GMEXT-Bluetooth" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="home.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Bluetooth Extension
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="getting_started.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="platform_setup.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Platform Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="extension_options.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extension Options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Modules
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Modules
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="core.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="devices.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Devices
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="le_client.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LE Client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="le_server.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LE Server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Classic
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="classic.html" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Classic
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#classic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Classic
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Classic">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Functions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_is_supported" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_is_supported
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_server_is_supported" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_server_is_supported
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_scan_start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_scan_start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_scan_stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_scan_stop
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_scan_is_running" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_scan_is_running
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_connect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_connect
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_disconnect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_disconnect
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_connection_is_valid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_connection_is_valid
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_connection_is_connected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_connection_is_connected
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_connection_get_device" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_connection_get_device
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_send" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_send
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_server_start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_server_start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_server_stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_server_stop
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_server_is_running" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_server_is_running
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_discoverable_start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_discoverable_start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_discoverable_stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_discoverable_stop
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_discoverable_is_running" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_discoverable_is_running
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_set_callback_classic_client_connected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_set_callback_classic_client_connected
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_remove_callback_classic_client_connected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_remove_callback_classic_client_connected
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_set_callback_classic_data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_set_callback_classic_data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_remove_callback_classic_data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_remove_callback_classic_data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_set_callback_classic_disconnected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_set_callback_classic_disconnected
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_remove_callback_classic_disconnected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_remove_callback_classic_disconnected
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#classic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Classic
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Classic">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Functions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_is_supported" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_is_supported
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_server_is_supported" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_server_is_supported
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_scan_start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_scan_start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_scan_stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_scan_stop
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_scan_is_running" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_scan_is_running
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_connect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_connect
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_disconnect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_disconnect
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_connection_is_valid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_connection_is_valid
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_connection_is_connected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_connection_is_connected
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_connection_get_device" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_connection_get_device
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_send" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_send
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_server_start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_server_start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_server_stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_server_stop
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_server_is_running" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_server_is_running
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_discoverable_start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_discoverable_start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_discoverable_stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_discoverable_stop
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_classic_discoverable_is_running" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_classic_discoverable_is_running
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_set_callback_classic_client_connected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_set_callback_classic_client_connected
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_remove_callback_classic_client_connected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_remove_callback_classic_client_connected
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_set_callback_classic_data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_set_callback_classic_data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_remove_callback_classic_data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_remove_callback_classic_data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_set_callback_classic_disconnected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_set_callback_classic_disconnected
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_remove_callback_classic_disconnected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_remove_callback_classic_disconnected
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<p><a id="top"></a></p>
+<h1 id="classic"><strong>Classic</strong><a class="headerlink" href="#classic" title="Permanent link">&para;</a></h1>
+<p>The functions to discover Bluetooth Classic devices, open RFCOMM connections to them, run an
+RFCOMM server, make this device discoverable, and send and receive the bytes of a connection.</p>
+<p>Bluetooth Classic is available on Windows, Android and macOS. On iOS the support queries return
+<code>false</code> and the calls that start Classic work return <a href="core.html#bluetootherror">BluetoothError</a>.NotSupported. On
+macOS Classic goes through IOBluetooth.</p>
+<p>An RFCOMM connection is a byte stream with no message boundaries. Received bytes arrive as values
+through the callback set with <a href="classic.html#bluetooth_set_callback_classic_data">bluetooth_set_callback_classic_data</a> and are copied with
+<a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a>; the failure codes are those of <a href="core.html#bluetootherror">BluetoothError</a>.</p>
+<h2 id="functions">Functions<a class="headerlink" href="#functions" title="Permanent link">&para;</a></h2>
+<p>These are the functions of Bluetooth Classic.</p>
+<ul>
+<li><a href="classic.html#bluetooth_classic_is_supported">bluetooth_classic_is_supported</a></li>
+<li><a href="classic.html#bluetooth_classic_server_is_supported">bluetooth_classic_server_is_supported</a></li>
+<li><a href="classic.html#bluetooth_classic_scan_start">bluetooth_classic_scan_start</a></li>
+<li><a href="classic.html#bluetooth_classic_scan_stop">bluetooth_classic_scan_stop</a></li>
+<li><a href="classic.html#bluetooth_classic_scan_is_running">bluetooth_classic_scan_is_running</a></li>
+<li><a href="classic.html#bluetooth_classic_connect">bluetooth_classic_connect</a></li>
+<li><a href="classic.html#bluetooth_classic_disconnect">bluetooth_classic_disconnect</a></li>
+<li><a href="classic.html#bluetooth_classic_connection_is_valid">bluetooth_classic_connection_is_valid</a></li>
+<li><a href="classic.html#bluetooth_classic_connection_is_connected">bluetooth_classic_connection_is_connected</a></li>
+<li><a href="classic.html#bluetooth_classic_connection_get_device">bluetooth_classic_connection_get_device</a></li>
+<li><a href="classic.html#bluetooth_classic_send">bluetooth_classic_send</a></li>
+<li><a href="classic.html#bluetooth_classic_server_start">bluetooth_classic_server_start</a></li>
+<li><a href="classic.html#bluetooth_classic_server_stop">bluetooth_classic_server_stop</a></li>
+<li><a href="classic.html#bluetooth_classic_server_is_running">bluetooth_classic_server_is_running</a></li>
+<li><a href="classic.html#bluetooth_classic_discoverable_start">bluetooth_classic_discoverable_start</a></li>
+<li><a href="classic.html#bluetooth_classic_discoverable_stop">bluetooth_classic_discoverable_stop</a></li>
+<li><a href="classic.html#bluetooth_classic_discoverable_is_running">bluetooth_classic_discoverable_is_running</a></li>
+<li><a href="classic.html#bluetooth_set_callback_classic_client_connected">bluetooth_set_callback_classic_client_connected</a></li>
+<li><a href="classic.html#bluetooth_remove_callback_classic_client_connected">bluetooth_remove_callback_classic_client_connected</a></li>
+<li><a href="classic.html#bluetooth_set_callback_classic_data">bluetooth_set_callback_classic_data</a></li>
+<li><a href="classic.html#bluetooth_remove_callback_classic_data">bluetooth_remove_callback_classic_data</a></li>
+<li><a href="classic.html#bluetooth_set_callback_classic_disconnected">bluetooth_set_callback_classic_disconnected</a></li>
+<li><a href="classic.html#bluetooth_remove_callback_classic_disconnected">bluetooth_remove_callback_classic_disconnected</a></li>
+</ul>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_classic_is_supported">bluetooth_classic_is_supported<a class="headerlink" href="#bluetooth_classic_is_supported" title="Permanent link">&para;</a></h1>
+<p>This function checks whether Bluetooth Classic (RFCOMM) client connections and Classic
+discovery are available on this platform and adapter. It returns <code>false</code> before
+<a href="core.html#bluetooth_initialize">bluetooth_initialize</a> has been called, so ask after initialising. It gives the same
+answer as <a href="core.html#bluetooth_feature_is_supported">bluetooth_feature_is_supported</a> with <a href="core.html#bluetoothfeature">BluetoothFeature</a>.Classic.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Bluetooth Classic is available on Windows, Android and macOS. On iOS this function always
+returns <code>false</code>, and every Classic call that starts radio work fails with
+<a href="core.html#bluetootherror">BluetoothError</a>.NotSupported.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Windows the answer comes from the adapter, so a machine with an LE-only adapter returns
+<code>false</code>. On macOS it is <code>true</code> once initialised. On Android it is <code>true</code> when the device has a
+Bluetooth adapter.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_classic_is_supported()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p><code>true</code> if Bluetooth Classic is supported, otherwise <code>false</code>.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">if (!bluetooth_classic_is_supported())
+{
+    show_debug_message("Bluetooth Classic is not available on this device");
+}</code></pre>
+The above code checks whether Bluetooth Classic can be used and shows a debug message when it
+cannot.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_classic_server_is_supported">bluetooth_classic_server_is_supported<a class="headerlink" href="#bluetooth_classic_server_is_supported" title="Permanent link">&para;</a></h1>
+<p>This function checks whether this platform and adapter can run a Bluetooth Classic RFCOMM
+server with <a href="classic.html#bluetooth_classic_server_start">bluetooth_classic_server_start</a>. It returns <code>false</code> before
+<a href="core.html#bluetooth_initialize">bluetooth_initialize</a> has been called. It gives the same answer as
+<a href="core.html#bluetooth_feature_is_supported">bluetooth_feature_is_supported</a> with <a href="core.html#bluetoothfeature">BluetoothFeature</a>.ClassicServer.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The server is available on Windows, Android and macOS wherever
+<a href="classic.html#bluetooth_classic_is_supported">bluetooth_classic_is_supported</a> returns <code>true</code>. On iOS this function always returns
+<code>false</code>.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_classic_server_is_supported()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p><code>true</code> if a Classic server can be started, otherwise <code>false</code>.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">if (bluetooth_classic_server_is_supported())
+{
+    bluetooth_classic_server_start("My Game", "00001101-0000-1000-8000-00805F9B34FB");
+}</code></pre>
+The above code starts an RFCOMM server that uses the Serial Port Profile UUID, but only when the
+platform supports a Classic server.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_classic_scan_start">bluetooth_classic_scan_start<a class="headerlink" href="#bluetooth_classic_scan_start" title="Permanent link">&para;</a></h1>
+<p>This function starts a Bluetooth Classic discovery (an inquiry scan) for nearby Classic
+devices. Every new device the scan finds enters the device cache and fires the callback set with
+<a href="devices.html#bluetooth_set_callback_device_found">bluetooth_set_callback_device_found</a>, with a device whose transport is
+<a href="core.html#bluetoothtransport">BluetoothTransport</a>.Classic. The scan ends on its own after one inquiry, and the
+callback set with <a href="devices.html#bluetooth_set_callback_scan_stopped">bluetooth_set_callback_scan_stopped</a> is then called with the
+transport <a href="core.html#bluetoothtransport">BluetoothTransport</a>.Classic, and with an error when the inquiry could not run.</p>
+<p>Starting a scan while one is already running returns <a href="core.html#bluetootherror">BluetoothError</a>.Ok and starts
+nothing new.</p>
+<p>The function returns a <a href="core.html#bluetootherror">BluetoothError</a>. When it is not
+<a href="core.html#bluetootherror">BluetoothError</a>.Ok the scan did not start, no callback is called, and the reason is in
+<a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>:
+NotInitialized before <a href="core.html#bluetooth_initialize">bluetooth_initialize</a>, PermissionDenied when the Bluetooth
+permission is missing or was refused, BluetoothDisabled when the radio is off, NotSupported where
+Classic is not available, or OperationFailed when the system could not start the inquiry.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>An inquiry runs for about 5 seconds on Windows and 10 seconds on macOS; on Android it lasts
+as long as the system's discovery.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Windows the inquiry also returns every device that Windows remembers, in range or not.
+The extension reports only the remembered devices that answered this inquiry. If Windows cannot
+list its remembered devices first, every result is reported, including remembered devices that
+are out of range. Use <a href="devices.html#bluetooth_paired_devices_query">bluetooth_paired_devices_query</a> to list paired devices.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Android the scan needs the Bluetooth scan and connect permissions, and on Android
+versions before 12 the Location setting must be on; otherwise the call returns PermissionDenied.
+On macOS it returns PermissionDenied until <a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a> has been
+called. On iOS it returns NotSupported.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_classic_scan_start()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a></p>
+</blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the scan started or was already
+running, otherwise the reason it did not start.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">var _result = bluetooth_classic_scan_start();
+if (_result != BluetoothError.Ok)
+{
+    show_debug_message($"Classic scan did not start: {bluetooth_last_error_message()}");
+}</code></pre>
+The above code starts a Classic scan and shows the reason in a debug message when it could not
+start. The devices it finds are reported to the callback set with
+<a href="devices.html#bluetooth_set_callback_device_found">bluetooth_set_callback_device_found</a>.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_classic_scan_stop">bluetooth_classic_scan_stop<a class="headerlink" href="#bluetooth_classic_scan_stop" title="Permanent link">&para;</a></h1>
+<p>This function stops a running Bluetooth Classic scan. When a scan was running, the callback
+set with <a href="devices.html#bluetooth_set_callback_scan_stopped">bluetooth_set_callback_scan_stopped</a> is called with
+<a href="core.html#bluetootherror">BluetoothError</a>.Ok and the transport <a href="core.html#bluetoothtransport">BluetoothTransport</a>.Classic. Stopping
+when no scan is running returns <a href="core.html#bluetootherror">BluetoothError</a>.Ok and calls nothing.</p>
+<p>The function returns <a href="core.html#bluetootherror">BluetoothError</a>.NotInitialized before
+<a href="core.html#bluetooth_initialize">bluetooth_initialize</a>, with the reason in <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Windows cannot cut an inquiry short. The scan is reported as stopped at once and nothing
+the inquiry still finds is reported.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_classic_scan_stop()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a></p>
+</blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the scan is stopped, otherwise the
+reason.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">if (bluetooth_classic_scan_is_running())
+{
+    bluetooth_classic_scan_stop();
+}</code></pre>
+The above code stops the Classic scan if one is running.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_classic_scan_is_running">bluetooth_classic_scan_is_running<a class="headerlink" href="#bluetooth_classic_scan_is_running" title="Permanent link">&para;</a></h1>
+<p>This function checks whether a Bluetooth Classic scan is running. It returns <code>true</code> from a
+successful <a href="classic.html#bluetooth_classic_scan_start">bluetooth_classic_scan_start</a> until the scan ends on its own or is stopped
+with <a href="classic.html#bluetooth_classic_scan_stop">bluetooth_classic_scan_stop</a>.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_classic_scan_is_running()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p><code>true</code> if a Classic scan is running, otherwise <code>false</code>.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">scanning_text = bluetooth_classic_scan_is_running() ? "Searching..." : "Idle";</code></pre>
+The above code sets the instance's <code>scanning_text</code> variable to a status string that depends on
+whether a Classic scan is running.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_classic_connect">bluetooth_classic_connect<a class="headerlink" href="#bluetooth_classic_connect" title="Permanent link">&para;</a></h1>
+<p>This function starts an RFCOMM connection to the given service of the given Bluetooth Classic
+device, which must have been found by a scan, listed by <a href="devices.html#bluetooth_paired_devices_query">bluetooth_paired_devices_query</a>
+or looked up with <a href="devices.html#bluetooth_device_from_id">bluetooth_device_from_id</a>. The service is named by its UUID, either
+in the full 36-character form or as 4 or 8 hex digits. It returns a connection handle straight
+away, before the device has answered, and the callback is called once when the connection is made
+or fails.</p>
+<p>The function returns 0 when the connect could not be started, and the reason is then in
+<a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>:
+NotInitialized, InvalidHandle for a device handle that is not valid, InvalidArgument for an LE
+device or a service UUID that is not valid, BluetoothDisabled, PermissionDenied, or NotSupported
+where Classic is not available. In that case the callback is never called.</p>
+<p>You can cancel a connect that is still in progress by passing the returned handle to
+<a href="classic.html#bluetooth_classic_disconnect">bluetooth_classic_disconnect</a>, and the callback is then called once with
+<a href="core.html#bluetootherror">BluetoothError</a>.ConnectionFailed. If <a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a> is called first,
+the callback is called with <a href="core.html#bluetootherror">BluetoothError</a>.NotInitialized.</p>
+<p>Once connected, the bytes the device sends arrive through the callback set with
+<a href="classic.html#bluetooth_set_callback_classic_data">bluetooth_set_callback_classic_data</a>, you send bytes with
+<a href="classic.html#bluetooth_classic_send">bluetooth_classic_send</a>, and the callback set with
+<a href="classic.html#bluetooth_set_callback_classic_disconnected">bluetooth_set_callback_classic_disconnected</a> tells you when the device ends the
+connection.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Windows a device that does not answer within 15 seconds fails with
+<a href="core.html#bluetootherror">BluetoothError</a>.Timeout. On Android the system's own connect timeout applies, and a
+failed connect reports <a href="core.html#bluetootherror">BluetoothError</a>.ConnectionFailed.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On macOS the RFCOMM channel is found by looking up the service UUID in the device's SDP
+records, through IOBluetooth. The records cached from pairing are used when they hold the
+service; otherwise an SDP query runs, which fails with <a href="core.html#bluetootherror">BluetoothError</a>.Timeout after 15
+seconds, and with <a href="core.html#bluetootherror">BluetoothError</a>.NotFound when the device does not offer the service.
+The call itself returns 0 with NotFound when macOS cannot resolve the device's address, and with
+PermissionDenied until <a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a> has been called.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Android the connection is a secure (authenticated) RFCOMM link, so an unpaired device
+may show a pairing prompt; on Windows and macOS the system's own security settings decide whether
+pairing is needed. Android also cancels a running Classic scan before it connects.</p>
+</div>
+<p>This function operates asynchronously, which means that it does not immediately return the requested result. Instead, upon completion of the task, it will trigger the <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a>.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_classic_connect(device, service_uuid, callback)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>device</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the Classic device to connect to.</td>
+</tr>
+<tr>
+<td>service_uuid</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></td>
+<td>The UUID of the RFCOMM service to connect to.</td>
+</tr>
+<tr>
+<td>callback</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Script_Functions.htm">Function</a></td>
+<td>The function to call once the connection is made or fails.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></p>
+</blockquote>
+<p>The new connection handle, or 0 if the connect did not start.</p>
+<p><br></p>
+<p><strong>Triggers:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a></p>
+</blockquote>
+<p>Called once, when the connection is made, fails or is cancelled.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>error_code</td>
+<td><a href="core.html#bluetootherror">BluetoothError</a></td>
+<td><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the device is<br>connected, otherwise the reason it is not.</td>
+</tr>
+<tr>
+<td>message</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></td>
+<td>A description of the failure, or an empty string on success.</td>
+</tr>
+<tr>
+<td>connection</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The connection handle that <a href="classic.html#bluetooth_classic_connect">bluetooth_classic_connect</a><br>returned.</td>
+</tr>
+<tr>
+<td>device</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the device.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">connection = bluetooth_classic_connect(device, "00001101-0000-1000-8000-00805F9B34FB", function(_error_code, _message, _connection, _device)
+{
+    if (_error_code != BluetoothError.Ok)
+    {
+        show_debug_message($"Connect failed: {_message}");
+        connection = 0;
+        exit;
+    }
+    show_debug_message($"Connected to {bluetooth_device_get_name(_device)}");
+});
+
+if (connection == 0)
+{
+    show_debug_message($"Connect did not start: {bluetooth_last_error_message()}");
+}</code></pre>
+The above code starts a connection to the Serial Port Profile service of the device stored in the
+instance's <code>device</code> variable and keeps the returned handle in <code>connection</code>. When the callback
+reports a failure the handle is cleared; on success the name of the device is shown with
+<a href="devices.html#bluetooth_device_get_name">bluetooth_device_get_name</a>. If the connect could not be started at all, the returned
+handle is 0 and the reason is read with <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_classic_disconnect">bluetooth_classic_disconnect<a class="headerlink" href="#bluetooth_classic_disconnect" title="Permanent link">&para;</a></h1>
+<p>This function ends the given RFCOMM connection, whether it is still connecting or already
+connected. The disconnect is synchronous: the handle is no longer valid when the function returns,
+and the callback set with <a href="classic.html#bluetooth_set_callback_classic_disconnected">bluetooth_set_callback_classic_disconnected</a> is not called
+for it. A connect that is still in progress is cancelled, and its callback is called once with
+<a href="core.html#bluetootherror">BluetoothError</a>.ConnectionFailed.</p>
+<p>Values that the callback set with <a href="classic.html#bluetooth_set_callback_classic_data">bluetooth_set_callback_classic_data</a> has already
+delivered can still be fetched with <a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a> after the disconnect.</p>
+<p>The function returns a <a href="core.html#bluetootherror">BluetoothError</a>: NotInitialized before
+<a href="core.html#bluetooth_initialize">bluetooth_initialize</a>, or InvalidHandle for a handle that is not valid, with the reason
+in <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Android the bytes already queued with <a href="classic.html#bluetooth_classic_send">bluetooth_classic_send</a> are sent
+before the link closes, for up to 2 seconds. On Windows and macOS the bytes not yet sent are
+discarded.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_classic_disconnect(connection)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>connection</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The connection handle to end.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a></p>
+</blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the connection was ended, otherwise
+the reason.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">if (bluetooth_classic_connection_is_valid(connection))
+{
+    bluetooth_classic_disconnect(connection);
+}
+connection = 0;</code></pre>
+The above code ends the connection stored in the instance's <code>connection</code> variable if its handle
+is still valid, then clears the variable.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_classic_connection_is_valid">bluetooth_classic_connection_is_valid<a class="headerlink" href="#bluetooth_classic_connection_is_valid" title="Permanent link">&para;</a></h1>
+<p>This function checks whether the given RFCOMM connection handle is valid. A handle is valid
+from the moment <a href="classic.html#bluetooth_classic_connect">bluetooth_classic_connect</a> returns it, or the callback set with
+<a href="classic.html#bluetooth_set_callback_classic_client_connected">bluetooth_set_callback_classic_client_connected</a> receives it, until the connect fails,
+<a href="classic.html#bluetooth_classic_disconnect">bluetooth_classic_disconnect</a> is called, the callback set with
+<a href="classic.html#bluetooth_set_callback_classic_disconnected">bluetooth_set_callback_classic_disconnected</a> is called for it, or
+<a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a> is called. Handles are never reused.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_classic_connection_is_valid(connection)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>connection</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The connection handle to check.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p><code>true</code> if the handle is valid, otherwise <code>false</code>.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">if (!bluetooth_classic_connection_is_valid(connection))
+{
+    connection = 0;
+}</code></pre>
+The above code clears the instance's <code>connection</code> variable when the handle it holds is no longer
+valid.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_classic_connection_is_connected">bluetooth_classic_connection_is_connected<a class="headerlink" href="#bluetooth_classic_connection_is_connected" title="Permanent link">&para;</a></h1>
+<p>This function checks whether the given RFCOMM connection is currently connected. It returns
+<code>false</code> while the connection is still being made, after it has ended, and for a handle that is not
+valid.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_classic_connection_is_connected(connection)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>connection</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The connection handle to check.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p><code>true</code> if the connection is connected, otherwise <code>false</code>.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">if (bluetooth_classic_connection_is_connected(connection))
+{
+    bluetooth_classic_send(connection, message_buffer, 0, message_size);
+}</code></pre>
+The above code sends the bytes held in the instance's <code>message_buffer</code> only when the connection
+stored in <code>connection</code> is connected.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_classic_connection_get_device">bluetooth_classic_connection_get_device<a class="headerlink" href="#bluetooth_classic_connection_get_device" title="Permanent link">&para;</a></h1>
+<p>This function returns the handle of the device at the other end of the given RFCOMM
+connection. For a connection accepted by the server it is the device that connected. It returns 0
+for a handle that is not valid.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_classic_connection_get_device(connection)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>connection</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The connection handle to query.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></p>
+</blockquote>
+<p>The device handle, or 0 if the connection handle is not valid.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">var _device = bluetooth_classic_connection_get_device(connection);
+if (_device != 0)
+{
+    show_debug_message($"Connected to {bluetooth_device_get_name(_device)}");
+}</code></pre>
+The above code gets the device of the connection stored in <code>connection</code> and shows its name with
+<a href="devices.html#bluetooth_device_get_name">bluetooth_device_get_name</a>.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_classic_send">bluetooth_classic_send<a class="headerlink" href="#bluetooth_classic_send" title="Permanent link">&para;</a></h1>
+<p>This function queues the given number of bytes from the given buffer, starting at the given
+offset, to be sent over the given RFCOMM connection. The bytes are copied when you call the
+function, so you can change or delete the buffer straight away. The function returns as soon as
+the bytes are queued, without waiting for them to go out, and there is no callback: a send that
+later fails ends the connection, and the callback set with
+<a href="classic.html#bluetooth_set_callback_classic_disconnected">bluetooth_set_callback_classic_disconnected</a> reports the error.</p>
+<p>At most 1 MiB may wait to be sent on a connection. A send that would take the queue past that
+returns <a href="core.html#bluetootherror">BluetoothError</a>.Busy and queues nothing, so send more than that in parts and
+try again once the queue drains. A size of 0 returns <a href="core.html#bluetootherror">BluetoothError</a>.Ok and sends
+nothing.</p>
+<p>An RFCOMM connection is a stream and has no message boundaries: the device may receive the bytes
+of one send in several chunks, or the bytes of several sends in one. If your data is made of
+messages, add your own framing, such as a length prefix or a line ending.</p>
+<p>The function returns a <a href="core.html#bluetootherror">BluetoothError</a>. When it is not
+<a href="core.html#bluetootherror">BluetoothError</a>.Ok nothing was queued, and the reason is in
+<a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>:
+NotInitialized, InvalidArgument when the offset and size go past the end of the buffer,
+InvalidHandle for a handle that is not valid, Disconnected when the connection is still
+connecting, closing or has ended, Busy when the queue is full, or NotSupported where Classic is not
+available.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Windows a handle that is not valid returns <a href="core.html#bluetootherror">BluetoothError</a>.Disconnected
+instead of InvalidHandle.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Android a single send larger than 1 MiB is accepted when nothing else is waiting to be
+sent.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_classic_send(connection, data, offset, size)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>connection</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The connection handle to send on.</td>
+</tr>
+<tr>
+<td>data</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/Buffers.htm">Buffer</a></td>
+<td>The buffer that holds the bytes to send.</td>
+</tr>
+<tr>
+<td>offset</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The position in the buffer of the first byte to send (in bytes).</td>
+</tr>
+<tr>
+<td>size</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The number of bytes to send.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a></p>
+</blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the bytes were queued, otherwise the
+reason they were not.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">var _buffer = buffer_create(64, buffer_grow, 1);
+buffer_write(_buffer, buffer_text, "PING\n");
+var _size = buffer_tell(_buffer);
+
+var _result = bluetooth_classic_send(connection, _buffer, 0, _size);
+buffer_delete(_buffer);
+
+if (_result == BluetoothError.Busy)
+{
+    show_debug_message("Send queue is full, try again later");
+}
+else if (_result != BluetoothError.Ok)
+{
+    show_debug_message($"Send failed: {bluetooth_last_error_message()}");
+}</code></pre>
+The above code writes the text "PING" and a line ending into a new buffer and queues those bytes
+on the connection stored in <code>connection</code>. The buffer is deleted straight after the call, since the
+bytes have already been copied. A full queue and any other failure are reported with a debug
+message. The line ending marks the end of the message for the receiving side, since the stream
+itself has no message boundaries.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_classic_server_start">bluetooth_classic_server_start<a class="headerlink" href="#bluetooth_classic_server_start" title="Permanent link">&para;</a></h1>
+<p>This function starts an RFCOMM server that offers a service with the given name and UUID to
+other devices. The service is published in the SDP records of this device, so a remote device can
+connect to it by its UUID. Every incoming connection calls the callback set with
+<a href="classic.html#bluetooth_set_callback_classic_client_connected">bluetooth_set_callback_classic_client_connected</a> with its new connection handle; set
+that callback before you start the server. Only one server can run at a time.</p>
+<p>An unpaired device can only find this device with a Classic scan while it is discoverable: see
+<a href="classic.html#bluetooth_classic_discoverable_start">bluetooth_classic_discoverable_start</a>.</p>
+<p>The function returns a <a href="core.html#bluetootherror">BluetoothError</a>. When it is not
+<a href="core.html#bluetootherror">BluetoothError</a>.Ok the server did not start, and the reason is in
+<a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>:
+NotInitialized, InvalidArgument for a service UUID that is not valid, Busy while a server is
+already running (stop it first to change its name or UUID), NotSupported where the Classic server
+is not available, or OperationFailed when the system refused to publish the service.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Windows and Android an empty name is published as "GMBluetooth RFCOMM". On Android the
+call also returns PermissionDenied without the Bluetooth connect permission and BluetoothDisabled
+while the radio is off, and incoming links are secure (authenticated) RFCOMM links. On macOS it
+returns PermissionDenied until <a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a> has been called.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_classic_server_start(name, service_uuid)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>name</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></td>
+<td>The name of the service, as other devices see it.</td>
+</tr>
+<tr>
+<td>service_uuid</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></td>
+<td>The UUID of the service, in the full 36-character form or as 4 or 8<br>hex digits.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a></p>
+</blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the server started, otherwise the
+reason it did not.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">bluetooth_set_callback_classic_client_connected(function(_connection, _device)
+{
+    show_debug_message($"Client connected: {bluetooth_device_get_name(_device)}");
+    client_connection = _connection;
+});
+
+var _result = bluetooth_classic_server_start("My Game", "6E400001-B5A3-F393-E0A9-E50E24DCCA9E");
+if (_result != BluetoothError.Ok)
+{
+    show_debug_message($"Server did not start: {bluetooth_last_error_message()}");
+}</code></pre>
+The above code first sets the callback that is called for each incoming connection, which keeps
+the new connection handle in the instance's <code>client_connection</code> variable. It then starts a server
+named "My Game" with a custom service UUID, and shows the reason in a debug message when the
+server could not start.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_classic_server_stop">bluetooth_classic_server_stop<a class="headerlink" href="#bluetooth_classic_server_stop" title="Permanent link">&para;</a></h1>
+<p>This function stops the running RFCOMM server: the service is removed from the SDP records
+and no more incoming connections are accepted. Connections the server has already accepted stay
+open; end them with <a href="classic.html#bluetooth_classic_disconnect">bluetooth_classic_disconnect</a>. Stopping when no server is running
+returns <a href="core.html#bluetootherror">BluetoothError</a>.Ok.</p>
+<p>The function returns <a href="core.html#bluetootherror">BluetoothError</a>.NotInitialized before
+<a href="core.html#bluetooth_initialize">bluetooth_initialize</a>, with the reason in <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_classic_server_stop()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a></p>
+</blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the server is stopped, otherwise
+the reason.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">bluetooth_classic_server_stop();
+if (bluetooth_classic_connection_is_valid(client_connection))
+{
+    bluetooth_classic_disconnect(client_connection);
+}</code></pre>
+The above code stops the server and then ends the connection it accepted, which is stored in the
+instance's <code>client_connection</code> variable.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_classic_server_is_running">bluetooth_classic_server_is_running<a class="headerlink" href="#bluetooth_classic_server_is_running" title="Permanent link">&para;</a></h1>
+<p>This function checks whether the RFCOMM server started with
+<a href="classic.html#bluetooth_classic_server_start">bluetooth_classic_server_start</a> is running.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_classic_server_is_running()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p><code>true</code> if the server is running, otherwise <code>false</code>.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">if (!bluetooth_classic_server_is_running())
+{
+    bluetooth_classic_server_start("My Game", "6E400001-B5A3-F393-E0A9-E50E24DCCA9E");
+}</code></pre>
+The above code starts the server only when it is not already running.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_classic_discoverable_start">bluetooth_classic_discoverable_start<a class="headerlink" href="#bluetooth_classic_discoverable_start" title="Permanent link">&para;</a></h1>
+<p>This function makes this device discoverable to the Classic scans of other devices for the
+given number of seconds, so that an unpaired device can find it and connect to the service started
+with <a href="classic.html#bluetooth_classic_server_start">bluetooth_classic_server_start</a>. Use <a href="core.html#bluetooth_feature_is_supported">bluetooth_feature_is_supported</a>
+with <a href="core.html#bluetoothfeature">BluetoothFeature</a>.ClassicDiscoverable to check whether the platform can do this.</p>
+<p>The function returns a <a href="core.html#bluetootherror">BluetoothError</a>. When it is not
+<a href="core.html#bluetootherror">BluetoothError</a>.Ok the reason is in <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and
+<a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>: NotInitialized, NotSupported where discoverability
+cannot be controlled, or OperationFailed when the system refused.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Windows the device becomes discoverable at once and stays so for the given duration,
+or until <a href="classic.html#bluetooth_classic_discoverable_stop">bluetooth_classic_discoverable_stop</a> when the duration is 0 or less. Incoming
+connections are also turned on if they were off, and turned back off when discoverability ends.
+Calling this function again replaces the previous duration. It returns NotSupported when no
+Bluetooth radio is found.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Android the user is shown a system prompt asking to make the device discoverable, and
+<a href="core.html#bluetootherror">BluetoothError</a>.Ok only means that the prompt was shown, not that the user accepted:
+check <a href="classic.html#bluetooth_classic_discoverable_is_running">bluetooth_classic_discoverable_is_running</a>. The duration is clamped to 1 to 3600
+seconds, and 0 or less asks for the Android default of 120 seconds; there is no indefinite
+duration. The call returns PermissionDenied without the Bluetooth advertise permission and
+BluetoothDisabled while the radio is off.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>macOS and iOS have no public API for this, and the function returns NotSupported.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_classic_discoverable_start(duration_seconds)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>duration_seconds</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>How long the device stays discoverable (in seconds), or 0 for no<br>limit where the platform allows it.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a></p>
+</blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the device was made discoverable
+(or, on Android, the prompt was shown), otherwise the reason.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">if (bluetooth_feature_is_supported(BluetoothFeature.ClassicDiscoverable))
+{
+    var _result = bluetooth_classic_discoverable_start(120);
+    if (_result != BluetoothError.Ok)
+    {
+        show_debug_message($"Could not become discoverable: {bluetooth_last_error_message()}");
+    }
+}</code></pre>
+The above code asks for the device to be discoverable for two minutes when the platform supports
+it, and shows the reason in a debug message when the request failed.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_classic_discoverable_stop">bluetooth_classic_discoverable_stop<a class="headerlink" href="#bluetooth_classic_discoverable_stop" title="Permanent link">&para;</a></h1>
+<p>This function ends discoverability early, before the duration given to
+<a href="classic.html#bluetooth_classic_discoverable_start">bluetooth_classic_discoverable_start</a> has passed. Use
+<a href="core.html#bluetooth_feature_is_supported">bluetooth_feature_is_supported</a> with <a href="core.html#bluetoothfeature">BluetoothFeature</a>.ClassicDiscoverableStop
+to check whether the platform can do this.</p>
+<p>The function returns a <a href="core.html#bluetootherror">BluetoothError</a>: NotInitialized before
+<a href="core.html#bluetooth_initialize">bluetooth_initialize</a>, or NotSupported where discoverability cannot be ended early,
+with the reason in <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Only Windows can end discoverability early; it also turns incoming connections back off
+if <a href="classic.html#bluetooth_classic_discoverable_start">bluetooth_classic_discoverable_start</a> turned them on. Android has no API for this
+and returns NotSupported, and discoverability ends on its own when its duration expires. macOS
+and iOS return NotSupported.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_classic_discoverable_stop()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a></p>
+</blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a>.Ok if discoverability was ended,
+otherwise the reason.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">if (bluetooth_feature_is_supported(BluetoothFeature.ClassicDiscoverableStop))
+{
+    bluetooth_classic_discoverable_stop();
+}</code></pre>
+The above code ends discoverability only on a platform that can end it early.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_classic_discoverable_is_running">bluetooth_classic_discoverable_is_running<a class="headerlink" href="#bluetooth_classic_discoverable_is_running" title="Permanent link">&para;</a></h1>
+<p>This function checks whether this device is currently discoverable to Classic scans. It reads
+the state from the system, so it also reflects a change the user made outside the game.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Android this function needs the Bluetooth scan permission on Android 12 and later;
+without it the function returns <code>false</code> and sets <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> to
+PermissionDenied. On macOS and iOS it always returns <code>false</code>.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_classic_discoverable_is_running()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p><code>true</code> if the device is discoverable, otherwise <code>false</code>.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">discoverable_text = bluetooth_classic_discoverable_is_running() ? "Visible to other devices" : "Hidden";</code></pre>
+The above code sets the instance's <code>discoverable_text</code> variable to a status string that depends on
+whether the device is discoverable.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_set_callback_classic_client_connected">bluetooth_set_callback_classic_client_connected<a class="headerlink" href="#bluetooth_set_callback_classic_client_connected" title="Permanent link">&para;</a></h1>
+<p>This function sets the function to call when a remote device connects to the RFCOMM server
+started with <a href="classic.html#bluetooth_classic_server_start">bluetooth_classic_server_start</a>. The callback receives the handle of the
+new connection, which you use with <a href="classic.html#bluetooth_classic_send">bluetooth_classic_send</a> and
+<a href="classic.html#bluetooth_classic_disconnect">bluetooth_classic_disconnect</a>, and the handle of the device that connected. Setting a
+new function replaces the previous one.</p>
+<p>You can set the callback before <a href="core.html#bluetooth_initialize">bluetooth_initialize</a>, and it stays set across
+<a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a>. Set it before you start the server: a connection accepted while
+no callback is set is still made, and its data arrives through the callback set with
+<a href="classic.html#bluetooth_set_callback_classic_data">bluetooth_set_callback_classic_data</a>.</p>
+<p>This function operates asynchronously, which means that it does not immediately return the requested result. Instead, upon completion of the task, it will trigger the <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a>.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_set_callback_classic_client_connected(callback)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>callback</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Script_Functions.htm">Function</a></td>
+<td>The function to call for each incoming connection.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p>Always <code>true</code>.</p>
+<p><br></p>
+<p><strong>Triggers:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a></p>
+</blockquote>
+<p>Called once for each connection the server accepts.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>connection</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the new connection.</td>
+</tr>
+<tr>
+<td>device</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the device that connected.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">bluetooth_set_callback_classic_client_connected(function(_connection, _device)
+{
+    show_debug_message($"{bluetooth_device_get_name(_device)} connected");
+    array_push(clients, _connection);
+});</code></pre>
+The above code sets the callback for incoming server connections. It shows the name of each
+device that connects and adds the new connection handle to the instance's <code>clients</code> array.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_remove_callback_classic_client_connected">bluetooth_remove_callback_classic_client_connected<a class="headerlink" href="#bluetooth_remove_callback_classic_client_connected" title="Permanent link">&para;</a></h1>
+<p>This function removes the function set with
+<a href="classic.html#bluetooth_set_callback_classic_client_connected">bluetooth_set_callback_classic_client_connected</a>. The server keeps accepting
+connections, but they are no longer reported.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_remove_callback_classic_client_connected()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p>Always <code>true</code>.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">bluetooth_remove_callback_classic_client_connected();</code></pre>
+The above code stops incoming server connections from being reported.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_set_callback_classic_data">bluetooth_set_callback_classic_data<a class="headerlink" href="#bluetooth_set_callback_classic_data" title="Permanent link">&para;</a></h1>
+<p>This function sets the function to call for every chunk of bytes an RFCOMM connection
+receives, in the order they arrive. The callback receives the connection, a value handle that
+holds the bytes, and their number. You copy the bytes into a buffer of your own with
+<a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a>, which also frees the value, or free it without copying with
+<a href="core.html#bluetooth_value_release">bluetooth_value_release</a>. Setting a new function replaces the previous one, and you can
+set it before <a href="core.html#bluetooth_initialize">bluetooth_initialize</a>.</p>
+<p>An RFCOMM connection is a stream and has no message boundaries: the bytes of one send from the
+device may arrive in several chunks, and the bytes of several sends may arrive in one. Collect the
+chunks in order and split them with your own framing.</p>
+<p>The values a connection has not fetched or released count toward its receive budget of 1 MiB.
+While they hold more than that, Windows and Android stop reading from the device until some are
+fetched or released, and RFCOMM flow control holds the device back. A value that is left
+unfetched for 30 seconds expires, and the connection is then ended with
+<a href="core.html#bluetootherror">BluetoothError</a>.Disconnected and the message "receive data expired", rather than leave
+a gap in the stream. For a connection the device ends, the callback set with
+<a href="classic.html#bluetooth_set_callback_classic_disconnected">bluetooth_set_callback_classic_disconnected</a> is called after its last chunk.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>While no callback is set, the bytes every connection receives are discarded.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>macOS cannot pause an RFCOMM channel, so a chunk that would take the unfetched bytes past
+1 MiB ends the connection with <a href="core.html#bluetootherror">BluetoothError</a>.Disconnected and the message "receive
+buffer full", after the part that fits is delivered.</p>
+</div>
+<p>This function operates asynchronously, which means that it does not immediately return the requested result. Instead, upon completion of the task, it will trigger the <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a>.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_set_callback_classic_data(callback)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>callback</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Script_Functions.htm">Function</a></td>
+<td>The function to call for each chunk of received bytes.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p>Always <code>true</code>.</p>
+<p><br></p>
+<p><strong>Triggers:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a></p>
+</blockquote>
+<p>Called once for every chunk of bytes a connection receives, in order.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>connection</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the connection that received the bytes.</td>
+</tr>
+<tr>
+<td>value</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The value handle that holds the bytes, for <a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a>.</td>
+</tr>
+<tr>
+<td>size</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The number of bytes the value holds.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">bluetooth_set_callback_classic_data(function(_connection, _value, _size)
+{
+    if (receive_length + _size &gt; buffer_get_size(receive_buffer))
+    {
+        buffer_resize(receive_buffer, (receive_length + _size) * 2);
+    }
+
+    var _copied = bluetooth_value_fetch(_value, receive_buffer, receive_length);
+    if (_copied &lt; 0)
+    {
+        show_debug_message($"Fetch failed: {bluetooth_last_error_message()}");
+        exit;
+    }
+    receive_length += _copied;
+});</code></pre>
+The above code sets the callback for received Classic data. The instance keeps a buffer in its
+<code>receive_buffer</code> variable and the number of bytes it holds in <code>receive_length</code>. For each chunk the
+buffer is first made large enough with <code>buffer_resize</code>, since <a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a>
+writes straight into the buffer's memory and never grows it. The bytes are then copied to the end
+of the data received so far and the count is advanced by the number of bytes copied. The game can
+then look for complete messages in the first <code>receive_length</code> bytes of the buffer.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_remove_callback_classic_data">bluetooth_remove_callback_classic_data<a class="headerlink" href="#bluetooth_remove_callback_classic_data" title="Permanent link">&para;</a></h1>
+<p>This function removes the function set with
+<a href="classic.html#bluetooth_set_callback_classic_data">bluetooth_set_callback_classic_data</a>. Note that while no callback is set, the bytes
+every connection receives are discarded.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_remove_callback_classic_data()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p>Always <code>true</code>.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">bluetooth_remove_callback_classic_data();</code></pre>
+The above code removes the callback for received Classic data.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_set_callback_classic_disconnected">bluetooth_set_callback_classic_disconnected<a class="headerlink" href="#bluetooth_set_callback_classic_disconnected" title="Permanent link">&para;</a></h1>
+<p>This function sets the function to call when an established RFCOMM connection ends without
+<a href="classic.html#bluetooth_classic_disconnect">bluetooth_classic_disconnect</a>: the device closed it, the link failed, a send failed, or
+the connection was ended because its received data expired or, on macOS, filled the receive
+budget (see <a href="classic.html#bluetooth_set_callback_classic_data">bluetooth_set_callback_classic_data</a>). The callback receives the reason and
+the connection. Setting a new function replaces the previous one, and you can set it before
+<a href="core.html#bluetooth_initialize">bluetooth_initialize</a>.</p>
+<p>The callback is called after the last chunk of data the connection received, and the connection
+handle is no longer valid once it is called; the values already delivered can still be fetched. A
+disconnect you ask for with <a href="classic.html#bluetooth_classic_disconnect">bluetooth_classic_disconnect</a> never calls it, and neither
+does a connect that fails, which reports through the callback of
+<a href="classic.html#bluetooth_classic_connect">bluetooth_classic_connect</a>.</p>
+<p>This function operates asynchronously, which means that it does not immediately return the requested result. Instead, upon completion of the task, it will trigger the <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a>.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_set_callback_classic_disconnected(callback)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>callback</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Script_Functions.htm">Function</a></td>
+<td>The function to call when a connection ends.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p>Always <code>true</code>.</p>
+<p><br></p>
+<p><strong>Triggers:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a></p>
+</blockquote>
+<p>Called once when an established connection ends without
+<a href="classic.html#bluetooth_classic_disconnect">bluetooth_classic_disconnect</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>error_code</td>
+<td><a href="core.html#bluetootherror">BluetoothError</a></td>
+<td><a href="core.html#bluetootherror">BluetoothError</a>.Disconnected when the device<br>closed the connection or its received data could not be held, otherwise the error that ended it.</td>
+</tr>
+<tr>
+<td>message</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></td>
+<td>A description of why the connection ended.</td>
+</tr>
+<tr>
+<td>connection</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the connection that ended.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">bluetooth_set_callback_classic_disconnected(function(_error_code, _message, _connection)
+{
+    show_debug_message($"Connection {_connection} ended: {_message}");
+    if (_connection == connection)
+    {
+        connection = 0;
+    }
+});</code></pre>
+The above code sets the callback for connections that end on their own. It shows why the
+connection ended and clears the instance's <code>connection</code> variable when it held that handle.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_remove_callback_classic_disconnected">bluetooth_remove_callback_classic_disconnected<a class="headerlink" href="#bluetooth_remove_callback_classic_disconnected" title="Permanent link">&para;</a></h1>
+<p>This function removes the function set with
+<a href="classic.html#bluetooth_set_callback_classic_disconnected">bluetooth_set_callback_classic_disconnected</a>. Connections that end are then no longer
+reported, but their handles still stop being valid.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_remove_callback_classic_disconnected()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p>Always <code>true</code>.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">bluetooth_remove_callback_classic_disconnected();</code></pre>
+The above code removes the callback for ended Classic connections.</p>
+<p><br></p>
+<hr />
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      <p align="center">GameMaker 2026</p>
+    </div>
+  
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": ".", "features": ["navigation.top", "navigation.tracking", "toc.follow", "content.code.copy"], "search": "assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/gml.min.js"></script>
+      
+        <script src="assets/js/hljs-init.js"></script>
+      
+        <script src="assets/js/resize-columns.js"></script>
+      
+    
+  </body>
+</html>

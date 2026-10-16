@@ -1,0 +1,2601 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+      
+        <link rel="prev" href="core.html">
+      
+      
+        <link rel="next" href="le_client.html">
+      
+      
+        
+      
+      
+      <link rel="icon" href="assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Devices - GMEXT-Bluetooth</title>
+      
+    
+    
+      <link rel="stylesheet" href="assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+    
+      <link rel="stylesheet" href="assets/css/extra.css">
+    
+    <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  <script>(function(){try{var w=["--gm-nav-width","--gm-toc-width"],i,v;for(i=0;i<w.length;i++){v=localStorage.getItem(w[i]);if(v)document.documentElement.style.setProperty(w[i],v)}}catch(e){}})()</script></head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#devices" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="home.html" title="GMEXT-Bluetooth" class="md-header__button md-logo" aria-label="GMEXT-Bluetooth" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            GMEXT-Bluetooth
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Devices
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/YoYoGames/GMEXT-Bluetooth" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="home.html" title="GMEXT-Bluetooth" class="md-nav__button md-logo" aria-label="GMEXT-Bluetooth" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    GMEXT-Bluetooth
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/YoYoGames/GMEXT-Bluetooth" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="home.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Bluetooth Extension
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="getting_started.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="platform_setup.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Platform Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="extension_options.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extension Options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Modules
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Modules
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="core.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Devices
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="devices.html" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Devices
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#devices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Devices
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Devices">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Functions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#structs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Structs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_clear" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_clear
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_get_count" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_get_count
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_get_at" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_get_at
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_is_valid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_is_valid
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_from_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_from_id
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_get_transport" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_get_transport
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_get_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_get_id
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_get_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_get_name
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_has_address" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_has_address
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_get_address" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_get_address
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_has_rssi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_has_rssi
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_get_rssi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_get_rssi
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_is_connectable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_is_connectable
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_get_advertisement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_get_advertisement
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_paired_devices_query" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_paired_devices_query
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_pairing_is_supported" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_pairing_is_supported
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_pair" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_pair
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_is_paired" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_is_paired
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_set_callback_device_found" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_set_callback_device_found
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_remove_callback_device_found" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_remove_callback_device_found
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_set_callback_scan_stopped" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_set_callback_scan_stopped
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_remove_callback_scan_stopped" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_remove_callback_scan_stopped
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothleadvertisement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothLeAdvertisement
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="le_client.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LE Client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="le_server.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LE Server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="classic.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Classic
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#devices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Devices
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Devices">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Functions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#structs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Structs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_clear" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_clear
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_get_count" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_get_count
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_get_at" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_get_at
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_is_valid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_is_valid
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_from_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_from_id
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_get_transport" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_get_transport
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_get_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_get_id
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_get_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_get_name
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_has_address" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_has_address
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_get_address" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_get_address
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_has_rssi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_has_rssi
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_get_rssi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_get_rssi
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_is_connectable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_is_connectable
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_get_advertisement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_get_advertisement
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_paired_devices_query" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_paired_devices_query
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_pairing_is_supported" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_pairing_is_supported
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_pair" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_pair
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_device_is_paired" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_device_is_paired
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_set_callback_device_found" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_set_callback_device_found
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_remove_callback_device_found" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_remove_callback_device_found
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_set_callback_scan_stopped" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_set_callback_scan_stopped
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_remove_callback_scan_stopped" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_remove_callback_scan_stopped
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothleadvertisement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothLeAdvertisement
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<p><a id="top"></a></p>
+<h1 id="devices"><strong>Devices</strong><a class="headerlink" href="#devices" title="Permanent link">&para;</a></h1>
+<p>The device cache that LE and Classic scans fill, and the functions to read the devices in
+it, get a device back from a saved id, list and pair devices, and hear about new devices and
+stopped scans.</p>
+<p>Scans are started with <a href="le_client.html#bluetooth_le_scan_start">bluetooth_le_scan_start</a> and
+<a href="classic.html#bluetooth_classic_scan_start">bluetooth_classic_scan_start</a>. Every device they find is added to one shared cache and
+given a device handle, a number that stays valid until <a href="devices.html#bluetooth_device_clear">bluetooth_device_clear</a> or
+<a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a> empties the cache. Handles are never reused. To remember a device
+between runs of the game, store its id from <a href="devices.html#bluetooth_device_get_id">bluetooth_device_get_id</a> and get a handle
+back with <a href="devices.html#bluetooth_device_from_id">bluetooth_device_from_id</a>.</p>
+<h2 id="functions">Functions<a class="headerlink" href="#functions" title="Permanent link">&para;</a></h2>
+<p>These are the functions to manage and read the device cache, to pair devices, and to be told
+about new devices and stopped scans.</p>
+<ul>
+<li><a href="devices.html#bluetooth_device_clear">bluetooth_device_clear</a></li>
+<li><a href="devices.html#bluetooth_device_get_count">bluetooth_device_get_count</a></li>
+<li><a href="devices.html#bluetooth_device_get_at">bluetooth_device_get_at</a></li>
+<li><a href="devices.html#bluetooth_device_is_valid">bluetooth_device_is_valid</a></li>
+<li><a href="devices.html#bluetooth_device_from_id">bluetooth_device_from_id</a></li>
+<li><a href="devices.html#bluetooth_device_get_transport">bluetooth_device_get_transport</a></li>
+<li><a href="devices.html#bluetooth_device_get_id">bluetooth_device_get_id</a></li>
+<li><a href="devices.html#bluetooth_device_get_name">bluetooth_device_get_name</a></li>
+<li><a href="devices.html#bluetooth_device_has_address">bluetooth_device_has_address</a></li>
+<li><a href="devices.html#bluetooth_device_get_address">bluetooth_device_get_address</a></li>
+<li><a href="devices.html#bluetooth_device_has_rssi">bluetooth_device_has_rssi</a></li>
+<li><a href="devices.html#bluetooth_device_get_rssi">bluetooth_device_get_rssi</a></li>
+<li><a href="devices.html#bluetooth_device_is_connectable">bluetooth_device_is_connectable</a></li>
+<li><a href="devices.html#bluetooth_device_get_advertisement">bluetooth_device_get_advertisement</a></li>
+<li><a href="devices.html#bluetooth_paired_devices_query">bluetooth_paired_devices_query</a></li>
+<li><a href="devices.html#bluetooth_pairing_is_supported">bluetooth_pairing_is_supported</a></li>
+<li><a href="devices.html#bluetooth_pair">bluetooth_pair</a></li>
+<li><a href="devices.html#bluetooth_device_is_paired">bluetooth_device_is_paired</a></li>
+<li><a href="devices.html#bluetooth_set_callback_device_found">bluetooth_set_callback_device_found</a></li>
+<li><a href="devices.html#bluetooth_remove_callback_device_found">bluetooth_remove_callback_device_found</a></li>
+<li><a href="devices.html#bluetooth_set_callback_scan_stopped">bluetooth_set_callback_scan_stopped</a></li>
+<li><a href="devices.html#bluetooth_remove_callback_scan_stopped">bluetooth_remove_callback_scan_stopped</a></li>
+</ul>
+<h2 id="structs">Structs<a class="headerlink" href="#structs" title="Permanent link">&para;</a></h2>
+<p>This is the struct used by the device cache.</p>
+<ul>
+<li><a href="devices.html#bluetoothleadvertisement">BluetoothLeAdvertisement</a></li>
+</ul>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_device_clear">bluetooth_device_clear<a class="headerlink" href="#bluetooth_device_clear" title="Permanent link">&para;</a></h1>
+<p>This function empties the device cache. Every device handle the cache has handed out becomes
+invalid, and <a href="devices.html#bluetooth_device_get_count">bluetooth_device_get_count</a> returns 0 afterwards.</p>
+<p>The cache keeps every device seen since the last clear, whichever scan found it, so you should
+call this function from time to time during a long scan in a busy place. Device handles are never
+reused: a device found again after the clear enters the cache under a new handle, and the
+device_found callback set with <a href="devices.html#bluetooth_set_callback_device_found">bluetooth_set_callback_device_found</a> is called for it
+again. An old handle can therefore never name a different device.</p>
+<p>Clearing the cache does not close anything. A connection made to a device stays open, and a
+pairing still in progress still calls its callback with the old handle, but the device getters
+return their empty values for that handle from now on.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p><a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a> also empties the cache.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_device_clear()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p>N/A</p>
+</blockquote>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">bluetooth_device_clear();
+devices = [];
+bluetooth_le_scan_start(true, []);</code></pre>
+The above code empties the device cache and the instance's own <code>devices</code> array before it starts a
+new LE scan with <a href="le_client.html#bluetooth_le_scan_start">bluetooth_le_scan_start</a>, so every device the scan reports gets a new
+handle.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_device_get_count">bluetooth_device_get_count<a class="headerlink" href="#bluetooth_device_get_count" title="Permanent link">&para;</a></h1>
+<p>This function returns the number of devices in the device cache. The count includes every
+device found by an LE or a Classic scan since the last call to <a href="devices.html#bluetooth_device_clear">bluetooth_device_clear</a>,
+as well as the devices added by <a href="devices.html#bluetooth_device_from_id">bluetooth_device_from_id</a>, by
+<a href="devices.html#bluetooth_paired_devices_query">bluetooth_paired_devices_query</a> and <a href="le_client.html#bluetooth_le_connected_devices_query">bluetooth_le_connected_devices_query</a>,
+and the centrals that connect to the LE server.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_device_get_count()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></p>
+</blockquote>
+<p>The number of devices in the cache.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">show_debug_message($"{bluetooth_device_get_count()} devices found so far");</code></pre>
+The above code shows the number of devices in the cache in the output log.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_device_get_at">bluetooth_device_get_at<a class="headerlink" href="#bluetooth_device_get_at" title="Permanent link">&para;</a></h1>
+<p>This function returns the handle of the device at the given index in the device cache.
+Devices are kept in the order they entered the cache, from 0 to
+<a href="devices.html#bluetooth_device_get_count">bluetooth_device_get_count</a> - 1. The function returns 0 for an index outside that
+range.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_device_get_at(index)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>index</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The index of the device in the cache, starting at 0.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></p>
+</blockquote>
+<p>The handle of the device, or 0 if the index is out of range.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">var _count = bluetooth_device_get_count();
+for (var i = 0; i &lt; _count; i++)
+{
+    var _device = bluetooth_device_get_at(i);
+    show_debug_message($"{i}: {bluetooth_device_get_name(_device)}");
+}</code></pre>
+The above code loops through every device in the cache and shows the name of each one, read with
+<a href="devices.html#bluetooth_device_get_name">bluetooth_device_get_name</a>, in the output log.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_device_is_valid">bluetooth_device_is_valid<a class="headerlink" href="#bluetooth_device_is_valid" title="Permanent link">&para;</a></h1>
+<p>This function checks whether the given device handle names a device in the device cache. It
+returns <code>false</code> for a handle that <a href="devices.html#bluetooth_device_clear">bluetooth_device_clear</a> or
+<a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a> invalidated, for 0, and for a handle of another kind, such as a
+connection handle.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_device_is_valid(device)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>device</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The device handle to check.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p><code>true</code> if the handle names a device in the cache, otherwise <code>false</code>.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">if (!bluetooth_device_is_valid(device))
+{
+    device = 0;
+}</code></pre>
+The above code forgets the handle stored in the instance's <code>device</code> variable when it no longer
+names a cached device.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_device_from_id">bluetooth_device_from_id<a class="headerlink" href="#bluetooth_device_from_id" title="Permanent link">&para;</a></h1>
+<p>This function returns the handle of the device that the given id names. The id is one that
+<a href="devices.html#bluetooth_device_get_id">bluetooth_device_get_id</a> returned, possibly in an earlier run of the game, so you can
+store it and use this function to reconnect to the same device later without scanning for it.</p>
+<p>A device already in the cache keeps its handle and that handle is returned. Otherwise the device
+enters the cache under a new handle without calling the device_found callback, and its name is an
+empty string until the platform knows it.</p>
+<p>The function returns 0 when it cannot make a handle, and the reason is then in
+<a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>:
+NotInitialized, or InvalidArgument for a malformed id or an id issued by another platform (a
+Windows id on Android, for example).</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Apple platforms an LE id names a peripheral that CoreBluetooth must already know: the
+function fails with BluetoothDisabled while the radio is off, NotFound for an id the system does not
+know, and PermissionDenied until <a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a> has been called.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Windows the device is built from the address in the id, so the function succeeds
+without contacting the device.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_device_from_id(id)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>id</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></td>
+<td>The device id, as returned by <a href="devices.html#bluetooth_device_get_id">bluetooth_device_get_id</a>.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></p>
+</blockquote>
+<p>The handle of the device, or 0 if it could not be made.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">var _device = bluetooth_device_from_id(saved_id);
+if (_device == 0)
+{
+    show_debug_message($"Unknown device: {bluetooth_last_error_message()}");
+    exit;
+}
+connection = bluetooth_le_connect(_device, on_connected);</code></pre>
+The above code turns the id stored in the instance's <code>saved_id</code> variable back into a device handle
+and connects to it with <a href="le_client.html#bluetooth_le_connect">bluetooth_le_connect</a>, without a scan. If the id cannot be used,
+the reason is shown with <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_device_get_transport">bluetooth_device_get_transport<a class="headerlink" href="#bluetooth_device_get_transport" title="Permanent link">&para;</a></h1>
+<p>This function returns the transport of the given device: Classic for a device found by a
+Classic scan, LowEnergy for an LE device. It returns <a href="core.html#bluetoothtransport">BluetoothTransport</a>.Unknown for a
+handle that is not valid.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>A device that supports both transports is two separate devices in the cache, one per
+transport, each with its own handle and id.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_device_get_transport(device)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>device</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the device.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="core.html#bluetoothtransport">BluetoothTransport</a></p>
+</blockquote>
+<p>The transport of the device.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">if (bluetooth_device_get_transport(device) == BluetoothTransport.Classic)
+{
+    bluetooth_classic_connect(device, service_uuid, on_connected);
+}</code></pre>
+The above code connects with <a href="classic.html#bluetooth_classic_connect">bluetooth_classic_connect</a> only when the device is a
+Classic device.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_device_get_id">bluetooth_device_get_id<a class="headerlink" href="#bluetooth_device_get_id" title="Permanent link">&para;</a></h1>
+<p>This function returns the id of the given device, a string you can store and later pass to
+<a href="devices.html#bluetooth_device_from_id">bluetooth_device_from_id</a> to get the device back without a scan. It returns an empty
+string for a handle that is not valid.</p>
+<p>The id is opaque and specific to the platform: you should not parse it or assume it holds a MAC
+address. Each platform prefixes its ids with its own name and the transport, so an id from one
+platform is refused on another:</p>
+<ul>
+<li>Windows: <code>win:ble:</code> or <code>win:classic:</code> followed by the device address.</li>
+<li>Android: <code>android:ble:</code> or <code>android:classic:</code> followed by the device address.</li>
+<li>macOS and iOS: <code>apple:ble:</code> followed by the identifier CoreBluetooth assigned to the peripheral,
+  or on macOS <code>apple:classic:</code> followed by the device address.</li>
+</ul>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>CoreBluetooth makes up the identifier of an LE peripheral itself, so an Apple LE id only
+names the device on the system that issued it.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_device_get_id(device)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>device</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the device.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></p>
+</blockquote>
+<p>The id of the device, or an empty string if the handle is not valid.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">saved_id = bluetooth_device_get_id(device);</code></pre>
+The above code stores the id of the device in the instance's <code>saved_id</code> variable, so the game can
+save it and reconnect to the device later with <a href="devices.html#bluetooth_device_from_id">bluetooth_device_from_id</a>.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_device_get_name">bluetooth_device_get_name<a class="headerlink" href="#bluetooth_device_get_name" title="Permanent link">&para;</a></h1>
+<p>This function returns the name of the given device. The name is updated whenever a later
+advertisement or inquiry result carries one, so it can be an empty string when the device is first
+found and filled in later. It is also an empty string for a device that has never reported a name
+and for a handle that is not valid.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_device_get_name(device)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>device</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the device.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></p>
+</blockquote>
+<p>The name of the device, or an empty string if it is not known.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">var _name = bluetooth_device_get_name(device);
+if (_name == "")
+{
+    _name = "(unnamed)";
+}
+show_debug_message($"Found {_name}");</code></pre>
+The above code shows the name of the device in the output log, or "(unnamed)" when it has none.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_device_has_address">bluetooth_device_has_address<a class="headerlink" href="#bluetooth_device_has_address" title="Permanent link">&para;</a></h1>
+<p>This function checks whether the address of the given device is known. You should call this
+function before you use <a href="devices.html#bluetooth_device_get_address">bluetooth_device_get_address</a>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Apple platforms never expose the address of an LE device, so this function returns
+<code>false</code> for every LE device on macOS and iOS. It returns <code>true</code> for a Classic device on macOS.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_device_has_address(device)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>device</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the device.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p><code>true</code> if the address of the device is known, otherwise <code>false</code>.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">if (bluetooth_device_has_address(device))
+{
+    show_debug_message($"Address: {bluetooth_device_get_address(device)}");
+}</code></pre>
+The above code shows the address of the device, read with <a href="devices.html#bluetooth_device_get_address">bluetooth_device_get_address</a>,
+only when it is known.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_device_get_address">bluetooth_device_get_address<a class="headerlink" href="#bluetooth_device_get_address" title="Permanent link">&para;</a></h1>
+<p>This function returns the Bluetooth address of the given device, in the form
+<code>AA:BB:CC:DD:EE:FF</code>. It returns an empty string when the address is not known (see
+<a href="devices.html#bluetooth_device_has_address">bluetooth_device_has_address</a>) and for a handle that is not valid.</p>
+<p>To remember a device between runs of the game, store its id from
+<a href="devices.html#bluetooth_device_get_id">bluetooth_device_get_id</a> instead: not every platform exposes an address.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_device_get_address(device)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>device</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the device.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></p>
+</blockquote>
+<p>The address of the device, or an empty string if it is not known.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">var _address = bluetooth_device_get_address(device);
+if (_address != "")
+{
+    show_debug_message($"Address: {_address}");
+}</code></pre>
+The above code shows the address of the device in the output log when it is known.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_device_has_rssi">bluetooth_device_has_rssi<a class="headerlink" href="#bluetooth_device_has_rssi" title="Permanent link">&para;</a></h1>
+<p>This function checks whether a signal strength (RSSI) has been reported for the given
+device. You should call this function before you use <a href="devices.html#bluetooth_device_get_rssi">bluetooth_device_get_rssi</a>.</p>
+<p>Scans report the signal strength. A device that entered the cache without a scan (through
+<a href="devices.html#bluetooth_device_from_id">bluetooth_device_from_id</a> or a device query, for example) has none until a scan sees
+it.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Classic scans on Windows and macOS report no signal strength, so this function returns
+<code>false</code> for those devices.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_device_has_rssi(device)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>device</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the device.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p><code>true</code> if a signal strength has been reported for the device, otherwise <code>false</code>.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">if (bluetooth_device_has_rssi(device))
+{
+    show_debug_message($"RSSI: {bluetooth_device_get_rssi(device)} dBm");
+}</code></pre>
+The above code shows the signal strength of the device, read with
+<a href="devices.html#bluetooth_device_get_rssi">bluetooth_device_get_rssi</a>, only when one has been reported.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_device_get_rssi">bluetooth_device_get_rssi<a class="headerlink" href="#bluetooth_device_get_rssi" title="Permanent link">&para;</a></h1>
+<p>This function returns the most recent signal strength (RSSI) reported for the given device,
+in dBm. Values are negative, and a value closer to 0 means a stronger signal. The value is updated
+by every later advertisement or inquiry result the device sends while a scan runs.</p>
+<p>The function returns 0 when no signal strength has been reported (see
+<a href="devices.html#bluetooth_device_has_rssi">bluetooth_device_has_rssi</a>) and for a handle that is not valid.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_device_get_rssi(device)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>device</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the device.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></p>
+</blockquote>
+<p>The signal strength of the device (in dBm), or 0 if none has been reported.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">var _closest = 0;
+var _best = -1000;
+var _count = bluetooth_device_get_count();
+for (var i = 0; i &lt; _count; i++)
+{
+    var _device = bluetooth_device_get_at(i);
+    if (bluetooth_device_has_rssi(_device) &amp;&amp; bluetooth_device_get_rssi(_device) &gt; _best)
+    {
+        _best = bluetooth_device_get_rssi(_device);
+        _closest = _device;
+    }
+}</code></pre>
+The above code goes through every device in the cache and keeps the handle of the one with the
+strongest signal in the local variable <code>_closest</code>.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_device_is_connectable">bluetooth_device_is_connectable<a class="headerlink" href="#bluetooth_device_is_connectable" title="Permanent link">&para;</a></h1>
+<p>This function checks whether the given device accepts connections. For an LE device this
+comes from its advertisements: once any advertisement has said the device is connectable, this
+function keeps returning <code>true</code>. Classic devices are reported as connectable. The function returns
+<code>false</code> for a handle that is not valid.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On Windows, a device added with <a href="devices.html#bluetooth_device_from_id">bluetooth_device_from_id</a> reports <code>false</code>
+until a scan sees it send a connectable advertisement.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_device_is_connectable(device)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>device</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the device.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p><code>true</code> if the device accepts connections, otherwise <code>false</code>.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">if (bluetooth_device_is_connectable(device))
+{
+    connection = bluetooth_le_connect(device, on_connected);
+}</code></pre>
+The above code connects to the device with <a href="le_client.html#bluetooth_le_connect">bluetooth_le_connect</a> only when it
+accepts connections.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_device_get_advertisement">bluetooth_device_get_advertisement<a class="headerlink" href="#bluetooth_device_get_advertisement" title="Permanent link">&para;</a></h1>
+<p>This function returns what the given device has advertised, as a
+<a href="devices.html#bluetoothleadvertisement">BluetoothLeAdvertisement</a> struct. The struct merges every advertisement and scan response
+received from the device since it entered the cache, not only the latest one.</p>
+<p>Every array in the struct is empty, and <code>tx_power</code> is <code>undefined</code>, for a Classic device, for a
+device that has never been seen advertising (one added with <a href="devices.html#bluetooth_device_from_id">bluetooth_device_from_id</a>,
+for example) and for a handle that is not valid.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_device_get_advertisement(device)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>device</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the device.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="devices.html#bluetoothleadvertisement">BluetoothLeAdvertisement</a></p>
+</blockquote>
+<p>What the device has advertised.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">var _advertisement = bluetooth_device_get_advertisement(device);
+for (var i = 0; i &lt; array_length(_advertisement.manufacturer_data); i++)
+{
+    var _entry = _advertisement.manufacturer_data[i];
+    show_debug_message($"Company {_entry.company_id}: {array_length(_entry.data)} bytes");
+}</code></pre>
+The above code reads the advertisement of the device and shows the company identifier and the
+length of each manufacturer data entry in the output log.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_paired_devices_query">bluetooth_paired_devices_query<a class="headerlink" href="#bluetooth_paired_devices_query" title="Permanent link">&para;</a></h1>
+<p>This function lists the devices that are paired (bonded) with this system, without a scan.
+The callback is called once with the handles of the paired devices. A paired device that is not
+yet in the cache enters it without calling the device_found callback.</p>
+<p>The function returns a <a href="core.html#bluetootherror">BluetoothError</a>, and the callback is never called when it is
+not Ok: NotInitialized, NotSupported where the platform cannot list paired devices or there is no
+Bluetooth hardware, PermissionDenied, or BluetoothDisabled. The reason is also in
+<a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>. If you call
+<a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a> before the answer arrives, the callback is called with
+NotInitialized.</p>
+<p>Use <a href="core.html#bluetooth_feature_is_supported">bluetooth_feature_is_supported</a> with <a href="core.html#bluetoothfeature">BluetoothFeature</a>.PairedDevicesQuery
+to check whether the platform can list paired devices.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Android lists Classic and LE bonds, with a dual-mode device as one entry of each transport.
+Windows lists paired Classic and LE devices. macOS lists paired Classic devices only. iOS returns
+NotSupported.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>A Classic scan started with <a href="classic.html#bluetooth_classic_scan_start">bluetooth_classic_scan_start</a> reports only the
+devices that answer its inquiry, never the paired list, so use this function to find a paired
+device that is out of range or not discoverable.</p>
+</div>
+<p>This function operates asynchronously, which means that it does not immediately return the requested result. Instead, upon completion of the task, it will trigger the <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a>.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_paired_devices_query(callback)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>callback</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Script_Functions.htm">Function</a></td>
+<td>The function to call once with the list of paired devices.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a></p>
+</blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the query started, otherwise the
+reason it did not.</p>
+<p><br></p>
+<p><strong>Triggers:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a></p>
+</blockquote>
+<p>Called once, with the paired devices or the reason the list could not be read.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>error_code</td>
+<td><a href="core.html#bluetootherror">BluetoothError</a></td>
+<td><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the list was read,<br>otherwise the reason it was not.</td>
+</tr>
+<tr>
+<td>message</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></td>
+<td>A description of the failure, or an empty string on success.</td>
+</tr>
+<tr>
+<td>devices</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Arrays.htm">Array</a> of <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handles of the paired devices, or an empty array on failure.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">var _error = bluetooth_paired_devices_query(function(_error_code, _message, _devices)
+{
+    if (_error_code != BluetoothError.Ok)
+    {
+        show_debug_message($"Could not list paired devices: {_message}");
+        exit;
+    }
+    for (var i = 0; i &lt; array_length(_devices); i++)
+    {
+        show_debug_message($"Paired: {bluetooth_device_get_name(_devices[i])}");
+    }
+});
+
+if (_error != BluetoothError.Ok)
+{
+    show_debug_message($"Query did not start: {bluetooth_last_error_message()}");
+}</code></pre>
+The above code asks for the list of paired devices. When the callback reports a failure the
+message is shown; on success the name of every paired device is shown in the output log. If the
+query could not be started at all, the reason is read with
+<a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a> and the callback is never called.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_pairing_is_supported">bluetooth_pairing_is_supported<a class="headerlink" href="#bluetooth_pairing_is_supported" title="Permanent link">&para;</a></h1>
+<p>This function checks whether <a href="devices.html#bluetooth_pair">bluetooth_pair</a> can pair with the given device. The
+answer depends on the device and its transport, not only on the platform. It returns <code>false</code> for
+a handle that is not valid and when Bluetooth is not initialised.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Android can pair Classic and LE devices. Windows can pair Classic devices only. macOS can
+pair Classic devices whose address is known. On Apple platforms LE pairing happens on its own when
+a protected characteristic is used, so this function returns <code>false</code> for every LE device there,
+and for every device on iOS.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_pairing_is_supported(device)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>device</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the device.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p><code>true</code> if the device can be paired with <a href="devices.html#bluetooth_pair">bluetooth_pair</a>, otherwise
+<code>false</code>.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">if (bluetooth_pairing_is_supported(device) &amp;&amp; !bluetooth_device_is_paired(device))
+{
+    bluetooth_pair(device, on_paired);
+}</code></pre>
+The above code pairs with the device using <a href="devices.html#bluetooth_pair">bluetooth_pair</a> only when the platform can
+pair it and it is not paired already.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_pair">bluetooth_pair<a class="headerlink" href="#bluetooth_pair" title="Permanent link">&para;</a></h1>
+<p>This function asks the system to pair (bond) with the given device. Pairing is separate
+from connecting with <a href="classic.html#bluetooth_classic_connect">bluetooth_classic_connect</a> or <a href="le_client.html#bluetooth_le_connect">bluetooth_le_connect</a>:
+some devices only accept a connection once they are paired, and the system remembers the pairing
+across runs of the game. The user may be shown a system pairing prompt.</p>
+<p>The function returns straight away, and the callback is called once, later, when the pairing
+succeeds or fails. On Windows and Android, a device that is already paired completes at once with
+<a href="core.html#bluetootherror">BluetoothError</a>.Ok.</p>
+<p>The function returns a <a href="core.html#bluetootherror">BluetoothError</a>, and the callback is never called when it is
+not Ok: NotInitialized, InvalidHandle for a device handle that is not valid, PermissionDenied,
+BluetoothDisabled, NotSupported for a device the platform cannot pair (see
+<a href="devices.html#bluetooth_pairing_is_supported">bluetooth_pairing_is_supported</a>), InvalidArgument for a device with no usable address,
+or Busy while a pairing of the same device is already in progress. The reason is also in
+<a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>.</p>
+<p>When the pairing fails, is rejected or is cancelled by the user, the callback reports
+<a href="core.html#bluetootherror">BluetoothError</a>.OperationFailed. If you call <a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a> before the
+pairing completes, the callback is called with NotInitialized.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Android pairs Classic and LE devices. Windows and macOS pair Classic devices only and
+return NotSupported for an LE device. iOS always returns NotSupported.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On macOS a pairing that has not completed after 60 seconds fails with
+<a href="core.html#bluetootherror">BluetoothError</a>.Timeout.</p>
+</div>
+<p>This function operates asynchronously, which means that it does not immediately return the requested result. Instead, upon completion of the task, it will trigger the <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a>.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_pair(device, callback)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>device</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the device to pair with.</td>
+</tr>
+<tr>
+<td>callback</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Script_Functions.htm">Function</a></td>
+<td>The function to call once the pairing succeeds or fails.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a></p>
+</blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the pairing started, otherwise the
+reason it did not.</p>
+<p><br></p>
+<p><strong>Triggers:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a></p>
+</blockquote>
+<p>Called once, when the pairing succeeds, fails or is cancelled.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>error_code</td>
+<td><a href="core.html#bluetootherror">BluetoothError</a></td>
+<td><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the device is paired,<br>otherwise the reason it is not.</td>
+</tr>
+<tr>
+<td>message</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></td>
+<td>A description of the failure, or an empty string on success.</td>
+</tr>
+<tr>
+<td>device</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the device passed to <a href="devices.html#bluetooth_pair">bluetooth_pair</a>.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">var _error = bluetooth_pair(device, function(_error_code, _message, _device)
+{
+    if (_error_code != BluetoothError.Ok)
+    {
+        show_debug_message($"Pairing failed: {_message}");
+        exit;
+    }
+    show_debug_message($"Paired with {bluetooth_device_get_name(_device)}");
+});
+
+if (_error != BluetoothError.Ok)
+{
+    show_debug_message($"Pairing did not start: {bluetooth_last_error_message()}");
+}</code></pre>
+The above code asks the system to pair with the device stored in the instance's <code>device</code>
+variable. The callback shows the reason when the pairing fails, or the name of the paired device
+on success. If the pairing could not be started at all, the reason is read with
+<a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a> and the callback is never called.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_device_is_paired">bluetooth_device_is_paired<a class="headerlink" href="#bluetooth_device_is_paired" title="Permanent link">&para;</a></h1>
+<p>This function checks whether the given device is currently paired (bonded) with this system.
+It returns <code>false</code> for a handle that is not valid and when Bluetooth is not initialised.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Android reports pairing for Classic and LE devices, and returns <code>false</code> without the
+Bluetooth connect permission. Windows and macOS report it for Classic devices only and return
+<code>false</code> for every LE device. iOS always returns <code>false</code>.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_device_is_paired(device)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>device</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the device.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p><code>true</code> if the device is paired, otherwise <code>false</code>.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">if (bluetooth_device_is_paired(device))
+{
+    show_debug_message("Already paired");
+}</code></pre>
+The above code shows a message in the output log when the device is already paired.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_set_callback_device_found">bluetooth_set_callback_device_found<a class="headerlink" href="#bluetooth_set_callback_device_found" title="Permanent link">&para;</a></h1>
+<p>This function sets the function to call when a scan adds a new device to the device cache.
+Both LE scans (<a href="le_client.html#bluetooth_le_scan_start">bluetooth_le_scan_start</a>) and Classic scans
+(<a href="classic.html#bluetooth_classic_scan_start">bluetooth_classic_scan_start</a>) call it, so use
+<a href="devices.html#bluetooth_device_get_transport">bluetooth_device_get_transport</a> to tell them apart. Setting a new function replaces the
+previous one.</p>
+<p>The callback is called once per device, not once per advertisement: later advertisements and
+inquiry results from the same device update its name, signal strength and advertisement in the
+cache, which the device getters return, without calling the callback again. After
+<a href="devices.html#bluetooth_device_clear">bluetooth_device_clear</a> a device found again is a new device and the callback is called
+for it again. When an LE scan has filters, a device is added, and the callback called, once its
+merged advertisement first matches one of them.</p>
+<p>A device that entered the cache without a scan is never reported here, even when a scan sees it
+later: one added with <a href="devices.html#bluetooth_device_from_id">bluetooth_device_from_id</a>, <a href="devices.html#bluetooth_paired_devices_query">bluetooth_paired_devices_query</a>
+or <a href="le_client.html#bluetooth_le_connected_devices_query">bluetooth_le_connected_devices_query</a>, or a central that connects to the LE server.</p>
+<p>The callback stays set across <a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a> and <a href="core.html#bluetooth_initialize">bluetooth_initialize</a>,
+until you call <a href="devices.html#bluetooth_remove_callback_device_found">bluetooth_remove_callback_device_found</a>.</p>
+<p>This function operates asynchronously, which means that it does not immediately return the requested result. Instead, upon completion of the task, it will trigger the <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a>.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_set_callback_device_found(callback)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>callback</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Script_Functions.htm">Function</a></td>
+<td>The function to call for each new device.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p>Always <code>true</code>.</p>
+<p><br></p>
+<p><strong>Triggers:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a></p>
+</blockquote>
+<p>Called once for each device a scan adds to the cache.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>device</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the new device.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">bluetooth_set_callback_device_found(function(_device)
+{
+    var _kind = (bluetooth_device_get_transport(_device) == BluetoothTransport.LowEnergy) ? "LE" : "Classic";
+    show_debug_message($"Found {_kind} device {bluetooth_device_get_name(_device)}");
+    array_push(devices, _device);
+});</code></pre>
+The above code sets a function that shows the transport and name of every new device in the
+output log and adds its handle to the instance's <code>devices</code> array.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_remove_callback_device_found">bluetooth_remove_callback_device_found<a class="headerlink" href="#bluetooth_remove_callback_device_found" title="Permanent link">&para;</a></h1>
+<p>This function removes the function set with <a href="devices.html#bluetooth_set_callback_device_found">bluetooth_set_callback_device_found</a>.
+Scans keep adding devices to the cache, but nothing is called for them.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_remove_callback_device_found()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p>Always <code>true</code>.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">bluetooth_remove_callback_device_found();</code></pre>
+The above code stops the game from being told about new devices.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_set_callback_scan_stopped">bluetooth_set_callback_scan_stopped<a class="headerlink" href="#bluetooth_set_callback_scan_stopped" title="Permanent link">&para;</a></h1>
+<p>This function sets the function to call when an LE or a Classic scan stops. Setting a new
+function replaces the previous one.</p>
+<p>The callback is called once per scan, whether the game stopped the scan with
+<a href="le_client.html#bluetooth_le_scan_stop">bluetooth_le_scan_stop</a> or <a href="classic.html#bluetooth_classic_scan_stop">bluetooth_classic_scan_stop</a>, the scan ended on
+its own (a Classic inquiry lasts a limited time), or the system ended it, for example because the
+radio was turned off. A stop while no scan is running calls nothing.</p>
+<p>The callback stays set across <a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a> and <a href="core.html#bluetooth_initialize">bluetooth_initialize</a>,
+until you call <a href="devices.html#bluetooth_remove_callback_scan_stopped">bluetooth_remove_callback_scan_stopped</a>.</p>
+<p>This function operates asynchronously, which means that it does not immediately return the requested result. Instead, upon completion of the task, it will trigger the <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a>.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_set_callback_scan_stopped(callback)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>callback</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Script_Functions.htm">Function</a></td>
+<td>The function to call when a scan stops.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p>Always <code>true</code>.</p>
+<p><br></p>
+<p><strong>Triggers:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a></p>
+</blockquote>
+<p>Called once each time an LE or a Classic scan stops.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>error_code</td>
+<td><a href="core.html#bluetootherror">BluetoothError</a></td>
+<td><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the scan ended without<br>an error, otherwise the reason it ended, such as BluetoothDisabled when the radio was turned off.</td>
+</tr>
+<tr>
+<td>message</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></td>
+<td>A description of the failure, or an empty string on success.</td>
+</tr>
+<tr>
+<td>transport</td>
+<td><a href="core.html#bluetoothtransport">BluetoothTransport</a></td>
+<td>The transport of the scan that stopped.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">bluetooth_set_callback_scan_stopped(function(_error_code, _message, _transport)
+{
+    var _kind = (_transport == BluetoothTransport.Classic) ? "Classic" : "LE";
+    if (_error_code != BluetoothError.Ok)
+    {
+        show_debug_message($"{_kind} scan ended: {_message}");
+        exit;
+    }
+    show_debug_message($"{_kind} scan stopped, {bluetooth_device_get_count()} devices cached");
+});</code></pre>
+The above code sets a function that shows why a scan ended when it ended with an error, or
+otherwise shows how many devices are in the cache, read with
+<a href="devices.html#bluetooth_device_get_count">bluetooth_device_get_count</a>.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_remove_callback_scan_stopped">bluetooth_remove_callback_scan_stopped<a class="headerlink" href="#bluetooth_remove_callback_scan_stopped" title="Permanent link">&para;</a></h1>
+<p>This function removes the function set with <a href="devices.html#bluetooth_set_callback_scan_stopped">bluetooth_set_callback_scan_stopped</a>.
+Scans still stop as before, but nothing is called when they do.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_remove_callback_scan_stopped()</code></pre>
+</blockquote>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
+</blockquote>
+<p>Always <code>true</code>.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">bluetooth_remove_callback_scan_stopped();</code></pre>
+The above code stops the game from being told when a scan stops.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetoothleadvertisement">BluetoothLeAdvertisement<a class="headerlink" href="#bluetoothleadvertisement" title="Permanent link">&para;</a></h1>
+<p>This struct holds what an LE device has advertised, as returned by
+<a href="devices.html#bluetooth_device_get_advertisement">bluetooth_device_get_advertisement</a>. It merges every advertisement and scan response
+received from the device since it entered the cache. Every array is empty for a Classic device and
+for a device never seen advertising. Each array holds at most 32 entries.</p>
+<p>This struct is referenced by the following functions:</p>
+<ul>
+<li><a href="devices.html#bluetooth_device_get_advertisement">bluetooth_device_get_advertisement</a></li>
+</ul>
+<p><br></p>
+<table>
+<thead>
+<tr>
+<th>Member</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>service_uuids</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Arrays.htm">Array</a> of <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></td>
+<td>Every service UUID the device has advertised, as lowercase<br>128-bit UUID strings.</td>
+</tr>
+<tr>
+<td>service_data</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Arrays.htm">Array</a> of <a href="le_server.html#bluetoothleadvertiseservicedata">BluetoothLeAdvertiseServiceData</a></td>
+<td>The service data the device<br>has advertised, the latest entry for each service UUID.</td>
+</tr>
+<tr>
+<td>manufacturer_data</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Arrays.htm">Array</a> of <a href="le_server.html#bluetoothleadvertisemanufacturerdata">BluetoothLeAdvertiseManufacturerData</a></td>
+<td>The manufacturer<br>data the device has advertised, the latest entry for each company identifier.</td>
+</tr>
+<tr>
+<td>tx_power</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The latest TX Power Level the device advertised (in dBm), or<br><code>undefined</code> if it has not advertised one.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<hr />
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      <p align="center">GameMaker 2026</p>
+    </div>
+  
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": ".", "features": ["navigation.top", "navigation.tracking", "toc.follow", "content.code.copy"], "search": "assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/gml.min.js"></script>
+      
+        <script src="assets/js/hljs-init.js"></script>
+      
+        <script src="assets/js/resize-columns.js"></script>
+      
+    
+  </body>
+</html>

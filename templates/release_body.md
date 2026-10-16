@@ -1,32 +1,36 @@
-
 ## IMPORTANT
 
-- GameMaker 2023.8 (LTSr2 supported)
-- Bluetooth classic is compatible with Windows and Android.
-- Bluetooth low energy is compatible with iOS, macOS, Windows and Android.
+- This extension requires GameMaker **2026.0** or later.
+- Requires the bundled **ExtensionCore** dependency.
+- Bluetooth Low Energy works with **Windows**, **macOS**, **iOS** and **Android**.
+- Bluetooth Classic works with **Windows**, **macOS** and **Android**.
+- macOS builds need a Bluetooth usage description and, when sandboxed, the Bluetooth entitlement, added by hand: see the Platform Setup page of the documentation.
 
 ## DESCRIPTION
 
-This extension provides you with a cross-platform experience of the Bluetooth technology. It is compatible with Windows|macOS|iOS|Android for Bluetooth Low Energy and with Windows|Android for Bluetooth Classic.
+This extension gives you access to Bluetooth Low Energy and Bluetooth Classic on Windows, macOS, iOS and Android through one API.
 
 ## CHANGES SINCE ${releaseOldVersion}
 
 https://github.com/YoYoGames/GMEXT-Bluetooth/compare/${releaseOldVersion}...${releaseNewVersion}
 
-## FEATURES 
+## FEATURES
 
-### Bluetooth classic (Windows|Android)
-- Create client and server
-- Connect to single or multiple servers
-- Servers allow multiple connections
-- Manage all connections and data flow.
+### Bluetooth Low Energy (Windows|macOS|iOS|Android)
+- Scan for devices, with filters, and read their advertisement data
+- Connect as a client and discover, read, write and subscribe to services, characteristics and descriptors
+- Negotiate the MTU and read the RSSI of a connection
+- Run a GATT server, advertise it and answer read and write requests
+- Reconnect to a known device without scanning
 
-### Bluetooth LE (Windows|Android|macOS|iOS)
-- Create server (peripheral)
-- Create clients (central)
-- Add services (manager properties and permissions)
-- Add characteristics and descriptors
-- Read and Write operations
+### Bluetooth Classic (Windows|macOS|Android)
+- Scan for devices and connect to RFCOMM services
+- Run an RFCOMM server that accepts several connections
+- Send and receive data on each connection
+
+### Common
+- Pairing and paired-device queries
+- Permission requests and a per-platform feature query
 
 ## DOCUMENTATION
 
