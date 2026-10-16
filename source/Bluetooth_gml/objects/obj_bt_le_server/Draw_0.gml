@@ -6,7 +6,7 @@ var _line = 17;
 
 
 // State: Step takes it (refresh_status); Draw only draws.
-var _permission = global.bt_permission_status;
+var _permission = obj_bt_init.bt_permission_status;
 var _server_running = status_server_running;
 var _advertising = status_advertising;
 
@@ -27,9 +27,9 @@ else if (_permission == BluetoothPermissionStatus.Denied)
 // Last peer event
 var _last_peer_message = "-";
 
-if (instance_exists(global.ble_server_conn_inst))
+if (instance_exists(conn_inst))
 {
-    var _logs = global.ble_server_conn_inst.log_lines;
+    var _logs = conn_inst.log_lines;
 
     if (array_length(_logs) > 0)
     {

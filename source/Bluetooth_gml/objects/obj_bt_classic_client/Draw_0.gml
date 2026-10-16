@@ -13,7 +13,7 @@ var _line = 17;
 // Step takes the scan and connection state (refresh_status); Draw only draws.
 var _permission_text = "Unknown";
 
-switch (global.bt_permission_status)
+switch (obj_bt_init.bt_permission_status)
 {
     case BluetoothPermissionStatus.Granted:
         _permission_text = "Granted";
@@ -24,7 +24,7 @@ switch (global.bt_permission_status)
         break;
 }
 
-var _conn = global.classic_conn;
+var _conn = conn;
 var _scanning = status_scanning;
 var _valid = status_valid;
 var _connected = status_connected;
@@ -40,14 +40,14 @@ var _pairing_supported = status_pairing_supported;
 
 var _remote_text = "-";
 
-if (instance_exists(global.classic_conn_inst))
+if (instance_exists(conn_inst))
 {
-    if (global.classic_conn_inst.has_remote)
+    if (conn_inst.has_remote)
     {
         _remote_text =
-            string(global.classic_conn_inst.remote_x)
+            string(conn_inst.remote_x)
             + ", "
-            + string(global.classic_conn_inst.remote_y);
+            + string(conn_inst.remote_y);
     }
 }
 

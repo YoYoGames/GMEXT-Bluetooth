@@ -14,6 +14,3 @@ if (server_started)
 bluetooth_remove_callback_le_server_connection_state_changed();
 bluetooth_remove_callback_le_server_write_request();
 bluetooth_remove_callback_le_server_read_request();
-
-global.ble_server_conn = 0;
-global.ble_server_conn_inst = noone;

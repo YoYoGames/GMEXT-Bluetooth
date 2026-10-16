@@ -22,8 +22,10 @@ auto_scan_after_permission = true;
 // here so Clean Up can cancel it when the room is left mid-connect.
 pending_conn = 0;
 
-global.ble_conn = 0;
-global.ble_conn_inst = noone;
+// The open connection's handle (0 when none) and the object showing it; that
+// object clears both in its Clean Up when it is still the current one.
+conn = 0;
+conn_inst = noone;
 
 // devices[] is a fresh list rebuilt for each scan.
 devices = [];
@@ -45,7 +47,7 @@ bluetooth_request_permissions = function()
 
     var _error = bluetooth_permission_request(function(_error_code, _message, _status)
     {
-        global.bt_permission_status = _status;
+        obj_bt_init.bt_permission_status = _status;
 
         show_debug_message(
             $"[GML] permission request: {_error_code} {_message}, status: {_status}"
@@ -137,7 +139,7 @@ add_device_button = function(_device)
 // or open (see obj_bt_le_device Step).
 connect_device = function(_device)
 {
-    if (!bt_ready || pending_conn != 0 || global.ble_conn != 0) return;
+    if (!bt_ready || pending_conn != 0 || conn != 0) return;
 
     // Bound to a struct, not to this instance: the callback can arrive after
     // the room is left, and must then close the link instead of spawning.
@@ -161,13 +163,13 @@ connect_device = function(_device)
 
             if (_error_code != BluetoothError.Ok) return;
 
-            global.ble_conn = _connection;
-            global.ble_conn_inst = instance_create_depth(
+            client.conn = _connection;
+            client.conn_inst = instance_create_depth(
                 0,
                 0,
                 0,
                 obj_bt_le_client_connection,
-                {connection: _connection}
+                {connection: _connection, owner: client}
             );
         })
     );
@@ -193,7 +195,7 @@ refresh_status = function()
     status_device_id = "-";
     status_rssi = "-";
 
-    var _conn = global.ble_conn;
+    var _conn = conn;
 
     if (_conn == 0 || !bluetooth_le_connection_is_valid(_conn)) return;
 
@@ -253,9 +255,9 @@ bluetooth_set_callback_scan_stopped(function(_error, _message, _transport)
 bluetooth_set_callback_le_characteristic_value_changed(
     function(_characteristic, _connection, _value, _size)
     {
-        if (instance_exists(global.ble_conn_inst))
+        if (instance_exists(conn_inst))
         {
-            global.ble_conn_inst.on_value_changed(_characteristic, _connection, _value, _size);
+            conn_inst.on_value_changed(_characteristic, _connection, _value, _size);
         }
         else
         {
@@ -269,13 +271,13 @@ bluetooth_set_callback_le_disconnected(
     {
         show_debug_message("[GML] le disconnected: " + _message);
 
-        if (instance_exists(global.ble_conn_inst))
+        if (instance_exists(conn_inst))
         {
-            instance_destroy(global.ble_conn_inst);
+            instance_destroy(conn_inst);
         }
 
-        global.ble_conn = 0;
-        global.ble_conn_inst = noone;
+        conn = 0;
+        conn_inst = noone;
     }
 );
 

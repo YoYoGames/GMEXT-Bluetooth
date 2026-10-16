@@ -23,8 +23,8 @@ if (bluetooth_le_connection_is_connected(connection))
     bluetooth_le_disconnect(connection);
 }
 
-if (global.ble_conn_inst == id)
+if (instance_exists(owner) && owner.conn_inst == id)
 {
-    global.ble_conn_inst = noone;
-    global.ble_conn = 0;
+    owner.conn_inst = noone;
+    owner.conn = 0;
 }

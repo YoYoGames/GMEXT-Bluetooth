@@ -6,8 +6,10 @@ service_ready = false;
 startup_requested = false;
 permission_request_sent = false;
 
-global.ble_server_conn = 0;
-global.ble_server_conn_inst = noone;
+// The open connection's handle (0 when none) and the object showing it; that
+// object clears both in its Clean Up when it is still the current one.
+conn = 0;
+conn_inst = noone;
 
 server_info_text = "GMBluetooth BLE Demo - READ characteristic OK";
 info_version = 0;
@@ -61,9 +63,9 @@ change_info_value = function()
     show_debug_message("[GML] INFO value changed: " + server_info_text);
     last_server_event = "INFO changed";
 
-    if (instance_exists(global.ble_server_conn_inst))
+    if (instance_exists(conn_inst))
     {
-        global.ble_server_conn_inst.log_msg("INFO changed: " + server_info_text);
+        conn_inst.log_msg("INFO changed: " + server_info_text);
     }
 };
 
@@ -95,9 +97,9 @@ send_demo_notification = function()
         last_notify_text = _text;
         last_server_event = "TX notification broadcast";
         show_debug_message("[GML] NOTIFY broadcast: \"" + _text + "\"");
-        if (instance_exists(global.ble_server_conn_inst))
+        if (instance_exists(conn_inst))
         {
-            global.ble_server_conn_inst.log_msg("TX notify: " + _text);
+            conn_inst.log_msg("TX notify: " + _text);
         }
     }
     else
@@ -105,9 +107,9 @@ send_demo_notification = function()
         var _message = bluetooth_last_error_message();
         last_server_event = "NOTIFY failed: " + _message;
         show_debug_message("[GML] NOTIFY failed: " + _message);
-        if (instance_exists(global.ble_server_conn_inst))
+        if (instance_exists(conn_inst))
         {
-            global.ble_server_conn_inst.log_msg("notify failed: " + _message);
+            conn_inst.log_msg("notify failed: " + _message);
         }
     }
 };
@@ -128,7 +130,7 @@ start_le_server_demo = function()
 
             var _error = bluetooth_permission_request(function(_error_code, _message, _status)
             {
-                global.bt_permission_status = _status;
+                obj_bt_init.bt_permission_status = _status;
 
                 show_debug_message(
                     "[GML] permission request: " + string(_error_code)
@@ -256,30 +258,30 @@ bluetooth_set_callback_le_server_connection_state_changed(
 
         if (_connected)
         {
-            global.ble_server_conn = _connection;
+            conn = _connection;
 
-            if (instance_exists(global.ble_server_conn_inst))
+            if (instance_exists(conn_inst))
             {
-                instance_destroy(global.ble_server_conn_inst);
+                instance_destroy(conn_inst);
             }
 
-            global.ble_server_conn_inst = instance_create_depth(
+            conn_inst = instance_create_depth(
                 0,
                 0,
                 0,
                 obj_bt_le_server_connection,
-                {connection: _connection}
+                {connection: _connection, owner: id}
             );
         }
         else
         {
-            if (instance_exists(global.ble_server_conn_inst))
+            if (instance_exists(conn_inst))
             {
-                instance_destroy(global.ble_server_conn_inst);
+                instance_destroy(conn_inst);
             }
 
-            global.ble_server_conn = 0;
-            global.ble_server_conn_inst = noone;
+            conn = 0;
+            conn_inst = noone;
         }
     }
 );
@@ -315,9 +317,9 @@ bluetooth_set_callback_le_server_write_request(
             last_rx_text = ble_bytes_to_string(_buf, _n);
             last_server_event = "RX write received";
 
-            if (instance_exists(global.ble_server_conn_inst))
+            if (instance_exists(conn_inst))
             {
-                global.ble_server_conn_inst.on_receive(
+                conn_inst.on_receive(
                     _characteristic,
                     _buf,
                     _n

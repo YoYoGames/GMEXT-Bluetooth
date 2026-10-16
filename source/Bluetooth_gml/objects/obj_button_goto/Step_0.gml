@@ -1,6 +1,6 @@
 // Lock a demo room the platform cannot run, from the capability matrix
 // obj_bt_init cached; any other room (the menu itself) stays unlocked.
-var _caps = global.bt_capabilities;
+var _caps = obj_bt_init.bt_capabilities;
 
 switch (goto)
 {

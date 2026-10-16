@@ -2,7 +2,7 @@ refresh_status();
 
 if (!bt_ready) exit;
 
-var _permission = global.bt_permission_status;
+var _permission = obj_bt_init.bt_permission_status;
 
 if (auto_scan_after_permission && _permission == BluetoothPermissionStatus.Granted)
 {
@@ -13,7 +13,7 @@ if (auto_scan_after_permission && _permission == BluetoothPermissionStatus.Grant
 last_permission_status = _permission;
 
 // Space = send (desktop convenience only; mobile uses the on-screen controls).
-if (keyboard_check_pressed(vk_space) && global.classic_conn != 0)
+if (keyboard_check_pressed(vk_space) && conn != 0)
 {
     send_dialog_id = get_string_async("Message to send", "");
 }

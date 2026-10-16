@@ -1,5 +1,5 @@
-if (global.ble_server_conn_inst == id)
+if (instance_exists(owner) && owner.conn_inst == id)
 {
-    global.ble_server_conn_inst = noone;
-    global.ble_server_conn = 0;
+    owner.conn_inst = noone;
+    owner.conn = 0;
 }

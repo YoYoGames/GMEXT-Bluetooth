@@ -4,8 +4,10 @@ bt_ready = bluetooth_is_initialized();
 server_started = false;
 permission_request_sent = false;
 
-global.classic_conn = 0;
-global.classic_conn_inst = noone;
+// The open connection's handle (0 when none) and the object showing it; that
+// object clears both in its Clean Up when it is still the current one.
+conn = 0;
+conn_inst = noone;
 
 // Why this room cannot run on this platform, or "" when it can.
 unavailable_reason = "";
@@ -39,7 +41,7 @@ start_classic_server_demo = function()
 
             var _error = bluetooth_permission_request(function(_error_code, _message, _status)
             {
-                global.bt_permission_status = _status;
+                obj_bt_init.bt_permission_status = _status;
 
                 show_debug_message(
                     "[GML] permission request: " + string(_error_code)
@@ -98,7 +100,7 @@ refresh_status = function()
     status_device_name = "-";
     status_device_address = "-";
 
-    var _conn = global.classic_conn;
+    var _conn = conn;
 
     if (_conn == 0 || !bluetooth_classic_connection_is_valid(_conn)) return;
 
@@ -129,19 +131,19 @@ if (!bt_ready)
 bluetooth_set_callback_classic_client_connected(
     function(_connection, _device)
     {
-        global.classic_conn = _connection;
+        conn = _connection;
 
-        if (instance_exists(global.classic_conn_inst))
+        if (instance_exists(conn_inst))
         {
-            instance_destroy(global.classic_conn_inst);
+            instance_destroy(conn_inst);
         }
 
-        global.classic_conn_inst = instance_create_depth(
+        conn_inst = instance_create_depth(
             0,
             0,
             0,
             obj_bt_classic_connection,
-            {connection: _connection}
+            {connection: _connection, owner: id}
         );
 
         show_debug_message(
@@ -152,7 +154,7 @@ bluetooth_set_callback_classic_client_connected(
 
 bluetooth_set_callback_classic_data(function(_connection, _value, _size)
 {
-    if (!instance_exists(global.classic_conn_inst))
+    if (!instance_exists(conn_inst))
     {
         bluetooth_value_release(_value);
         return;
@@ -163,7 +165,7 @@ bluetooth_set_callback_classic_data(function(_connection, _value, _size)
 
     if (_n > 0)
     {
-        global.classic_conn_inst.on_receive(_buf, _n);
+        conn_inst.on_receive(_buf, _n);
     }
 
     buffer_delete(_buf);
@@ -174,13 +176,13 @@ bluetooth_set_callback_classic_disconnected(
     {
         show_debug_message("[GML] classic client disconnected: " + _message);
 
-        if (instance_exists(global.classic_conn_inst))
+        if (instance_exists(conn_inst))
         {
-            instance_destroy(global.classic_conn_inst);
+            instance_destroy(conn_inst);
         }
 
-        global.classic_conn = 0;
-        global.classic_conn_inst = noone;
+        conn = 0;
+        conn_inst = noone;
     }
 );
 

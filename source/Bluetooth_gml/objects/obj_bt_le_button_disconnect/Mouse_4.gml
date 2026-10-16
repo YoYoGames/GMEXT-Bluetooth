@@ -12,7 +12,7 @@ if (_r != BluetoothError.Ok)
 }
 
 // A disconnect we asked for fires no le_disconnected, so tear the connection
-// UI down here. Its CleanUp resets global.ble_conn, which unlocks the device
-// list again.
+// UI down here. Its CleanUp resets obj_bt_le_client's conn, which unlocks the
+// device list again.
 show_debug_message("[GML] disconnected by user");
 instance_destroy(owner);

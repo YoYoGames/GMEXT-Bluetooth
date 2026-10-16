@@ -42,9 +42,9 @@ function bt_yes_no(_value)
 
 bt_ready = bluetooth_initialize();
 
-global.bt_state = BluetoothState.Unknown;
-global.bt_permission_status = BluetoothPermissionStatus.Unknown;
-global.bt_capabilities = {
+bt_state = BluetoothState.Unknown;
+bt_permission_status = BluetoothPermissionStatus.Unknown;
+bt_capabilities = {
     le: false,
     le_advertise: false,
     le_server: false,
@@ -85,29 +85,29 @@ if (!bt_ready)
 }
 
 // Cache the capability matrix once so demo rooms can also use it for UI.
-global.bt_capabilities.le = bluetooth_le_is_supported();
-global.bt_capabilities.le_advertise = bluetooth_le_advertise_is_supported();
-global.bt_capabilities.le_server = bluetooth_le_server_is_supported();
-global.bt_capabilities.classic = bluetooth_classic_is_supported();
-global.bt_capabilities.classic_server = bluetooth_classic_server_is_supported();
+bt_capabilities.le = bluetooth_le_is_supported();
+bt_capabilities.le_advertise = bluetooth_le_advertise_is_supported();
+bt_capabilities.le_server = bluetooth_le_server_is_supported();
+bt_capabilities.classic = bluetooth_classic_is_supported();
+bt_capabilities.classic_server = bluetooth_classic_server_is_supported();
 
-global.bt_permission_status = bluetooth_permission_get_status();
+bt_permission_status = bluetooth_permission_get_status();
 
 show_debug_message("----------------------------------------");
 show_debug_message("[GML] Initialized: " + bt_yes_no(bluetooth_is_initialized()));
-show_debug_message("[GML] Permission status: " + bt_permission_name(global.bt_permission_status));
-show_debug_message("[GML] BLE supported: " + bt_yes_no(global.bt_capabilities.le));
-show_debug_message("[GML] BLE advertising supported: " + bt_yes_no(global.bt_capabilities.le_advertise));
-show_debug_message("[GML] BLE GATT server supported: " + bt_yes_no(global.bt_capabilities.le_server));
-show_debug_message("[GML] Classic supported: " + bt_yes_no(global.bt_capabilities.classic));
-show_debug_message("[GML] Classic server supported: " + bt_yes_no(global.bt_capabilities.classic_server));
+show_debug_message("[GML] Permission status: " + bt_permission_name(bt_permission_status));
+show_debug_message("[GML] BLE supported: " + bt_yes_no(bt_capabilities.le));
+show_debug_message("[GML] BLE advertising supported: " + bt_yes_no(bt_capabilities.le_advertise));
+show_debug_message("[GML] BLE GATT server supported: " + bt_yes_no(bt_capabilities.le_server));
+show_debug_message("[GML] Classic supported: " + bt_yes_no(bt_capabilities.classic));
+show_debug_message("[GML] Classic server supported: " + bt_yes_no(bt_capabilities.classic_server));
 show_debug_message("[GML] Explicit pairing support is device-specific.");
 show_debug_message("[GML] After discovery use bluetooth_pairing_is_supported(device).");
 show_debug_message("----------------------------------------");
 
 bluetooth_set_callback_state_changed(function(_state)
 {
-    global.bt_state = _state;
+    bt_state = _state;
 
     show_debug_message(
         "[GML] Bluetooth state changed: "
@@ -118,12 +118,12 @@ bluetooth_set_callback_state_changed(function(_state)
     );
 });
 
-if (global.bt_permission_status != BluetoothPermissionStatus.Granted)
+if (bt_permission_status != BluetoothPermissionStatus.Granted)
 {
     show_debug_message("[GML] Requesting Bluetooth permission...");
     var _error = bluetooth_permission_request(function(_error_code, _message, _status)
     {
-        global.bt_permission_status = _status;
+        bt_permission_status = _status;
 
         show_debug_message(
             "[GML] Bluetooth permission request: "

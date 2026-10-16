@@ -12,7 +12,7 @@ var _line = 17;
 // Step takes the scan and connection state (refresh_status); Draw only draws.
 var _permission_text = "Unknown";
 
-switch (global.bt_permission_status)
+switch (obj_bt_init.bt_permission_status)
 {
     case BluetoothPermissionStatus.Granted:
         _permission_text = "Granted";
@@ -35,7 +35,7 @@ var _scan_running = status_scanning;
 // Connection state
 // -----------------------------------------------------------------------------
 
-var _conn = global.ble_conn;
+var _conn = conn;
 
 var _connected = status_connected;
 var _device_name = status_device_name;
@@ -51,10 +51,10 @@ var _rssi = status_rssi;
 var _rows_count = 0;
 var _button_count = 0;
 
-if (instance_exists(global.ble_conn_inst))
+if (instance_exists(conn_inst))
 {
-    _rows_count = array_length(global.ble_conn_inst.rows);
-    _button_count = array_length(global.ble_conn_inst.buttons);
+    _rows_count = array_length(conn_inst.rows);
+    _button_count = array_length(conn_inst.buttons);
 }
 
 

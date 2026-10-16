@@ -5,8 +5,8 @@ if (bluetooth_classic_connection_is_connected(connection))
 
 buffer_delete(recv_buffer);
 
-if (global.classic_conn_inst == id)
+if (instance_exists(owner) && owner.conn_inst == id)
 {
-    global.classic_conn_inst = noone;
-    global.classic_conn = 0;
+    owner.conn_inst = noone;
+    owner.conn = 0;
 }

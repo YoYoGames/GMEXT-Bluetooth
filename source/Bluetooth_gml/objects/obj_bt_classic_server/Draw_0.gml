@@ -7,11 +7,11 @@ var _line = 17;
 
 
 // State: Step takes it (refresh_status); Draw only draws.
-var _permission = global.bt_permission_status;
+var _permission = obj_bt_init.bt_permission_status;
 var _running = status_running;
 var _discoverable = status_discoverable;
 
-var _conn = global.classic_conn;
+var _conn = conn;
 var _connected = status_connected;
 var _device_name = status_device_name;
 var _address = status_device_address;
@@ -34,16 +34,16 @@ else if (_permission == BluetoothPermissionStatus.Denied)
 var _peer_position = "-";
 var _buffered_bytes = 0;
 
-if (instance_exists(global.classic_conn_inst))
+if (instance_exists(conn_inst))
 {
-    _buffered_bytes = global.classic_conn_inst.recv_buffer_size;
+    _buffered_bytes = conn_inst.recv_buffer_size;
 
-    if (global.classic_conn_inst.has_remote)
+    if (conn_inst.has_remote)
     {
         _peer_position =
-            string(global.classic_conn_inst.remote_x)
+            string(conn_inst.remote_x)
             + ", "
-            + string(global.classic_conn_inst.remote_y);
+            + string(conn_inst.remote_y);
     }
 }
 

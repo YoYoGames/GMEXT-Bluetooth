@@ -13,6 +13,3 @@ if (server_started)
 bluetooth_remove_callback_classic_client_connected();
 bluetooth_remove_callback_classic_data();
 bluetooth_remove_callback_classic_disconnected();
-
-global.classic_conn = 0;
-global.classic_conn_inst = noone;
