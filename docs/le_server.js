@@ -137,9 +137,9 @@
  *
  * You must answer every read request, once. The request is checked before anything is sent, so a call that fails can be retried. The function returns ${constant.BluetoothError}.Ok when the answer was sent, otherwise the reason, which is also in ${function.bluetooth_last_error_code} and ${function.bluetooth_last_error_message}: NotInitialized before ${function.bluetooth_initialize}, InvalidHandle for a request id that is unknown, already answered or expired, InvalidArgument for an `error_code` that is not a ${constant.BluetoothAttError} member, for the id of a write request (answer it with ${function.bluetooth_le_server_respond_write}), or for an offset and size outside the buffer when sending a value, and OperationFailed when the platform could not send the answer.
  *
- * A request you do not answer expires 30 seconds after it arrived, which is the ATT transaction timeout: by then the central has usually given up on the link, and a call with its id returns InvalidHandle. Expired requests are swept when the next request arrives. Stopping the server or clearing its services answers every waiting request with ${constant.BluetoothAttError}.UnlikelyError.
+ * A request you do not answer expires 30 seconds after it arrived, which is the ATT transaction timeout: by then the central has usually given up on the link, and a call with its id returns InvalidHandle. Expired requests are swept when the next request arrives, and one the central still waits on is answered with ${constant.BluetoothAttError}.UnlikelyError. Stopping the server or clearing its services answers every waiting request with ${constant.BluetoothAttError}.UnlikelyError.
  *
- * [[Note: On Windows, macOS and iOS the extension answers an expired request with ${constant.BluetoothAttError}.UnlikelyError when it sweeps it. On Android an expired request is dropped without an answer, and so is every request of a central that disconnects.]]
+ * [[Note: On Android the requests of a central that disconnects are dropped at once, since nothing can reach it, and a call with their ids returns InvalidHandle. On Windows, macOS and iOS they wait until they expire.]]
  *
  * [[Note: The `data` argument must be an existing buffer even when you refuse the read.]]
  * @param {Real} request_id The id of the request, as the read request callback reported it.
@@ -205,8 +205,6 @@
  * The value is copied, so you can free the buffer as soon as the function returns. It is queued and sent as the link allows: while 64 values are waiting to be sent the function returns Busy, and you should try again later, for example on the next step.
  *
  * The function returns ${constant.BluetoothError}.Ok when the value was queued, otherwise the reason, which is also in ${function.bluetooth_last_error_code} and ${function.bluetooth_last_error_message}: NotInitialized before ${function.bluetooth_initialize}, InvalidHandle for a characteristic that is not a live server characteristic or a connection that is not a connected server connection, InvalidArgument for an offset and size outside the buffer, NotFound when the given central is not subscribed to the characteristic, or Busy.
- *
- * [[Note: On Android the limit of 64 counts one value per subscriber, so a value sent to every subscriber takes one place for each of them.]]
  * @param {Real} characteristic The handle of the server characteristic whose value changed.
  * @param {Real} connection The server connection handle of the central to send to, or 0 for every subscriber.
  * @param {Buffer} data The buffer holding the new value.
