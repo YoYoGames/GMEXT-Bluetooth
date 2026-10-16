@@ -73,5 +73,13 @@ stop_advertising = function()
 
     var _r = bluetooth_le_advertise_stop();
     show_debug_message($"[GML] bluetooth_le_advertise_stop() = {_r}");
+
+    if (_r != BluetoothError.Ok)
+    {
+        owner.last_server_event = "Advertise stop failed: " + bluetooth_last_error_message();
+        show_debug_message($"[GML] le advertise stop failed: {bluetooth_last_error_message()}");
+        return;
+    }
+
     owner.last_server_event = "Advertising stopped";
 };

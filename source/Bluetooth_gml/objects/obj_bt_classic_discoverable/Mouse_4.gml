@@ -4,6 +4,10 @@ if (bluetooth_classic_discoverable_is_running())
 {
     var _stop = bluetooth_classic_discoverable_stop();
     show_debug_message($"[GML] bluetooth_classic_discoverable_stop() = {_stop}");
+    if (_stop != BluetoothError.Ok)
+    {
+        show_debug_message("[GML] discoverable stop failed: " + bluetooth_last_error_message());
+    }
     exit;
 }
 

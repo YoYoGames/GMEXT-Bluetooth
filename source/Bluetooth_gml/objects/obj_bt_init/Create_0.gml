@@ -115,6 +115,11 @@ if (global.bt_permission_status != BluetoothPermissionStatus.Granted)
     });
 
     show_debug_message("[GML] bluetooth_permission_request = " + string(_error));
+
+    if (_error != BluetoothError.Ok)
+    {
+        show_debug_message("[GML] permission request failed: " + bluetooth_last_error_message());
+    }
 }
 
 room_goto(rm_bt_menu);

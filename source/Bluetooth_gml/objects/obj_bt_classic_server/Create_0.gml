@@ -7,21 +7,89 @@ permission_request_sent = false;
 global.classic_conn = 0;
 global.classic_conn_inst = noone;
 
+// Why this room cannot run on this platform, or "" when it can.
+unavailable_reason = "";
+
 if (!bt_ready)
 {
-    show_debug_message("[GML] Bluetooth is not initialized");
-    exit;
+    unavailable_reason = "Bluetooth is not initialized";
+}
+else if (!bluetooth_classic_is_supported())
+{
+    bt_ready = false;
+    unavailable_reason = "Bluetooth Classic is not supported on this platform";
+}
+else if (!bluetooth_classic_server_is_supported())
+{
+    bt_ready = false;
+    unavailable_reason = "Bluetooth Classic server is not supported on this platform";
 }
 
-if (!bluetooth_classic_is_supported())
+// Defined before the room gives up on an unsupported platform, so Step can
+// always call it.
+start_classic_server_demo = function()
 {
-    show_debug_message("[GML] Bluetooth Classic is not supported on this platform");
-    exit;
-}
+    if (!bt_ready || server_started) return;
 
-if (!bluetooth_classic_server_is_supported())
+    if (bluetooth_permission_get_status() != BluetoothPermissionStatus.Granted)
+    {
+        if (!permission_request_sent)
+        {
+            permission_request_sent = true;
+
+            var _error = bluetooth_permission_request(function(_error_code, _message, _status)
+            {
+                show_debug_message(
+                    "[GML] permission request: " + string(_error_code)
+                    + " " + _message
+                    + ", status: " + string(_status)
+                );
+
+                if (_status == BluetoothPermissionStatus.Granted)
+                {
+                    start_classic_server_demo();
+                }
+            });
+
+            show_debug_message(
+                "[GML] bluetooth_permission_request = " + string(_error)
+            );
+
+            if (_error != BluetoothError.Ok)
+            {
+                show_debug_message(
+                    "[GML] permission request failed: " + bluetooth_last_error_message()
+                );
+            }
+        }
+
+        return;
+    }
+
+    var _server_error = bluetooth_classic_server_start(
+        DEMO_CLASSIC_SERVICE_NAME,
+        DEMO_CLASSIC_SERVICE_UUID
+    );
+
+    show_debug_message(
+        "[GML] classic_server_start = " + string(_server_error)
+    );
+
+    if (_server_error == BluetoothError.Ok)
+    {
+        server_started = true;
+    }
+    else
+    {
+        show_debug_message(
+            "[GML] classic server failed to start: " + bluetooth_last_error_message()
+        );
+    }
+};
+
+if (!bt_ready)
 {
-    show_debug_message("[GML] Bluetooth Classic server is not supported on this platform");
+    show_debug_message("[GML] " + unavailable_reason);
     exit;
 }
 
@@ -82,52 +150,5 @@ bluetooth_set_callback_classic_disconnected(
         global.classic_conn_inst = noone;
     }
 );
-
-start_classic_server_demo = function()
-{
-    if (!bt_ready || server_started) return;
-
-    if (bluetooth_permission_get_status() != BluetoothPermissionStatus.Granted)
-    {
-        if (!permission_request_sent)
-        {
-            permission_request_sent = true;
-
-            var _error = bluetooth_permission_request(function(_error_code, _message, _status)
-            {
-                show_debug_message(
-                    "[GML] permission request: " + string(_error_code)
-                    + " " + _message
-                    + ", status: " + string(_status)
-                );
-
-                if (_status == BluetoothPermissionStatus.Granted)
-                {
-                    start_classic_server_demo();
-                }
-            });
-
-            show_debug_message(
-                "[GML] bluetooth_permission_request = " + string(_error)
-            );
-        }
-
-        return;
-    }
-
-    var _server_error = bluetooth_classic_server_start(
-        DEMO_CLASSIC_SERVICE_NAME,
-        DEMO_CLASSIC_SERVICE_UUID
-    );
-
-    show_debug_message(
-        "[GML] classic_server_start = " + string(_server_error)
-    );
-
-    if (_server_error == BluetoothError.Ok)
-    {
-        server_started = true;
-    }
-};
 
 start_classic_server_demo();

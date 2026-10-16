@@ -100,6 +100,12 @@ draw_set_valign(fa_top);
 draw_text(_x, _y, "BLE CLIENT");
 _y += _line * 2;
 
+if (unavailable_reason != "")
+{
+    draw_text(_x, _y, unavailable_reason);
+    _y += _line * 2;
+}
+
 draw_text(_x, _y, "Permission: " + _permission_text);
 _y += _line;
 

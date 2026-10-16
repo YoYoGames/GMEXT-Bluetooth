@@ -1,41 +1,15 @@
 if (locked) exit;
+if (!instance_exists(owner)) exit;
 
 show_debug_message("[GML] connecting to " + label);
 
-bluetooth_le_scan_stop();
-connecting = true;
+var _stop = bluetooth_le_scan_stop();
 
-var _ctx = {
-    button_inst: id
-};
-
-var _connection = bluetooth_le_connect(
-    device,
-    method(_ctx, function(_error_code, _message, _connection, _device)
-    {
-        if (instance_exists(button_inst)) button_inst.connecting = false;
-
-        show_debug_message("[GML] le connect " + string(_error_code) + " " + _message);
-        if (_error_code != BluetoothError.Ok) return;
-
-        global.ble_conn = _connection;
-        global.ble_conn_inst = instance_create_depth(
-            0,
-            0,
-            0,
-            obj_bt_le_client_connection,
-            {connection: _connection}
-        );
-    })
-);
-
-if (_connection == 0)
+if (_stop != BluetoothError.Ok)
 {
-    connecting = false;
-    show_debug_message(
-        "[GML] le connect failed to start: "
-        + string(bluetooth_last_error_code())
-        + " "
-        + bluetooth_last_error_message()
-    );
+    show_debug_message("[GML] le scan stop failed: " + bluetooth_last_error_message());
 }
+
+// The controller owns the pending handle, so leaving the room cancels the
+// connect instead of letting its callback spawn a connection elsewhere.
+owner.connect_device(device);

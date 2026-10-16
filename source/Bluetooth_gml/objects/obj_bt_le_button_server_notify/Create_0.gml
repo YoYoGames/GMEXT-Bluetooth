@@ -5,6 +5,6 @@ event_inherited();
 owner = instance_find(obj_bt_le_server, 0);
 
 // Stay locked if the controller bailed out early (Bluetooth unavailable).
-locked = !instance_exists(owner) || !variable_instance_exists(owner, "send_demo_notification");
+locked = !instance_exists(owner) || !owner.bt_ready;
 
 text = "NOTIFY CLIENT";

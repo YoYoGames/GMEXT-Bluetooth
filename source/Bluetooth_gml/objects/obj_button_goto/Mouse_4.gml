@@ -1,2 +1,4 @@
 
-room_goto(goto)
+if (locked) exit;
+
+room_goto(goto);

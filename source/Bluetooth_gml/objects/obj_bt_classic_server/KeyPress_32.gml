@@ -1,8 +1,6 @@
- 
-var _text = "Helloo"
- 
-var _buf = buffer_create(string_byte_length(_text) + 1, buffer_fixed, 1);
-buffer_write(_buf, buffer_string, _text);
-bluetooth_classic_send(global.classic_conn, _buf, 0, buffer_get_size(_buf));
-buffer_delete(_buf);
-
+// Space sends a text record; the connection frames it, so it cannot
+// misalign the position records on the same stream.
+if (global.classic_conn != 0 && instance_exists(global.classic_conn_inst))
+{
+    global.classic_conn_inst.send_text("Hello");
+}

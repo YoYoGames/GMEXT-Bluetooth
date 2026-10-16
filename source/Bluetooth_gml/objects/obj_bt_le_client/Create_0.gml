@@ -3,7 +3,24 @@ show_debug_message("========== BLUETOOTH LE CLIENT (DEMO) ==========");
 
 bt_ready = bluetooth_is_initialized();
 
+// Why this room cannot run on this platform, or "" when it can.
+unavailable_reason = "";
+
+if (!bt_ready)
+{
+    unavailable_reason = "Bluetooth is not initialized";
+}
+else if (!bluetooth_le_is_supported())
+{
+    bt_ready = false;
+    unavailable_reason = "Bluetooth LE is not supported on this platform";
+}
+
 auto_scan_after_permission = true;
+
+// The handle of a connect that has not completed yet (0 when none), owned
+// here so Clean Up can cancel it when the room is left mid-connect.
+pending_conn = 0;
 
 global.ble_conn = 0;
 global.ble_conn_inst = noone;
@@ -16,18 +33,11 @@ device_instances = [];
 // here until a later advertisement or scan response names it (see Step).
 unnamed_devices = [];
 
-if (!bt_ready)
-{
-    show_debug_message("[GML] Bluetooth is not initialized");
-    exit;
-}
+list_x = max(650, room_width * 0.55);
+list_y = 100;
 
-if (!bluetooth_le_is_supported())
-{
-    show_debug_message("[GML] Bluetooth LE is not supported on this platform");
-    exit;
-}
-
+// The methods are defined before the room gives up on an unsupported
+// platform, so Step and the buttons can always call them.
 bluetooth_request_permissions = function()
 {
     if (!bt_ready) return;
@@ -46,6 +56,11 @@ bluetooth_request_permissions = function()
         }
     });
     show_debug_message($"[GML] bluetooth_permission_request() = {_error}");
+
+    if (_error != BluetoothError.Ok)
+    {
+        show_debug_message($"[GML] permission request failed: {bluetooth_last_error_message()}");
+    }
 };
 
 bluetooth_start_le_scan = function()
@@ -75,26 +90,12 @@ bluetooth_start_le_scan = function()
 
     var _error = bluetooth_le_scan_start(true, []);
     show_debug_message($"[GML] bluetooth_le_scan_start() = {_error}");
-};
 
-list_x = max(650, room_width * 0.55);
-list_y = 100;
-
-bluetooth_set_callback_device_found(function(_device)
-{
-    // The public discovery callback is shared by BLE and Classic.
-    if (bluetooth_device_get_transport(_device) != BluetoothTransport.LowEnergy) return;
-
-    // Keep the demo scan focused: only show BLE devices with a visible name.
-    // An unnamed one is kept aside; Step adds it once its scan response names it.
-    if (bluetooth_device_get_name(_device) == "")
+    if (_error != BluetoothError.Ok)
     {
-        array_push(unnamed_devices, _device);
-        return;
+        show_debug_message($"[GML] le scan failed to start: {bluetooth_last_error_message()}");
     }
-
-    add_device_button(_device);
-});
+};
 
 add_device_button = function(_device)
 {
@@ -116,7 +117,7 @@ add_device_button = function(_device)
         list_y,
         0,
         obj_bt_le_device,
-        {device: _device}
+        {device: _device, owner: id}
     );
 
     array_push(device_instances, _inst);
@@ -129,6 +130,78 @@ add_device_button = function(_device)
 
     list_y += 60;
 };
+
+// One connection at a time; the device buttons lock while one is pending
+// or open (see obj_bt_le_device Step).
+connect_device = function(_device)
+{
+    if (!bt_ready || pending_conn != 0 || global.ble_conn != 0) return;
+
+    // Bound to a struct, not to this instance: the callback can arrive after
+    // the room is left, and must then close the link instead of spawning.
+    var _ctx = {
+        client: id
+    };
+
+    pending_conn = bluetooth_le_connect(
+        _device,
+        method(_ctx, function(_error_code, _message, _connection, _device)
+        {
+            show_debug_message("[GML] le connect " + string(_error_code) + " " + _message);
+
+            if (!instance_exists(client))
+            {
+                if (_error_code == BluetoothError.Ok) bluetooth_le_disconnect(_connection);
+                return;
+            }
+
+            client.pending_conn = 0;
+
+            if (_error_code != BluetoothError.Ok) return;
+
+            global.ble_conn = _connection;
+            global.ble_conn_inst = instance_create_depth(
+                0,
+                0,
+                0,
+                obj_bt_le_client_connection,
+                {connection: _connection}
+            );
+        })
+    );
+
+    if (pending_conn == 0)
+    {
+        show_debug_message(
+            "[GML] le connect failed to start: "
+            + string(bluetooth_last_error_code())
+            + " "
+            + bluetooth_last_error_message()
+        );
+    }
+};
+
+if (!bt_ready)
+{
+    show_debug_message("[GML] " + unavailable_reason);
+    exit;
+}
+
+bluetooth_set_callback_device_found(function(_device)
+{
+    // The public discovery callback is shared by BLE and Classic.
+    if (bluetooth_device_get_transport(_device) != BluetoothTransport.LowEnergy) return;
+
+    // Keep the demo scan focused: only show BLE devices with a visible name.
+    // An unnamed one is kept aside; Step adds it once its scan response names it.
+    if (bluetooth_device_get_name(_device) == "")
+    {
+        array_push(unnamed_devices, _device);
+        return;
+    }
+
+    add_device_button(_device);
+});
 
 bluetooth_set_callback_scan_stopped(function(_error, _message, _transport)
 {
