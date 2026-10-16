@@ -8993,17 +8993,17 @@ public class GMBluetooth extends GMBluetoothInternal
                 INVALID_HANDLE,
                 "Invalid Bluetooth Classic connection handle");
 
+        if (bufferRangeInvalid(data, offset, size))
+            return result(
+                INVALID_ARGUMENT,
+                "Invalid buffer offset/size for bluetooth_classic_send");
+
         BluetoothSocket socket = entry.socket;
 
         if (socket == null || !entry.connected || entry.finished)
             return result(
                 DISCONNECTED,
                 "Classic connection is not connected");
-
-        if (bufferRangeInvalid(data, offset, size))
-            return result(
-                INVALID_ARGUMENT,
-                "Invalid buffer offset/size for bluetooth_classic_send");
 
         if (size == 0)
             return OK;
@@ -9021,11 +9021,7 @@ public class GMBluetooth extends GMBluetoothInternal
                     DISCONNECTED,
                     "Classic connection is closing");
 
-            // One send larger than the limit still goes when nothing else is
-            // waiting, or it could never go at all.
-            if (
-                entry.sendQueuedBytes > 0 &&
-                (long) entry.sendQueuedBytes + size > MAX_QUEUED_SEND_BYTES)
+            if ((long) entry.sendQueuedBytes + size > MAX_QUEUED_SEND_BYTES)
             {
                 return result(
                     BUSY,
@@ -9054,16 +9050,6 @@ public class GMBluetooth extends GMBluetoothInternal
         if (ready != OK)
             return ready;
 
-        if (!hasConnectPermission())
-            return result(
-                PERMISSION_DENIED,
-                "Bluetooth connect permission is not granted");
-
-        if (!adapterEnabled())
-            return result(
-                BLUETOOTH_DISABLED,
-                "Bluetooth is disabled");
-
         if (service_uuid == null || service_uuid.isEmpty())
             return result(
                 INVALID_ARGUMENT,
@@ -9081,6 +9067,16 @@ public class GMBluetooth extends GMBluetoothInternal
                 INVALID_ARGUMENT,
                 "service_uuid is not a valid UUID");
         }
+
+        if (!hasConnectPermission())
+            return result(
+                PERMISSION_DENIED,
+                "Bluetooth connect permission is not granted");
+
+        if (!adapterEnabled())
+            return result(
+                BLUETOOTH_DISABLED,
+                "Bluetooth is disabled");
 
         final ClassicServer server = new ClassicServer(
             name == null || name.isEmpty() ? "GMBluetooth RFCOMM" : name,

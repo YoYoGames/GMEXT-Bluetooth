@@ -3432,6 +3432,13 @@ BluetoothError bluetooth_classic_send(std::uint64_t connection, struct gm::wire:
         return to_gm(Error::NotInitialized);
     }
 
+    if (!g_classic_connection_manager.is_valid(connection))
+    {
+        g_last_error = Error::InvalidHandle;
+        g_last_error_message = "Invalid Bluetooth Classic connection handle";
+        return to_gm(Error::InvalidHandle);
+    }
+
     if (!buffer_range_valid(data, offset, size, "bluetooth_classic_send"))
         return to_gm(Error::InvalidArgument);
 
@@ -3452,8 +3459,15 @@ BluetoothError bluetooth_classic_server_start(std::string_view name, std::string
         return to_gm(Error::NotInitialized);
     }
 
-    if (!check_uuid(service_uuid))
-        return to_gm(Error::InvalidArgument);
+    if (!g_backend->supports_classic_server())
+    {
+        g_last_error = Error::NotSupported;
+        g_last_error_message = "A Bluetooth Classic server is not supported on this platform";
+        return to_gm(Error::NotSupported);
+    }
+
+    if (!check_uuid(service_uuid) || !check_radio())
+        return to_gm(g_last_error);
 
     // One answer on every platform, rather than a running server that quietly
     // keeps its old name and UUID.
@@ -3498,6 +3512,16 @@ BluetoothError bluetooth_classic_discoverable_start(std::int32_t duration_second
         g_last_error_message = "Bluetooth backend is not initialized";
         return to_gm(Error::NotInitialized);
     }
+
+    if (!g_backend->feature_supported(static_cast<std::int32_t>(BluetoothFeature::ClassicDiscoverable)))
+    {
+        g_last_error = Error::NotSupported;
+        g_last_error_message = "Making the device discoverable is not supported on this platform";
+        return to_gm(Error::NotSupported);
+    }
+
+    if (!check_radio())
+        return to_gm(g_last_error);
 
     std::string message;
     const Error error = g_backend->classic_discoverable_start(duration_seconds, message);

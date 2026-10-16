@@ -337,12 +337,6 @@
  * InvalidHandle for a handle that is not valid, Disconnected when the connection is still
  * connecting, closing or has ended, Busy when the queue is full, or NotSupported where Classic is not
  * available.
- *
- * [[Note: On Windows a handle that is not valid returns ${constant.BluetoothError}.Disconnected
- * instead of InvalidHandle.]]
- *
- * [[Note: On Android a single send larger than 1 MiB is accepted when nothing else is waiting to be
- * sent.]]
  * @param {Real} connection The connection handle to send on.
  * @param {Buffer} data The buffer that holds the bytes to send.
  * @param {Real} offset The position in the buffer of the first byte to send (in bytes).
@@ -390,13 +384,15 @@
  * ${constant.BluetoothError}.Ok the server did not start, and the reason is in
  * ${function.bluetooth_last_error_code} and ${function.bluetooth_last_error_message}:
  * NotInitialized, InvalidArgument for a service UUID that is not valid, Busy while a server is
- * already running (stop it first to change its name or UUID), NotSupported where the Classic server
- * is not available, or OperationFailed when the system refused to publish the service.
+ * already running (stop it first to change its name or UUID), PermissionDenied when the Bluetooth
+ * permission is missing or was refused, BluetoothDisabled when the radio is off, NotSupported where
+ * the Classic server is not available, or OperationFailed when the system refused to publish the
+ * service.
  *
  * [[Note: On Windows and Android an empty name is published as "GMBluetooth RFCOMM". On Android the
- * call also returns PermissionDenied without the Bluetooth connect permission and BluetoothDisabled
- * while the radio is off, and incoming links are secure (authenticated) RFCOMM links. On macOS it
- * returns PermissionDenied until ${function.bluetooth_permission_request} has been called.]]
+ * permission is the Bluetooth connect permission, and incoming links are secure (authenticated)
+ * RFCOMM links. On macOS it returns PermissionDenied until ${function.bluetooth_permission_request}
+ * has been called.]]
  * @param {String} name The name of the service, as other devices see it.
  * @param {String} service_uuid The UUID of the service, in the full 36-character form or as 4 or 8
  * hex digits.
@@ -472,8 +468,9 @@
  *
  * The function returns a ${constant.BluetoothError}. When it is not
  * ${constant.BluetoothError}.Ok the reason is in ${function.bluetooth_last_error_code} and
- * ${function.bluetooth_last_error_message}: NotInitialized, NotSupported where discoverability
- * cannot be controlled, or OperationFailed when the system refused.
+ * ${function.bluetooth_last_error_message}: NotInitialized, PermissionDenied when the Bluetooth
+ * permission is missing or was refused, BluetoothDisabled when the radio is off, NotSupported where
+ * discoverability cannot be controlled, or OperationFailed when the system refused.
  *
  * [[Note: On Windows the device becomes discoverable at once and stays so for the given duration,
  * or until ${function.bluetooth_classic_discoverable_stop} when the duration is 0 or less. Incoming
@@ -485,8 +482,7 @@
  * ${constant.BluetoothError}.Ok only means that the prompt was shown, not that the user accepted:
  * check ${function.bluetooth_classic_discoverable_is_running}. The duration is clamped to 1 to 3600
  * seconds, and 0 or less asks for the Android default of 120 seconds; there is no indefinite
- * duration. The call returns PermissionDenied without the Bluetooth advertise permission and
- * BluetoothDisabled while the radio is off.]]
+ * duration. The permission is the Bluetooth advertise permission.]]
  *
  * [[Note: macOS and iOS have no public API for this, and the function returns NotSupported.]]
  * @param {Real} duration_seconds How long the device stays discoverable (in seconds), or 0 for no

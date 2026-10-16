@@ -1808,16 +1808,6 @@ NotInitialized, InvalidArgument when the offset and size go past the end of the 
 InvalidHandle for a handle that is not valid, Disconnected when the connection is still
 connecting, closing or has ended, Busy when the queue is full, or NotSupported where Classic is not
 available.</p>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>On Windows a handle that is not valid returns <a href="core.html#bluetootherror">BluetoothError</a>.Disconnected
-instead of InvalidHandle.</p>
-</div>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>On Android a single send larger than 1 MiB is accepted when nothing else is waiting to be
-sent.</p>
-</div>
 <p><br></p>
 <p><strong>Syntax:</strong></p>
 <blockquote>
@@ -1899,14 +1889,16 @@ that callback before you start the server. Only one server can run at a time.</p
 <a href="core.html#bluetootherror">BluetoothError</a>.Ok the server did not start, and the reason is in
 <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>:
 NotInitialized, InvalidArgument for a service UUID that is not valid, Busy while a server is
-already running (stop it first to change its name or UUID), NotSupported where the Classic server
-is not available, or OperationFailed when the system refused to publish the service.</p>
+already running (stop it first to change its name or UUID), PermissionDenied when the Bluetooth
+permission is missing or was refused, BluetoothDisabled when the radio is off, NotSupported where
+the Classic server is not available, or OperationFailed when the system refused to publish the
+service.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>On Windows and Android an empty name is published as "GMBluetooth RFCOMM". On Android the
-call also returns PermissionDenied without the Bluetooth connect permission and BluetoothDisabled
-while the radio is off, and incoming links are secure (authenticated) RFCOMM links. On macOS it
-returns PermissionDenied until <a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a> has been called.</p>
+permission is the Bluetooth connect permission, and incoming links are secure (authenticated)
+RFCOMM links. On macOS it returns PermissionDenied until <a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a>
+has been called.</p>
 </div>
 <p><br></p>
 <p><strong>Syntax:</strong></p>
@@ -2026,8 +2018,9 @@ with <a href="classic.html#bluetooth_classic_server_start">bluetooth_classic_ser
 with <a href="core.html#bluetoothfeature">BluetoothFeature</a>.ClassicDiscoverable to check whether the platform can do this.</p>
 <p>The function returns a <a href="core.html#bluetootherror">BluetoothError</a>. When it is not
 <a href="core.html#bluetootherror">BluetoothError</a>.Ok the reason is in <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and
-<a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>: NotInitialized, NotSupported where discoverability
-cannot be controlled, or OperationFailed when the system refused.</p>
+<a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>: NotInitialized, PermissionDenied when the Bluetooth
+permission is missing or was refused, BluetoothDisabled when the radio is off, NotSupported where
+discoverability cannot be controlled, or OperationFailed when the system refused.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>On Windows the device becomes discoverable at once and stays so for the given duration,
@@ -2042,8 +2035,7 @@ Bluetooth radio is found.</p>
 <a href="core.html#bluetootherror">BluetoothError</a>.Ok only means that the prompt was shown, not that the user accepted:
 check <a href="classic.html#bluetooth_classic_discoverable_is_running">bluetooth_classic_discoverable_is_running</a>. The duration is clamped to 1 to 3600
 seconds, and 0 or less asks for the Android default of 120 seconds; there is no indefinite
-duration. The call returns PermissionDenied without the Bluetooth advertise permission and
-BluetoothDisabled while the radio is off.</p>
+duration. The permission is the Bluetooth advertise permission.</p>
 </div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
