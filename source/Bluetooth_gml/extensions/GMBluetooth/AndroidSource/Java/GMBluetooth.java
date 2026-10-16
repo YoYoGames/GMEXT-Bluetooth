@@ -855,14 +855,24 @@ public class GMBluetooth extends GMBluetoothInternal
         BluetoothGattCharacteristic characteristic;
         byte[] value;
         boolean confirm;
+        LeServerNotifyCall call;
     }
 
+    // One bluetooth_le_server_notify_value call: its notifications still
+    // queued or in flight, one per subscribed central.
+    private static final class LeServerNotifyCall
+    {
+        int remaining;
+    }
+
+    // Counted in calls, as Windows and Apple count them, not in centrals.
     private static final int MAX_QUEUED_NOTIFICATIONS = 64;
 
     // Per device address, the notification the stack holds and the ones
     // waiting behind it, in order. An address with an in-flight entry has its
-    // sending turn taken; onNotificationSent hands it on. The count covers
-    // every queue and every in-flight entry. Guarded by leServerNotifyLock.
+    // sending turn taken; onNotificationSent hands it on. The count is of the
+    // calls with a notification in any queue or in flight, kept by
+    // releaseLeServerNotification. Guarded by leServerNotifyLock.
     private final Object leServerNotifyLock = new Object();
     private final HashMap<String, ArrayDeque<LeServerNotification>> leServerNotifyQueues = new HashMap<>();
     private final HashMap<String, LeServerNotification> leServerNotifyInFlight = new HashMap<>();
@@ -6111,6 +6121,8 @@ public class GMBluetooth extends GMBluetoothInternal
 
                 ArrayList<Integer> ids = new ArrayList<>();
 
+                expireLeServerRequests();
+
                 synchronized (leServerRequestLock)
                 {
                     for (LeServerRequestEntry request : requests)
@@ -6145,11 +6157,13 @@ public class GMBluetooth extends GMBluetoothInternal
 
                 synchronized (leServerNotifyLock)
                 {
+                    LeServerNotification sent = leServerNotifyInFlight.remove(address);
+
                     // Dropped meanwhile: nothing of this device's is in flight.
-                    if (leServerNotifyInFlight.remove(address) == null)
+                    if (sent == null)
                         return;
 
-                    leServerNotifyCount--;
+                    releaseLeServerNotification(sent);
                 }
 
                 sendLeServerNotifications(address);
@@ -6196,7 +6210,7 @@ public class GMBluetooth extends GMBluetoothInternal
                     return;
 
                 leServerNotifyInFlight.remove(address);
-                leServerNotifyCount--;
+                releaseLeServerNotification(next);
             }
         }
     }
@@ -6245,23 +6259,46 @@ public class GMBluetooth extends GMBluetoothInternal
         {
             if (address == null)
             {
+                for (ArrayDeque<LeServerNotification> queue : leServerNotifyQueues.values())
+                    for (LeServerNotification notification : queue)
+                        releaseLeServerNotification(notification);
+
                 leServerNotifyQueues.clear();
 
                 if (!keepInFlight)
-                    leServerNotifyInFlight.clear();
+                {
+                    for (LeServerNotification notification : leServerNotifyInFlight.values())
+                        releaseLeServerNotification(notification);
 
-                leServerNotifyCount = leServerNotifyInFlight.size();
+                    leServerNotifyInFlight.clear();
+                }
+
                 return;
             }
 
             ArrayDeque<LeServerNotification> queue = leServerNotifyQueues.remove(address);
 
             if (queue != null)
-                leServerNotifyCount -= queue.size();
+                for (LeServerNotification notification : queue)
+                    releaseLeServerNotification(notification);
 
-            if (!keepInFlight && leServerNotifyInFlight.remove(address) != null)
-                leServerNotifyCount--;
+            if (!keepInFlight)
+            {
+                LeServerNotification inFlight = leServerNotifyInFlight.remove(address);
+
+                if (inFlight != null)
+                    releaseLeServerNotification(inFlight);
+            }
         }
+    }
+
+
+    // Caller holds leServerNotifyLock. A notification left its queue or the
+    // stack, sent or not; its call stops counting with the last one.
+    private void releaseLeServerNotification(LeServerNotification notification)
+    {
+        if (--notification.call.remaining == 0)
+            leServerNotifyCount--;
     }
 
 
@@ -6323,6 +6360,8 @@ public class GMBluetooth extends GMBluetoothInternal
 
         int requestId;
 
+        expireLeServerRequests();
+
         synchronized (leServerRequestLock)
         {
             requestId = storeLeServerRequest(request);
@@ -6379,6 +6418,8 @@ public class GMBluetooth extends GMBluetoothInternal
         request.value = storeValue(VALUE_SERVER_WRITE, bytes.clone(), null);
 
         int requestId;
+
+        expireLeServerRequests();
 
         synchronized (leServerRequestLock)
         {
@@ -6457,11 +6498,9 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     // Caller holds leServerRequestLock. Stores a request under a new extension
-    // id, after dropping the ones past their lifetime.
+    // id; the caller runs expireLeServerRequests first.
     private int storeLeServerRequest(LeServerRequestEntry request)
     {
-        expireLeServerRequests();
-
         int requestId = nextLeServerRequestId++;
 
         if (nextLeServerRequestId <= 0)
@@ -6472,27 +6511,43 @@ public class GMBluetooth extends GMBluetoothInternal
     }
 
 
-    // Caller holds leServerRequestLock. Runs on each new request, so neither
-    // the no-response writes of a streaming central nor requests nobody
-    // answered can pile up.
+    // Runs on each new request, so neither the no-response writes of a
+    // streaming central nor requests nobody answered can pile up. Those a
+    // central still waits on are answered, with no lock held.
     private void expireLeServerRequests()
     {
         long now = System.nanoTime();
-        Iterator<Map.Entry<Integer, LeServerRequestEntry>> iterator =
-            leServerRequests.entrySet().iterator();
+        ArrayList<LeServerRequestEntry> toAnswer = new ArrayList<>();
 
-        while (iterator.hasNext())
+        synchronized (leServerRequestLock)
         {
-            LeServerRequestEntry request = iterator.next().getValue();
-            long ttl = request.responseNeeded
-                ? SERVER_REQUEST_TTL_NANOS
-                : NO_RESPONSE_WRITE_TTL_NANOS;
+            Iterator<Map.Entry<Integer, LeServerRequestEntry>> iterator =
+                leServerRequests.entrySet().iterator();
 
-            if (now - request.receivedAtNanos > ttl)
+            while (iterator.hasNext())
             {
-                iterator.remove();
-                discardValue(request.value);
+                LeServerRequestEntry request = iterator.next().getValue();
+                long ttl = request.responseNeeded
+                    ? SERVER_REQUEST_TTL_NANOS
+                    : NO_RESPONSE_WRITE_TTL_NANOS;
+
+                if (now - request.receivedAtNanos > ttl)
+                {
+                    iterator.remove();
+                    discardValue(request.value);
+
+                    if (request.responseNeeded)
+                        toAnswer.add(request);
+                }
             }
+        }
+
+        for (LeServerRequestEntry request : toAnswer)
+        {
+            if (request.batch != null)
+                finishLeServerWriteBatchPart(request.batch, ATT_UNLIKELY_ERROR);
+            else
+                sendServerResponse(request.device, request.stackRequestId, ATT_UNLIKELY_ERROR, 0, null);
         }
     }
 
@@ -6835,9 +6890,6 @@ public class GMBluetooth extends GMBluetoothInternal
         if (!initialized)
             return result(NOT_INITIALIZED, "Bluetooth is not initialized");
 
-        if (!leServerRunning.get() || gattServer == null)
-            return result(OPERATION_FAILED, "BLE server is not running");
-
         if (service == null)
             return result(INVALID_ARGUMENT, "service cannot be null");
 
@@ -6935,6 +6987,10 @@ public class GMBluetooth extends GMBluetoothInternal
                 INVALID_ARGUMENT,
                 "Invalid service definition: " + throwableMessage(throwable));
         }
+
+        // Validated first, as the core does.
+        if (!leServerRunning.get() || gattServer == null)
+            return result(OPERATION_FAILED, "BLE server is not running");
 
         // A failure from here on, the stack refusing the add included, is
         // reported through the callback.
@@ -7183,9 +7239,6 @@ public class GMBluetooth extends GMBluetoothInternal
         if (!initialized)
             return result(NOT_INITIALIZED, "Bluetooth is not initialized");
 
-        if (gattServer == null)
-            return result(OPERATION_FAILED, "BLE server is not running");
-
         BluetoothGattCharacteristic gattCharacteristic = null;
 
         if (isHandleType(characteristic, HANDLE_TYPE_LE_SERVER_CHARACTERISTIC))
@@ -7213,6 +7266,10 @@ public class GMBluetooth extends GMBluetoothInternal
             return result(
                 INVALID_ARGUMENT,
                 "Invalid buffer offset/size for bluetooth_le_server_notify_value");
+
+        // A stop clears the handles, so only a stop racing this call gets here.
+        if (gattServer == null)
+            return result(OPERATION_FAILED, "BLE server is not running");
 
         byte[] payload = new byte[size];
 
@@ -7248,6 +7305,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
         ArrayList<LeServerNotification> notifications = new ArrayList<>();
         ArrayList<LeConnectionEntry> links = new ArrayList<>();
+        LeServerNotifyCall call = new LeServerNotifyCall();
 
         for (Map.Entry<Long, Integer> target : targets.entrySet())
         {
@@ -7261,6 +7319,7 @@ public class GMBluetooth extends GMBluetoothInternal
             notification.characteristic = gattCharacteristic;
             notification.value = payload;
             notification.confirm = target.getValue() == SUBSCRIBE_MODE_INDICATE;
+            notification.call = call;
             notifications.add(notification);
             links.add(entry);
         }
@@ -7274,7 +7333,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
         synchronized (leServerNotifyLock)
         {
-            if (leServerNotifyCount + notifications.size() > MAX_QUEUED_NOTIFICATIONS)
+            if (leServerNotifyCount >= MAX_QUEUED_NOTIFICATIONS)
                 return result(BUSY, "Too many GATT notifications are waiting to be sent");
 
             for (int i = 0; i < notifications.size(); i++)
@@ -7296,11 +7355,14 @@ public class GMBluetooth extends GMBluetoothInternal
                 }
 
                 queue.addLast(notification);
-                leServerNotifyCount++;
+                call.remaining++;
 
                 if (!leServerNotifyInFlight.containsKey(address) && !start.contains(address))
                     start.add(address);
             }
+
+            if (call.remaining > 0)
+                leServerNotifyCount++;
         }
 
         for (String address : start)
