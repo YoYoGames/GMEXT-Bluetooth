@@ -257,6 +257,21 @@ public class GMBluetooth extends GMBluetoothInternal
     private final ArrayList<Long> deviceOrder = new ArrayList<>();
     private long nextDeviceId = 1;
 
+    // A device a filtered LE scan has heard that matches no filter yet, its
+    // packets merged as the core's ScanFilterState merges them.
+    private static final class PendingScanDevice
+    {
+        final DeviceEntry merged = new DeviceEntry();
+        String localName = "";
+    }
+
+    private static final int MAX_PENDING_SCAN_DEVICES = 256;
+
+    // The running LE scan's filters and the devices it holds back, oldest
+    // first. Under deviceLock.
+    private List<BluetoothLeScanFilter> leScanFilterList = new ArrayList<>();
+    private final LinkedHashMap<String, PendingScanDevice> pendingScanDevices = new LinkedHashMap<>();
+
 
     // =========================================================================
     // Local Bluetooth adapter state
@@ -1198,9 +1213,6 @@ public class GMBluetooth extends GMBluetoothInternal
     }
 
 
-    // A scan result also folds its advertisement in, under the same lock and
-    // before device_found, so the game never reads a found device's record
-    // without its first packet.
     private long upsertDevice(
         int transport,
         String id,
@@ -1212,6 +1224,28 @@ public class GMBluetooth extends GMBluetoothInternal
         BluetoothDevice androidDevice,
         boolean announce,
         ScanRecord record)
+    {
+        return upsertDevice(
+            transport, id, name, address, rssi, hasRssi, connectable, androidDevice, announce, record, null);
+    }
+
+
+    // A scan result also folds its advertisement in, under the same lock and
+    // before device_found, so the game never reads a found device's record
+    // without its first packet. A device a filtered scan held back brings
+    // every packet it was held for in merged, which already holds record.
+    private long upsertDevice(
+        int transport,
+        String id,
+        String name,
+        String address,
+        int rssi,
+        boolean hasRssi,
+        boolean connectable,
+        BluetoothDevice androidDevice,
+        boolean announce,
+        ScanRecord record,
+        DeviceEntry merged)
     {
         String safeId = id != null ? id : "";
         String safeName = name != null ? name : "";
@@ -1267,7 +1301,9 @@ public class GMBluetooth extends GMBluetoothInternal
             if (androidDevice != null)
                 entry.androidDevice = androidDevice;
 
-            if (record != null)
+            if (merged != null)
+                foldAdvertisement(entry, merged);
+            else if (record != null)
                 mergeAdvertisement(entry, record);
         }
 
@@ -1343,6 +1379,35 @@ public class GMBluetooth extends GMBluetoothInternal
 
         if (txPower != Integer.MIN_VALUE)
             entry.advTxPower = txPower;
+    }
+
+
+    // mergeAdvertisement for an already merged record. Under deviceLock.
+    private static void foldAdvertisement(DeviceEntry entry, DeviceEntry from)
+    {
+        for (String uuid : from.advServiceUuids)
+        {
+            if (!entry.advServiceUuids.contains(uuid) &&
+                entry.advServiceUuids.size() < MAX_ADVERTISEMENT_ENTRIES)
+                entry.advServiceUuids.add(uuid);
+        }
+
+        for (Map.Entry<String, byte[]> item : from.advServiceData.entrySet())
+        {
+            if (entry.advServiceData.containsKey(item.getKey()) ||
+                entry.advServiceData.size() < MAX_ADVERTISEMENT_ENTRIES)
+                entry.advServiceData.put(item.getKey(), item.getValue());
+        }
+
+        for (Map.Entry<Integer, byte[]> item : from.advManufacturerData.entrySet())
+        {
+            if (entry.advManufacturerData.containsKey(item.getKey()) ||
+                entry.advManufacturerData.size() < MAX_ADVERTISEMENT_ENTRIES)
+                entry.advManufacturerData.put(item.getKey(), item.getValue());
+        }
+
+        if (from.advTxPower != null)
+            entry.advTxPower = from.advTxPower;
     }
 
 
@@ -2870,6 +2935,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
         leScanning.set(false);
         leScanner = null;
+        setScanFilters(null);
 
         try
         {
@@ -3514,10 +3580,23 @@ public class GMBluetooth extends GMBluetoothInternal
                 connectable = scanResult.isConnectable();
 
             int rssi = scanResult.getRssi();
+            String id = deviceId(TRANSPORT_LE, device);
+            ScanRecord record = scanResult.getScanRecord();
+            PendingScanDevice admitted = null;
+
+            synchronized (deviceLock)
+            {
+                if (!leScanFilterList.isEmpty() && !deviceById.containsKey(id))
+                {
+                    admitted = admitScanResult(id, record);
+                    if (admitted == null)
+                        return;
+                }
+            }
 
             upsertDevice(
                 TRANSPORT_LE,
-                deviceId(TRANSPORT_LE, device),
+                id,
                 safeName(device),
                 safeAddress(device),
                 rssi,
@@ -3525,7 +3604,8 @@ public class GMBluetooth extends GMBluetoothInternal
                 connectable,
                 device,
                 true,
-                scanResult.getScanRecord());
+                record,
+                admitted != null ? admitted.merged : null);
         }
 
 
@@ -3549,10 +3629,11 @@ public class GMBluetooth extends GMBluetoothInternal
     }
 
 
-    // One ScanFilter per GML filter; the stack ORs them and matches each on
-    // the combined advertisement and scan response, which is the spec's rule,
-    // and keeps a filtered scan running with the screen off. Assumes the
-    // filters passed checkScanFilters.
+    // One ScanFilter per field a GML filter sets, so the stack reports every
+    // advertisement that carries any filtered field and keeps the scan running
+    // with the screen off. It sees an advertisement with its scan response
+    // but never merges across advertisements, so admitScanResult matches the
+    // whole filters. Assumes the filters passed checkScanFilters.
     private static List<ScanFilter> buildScanFilters(List<BluetoothLeScanFilter> filters)
     {
         ArrayList<ScanFilter> out = new ArrayList<>();
@@ -3562,22 +3643,101 @@ public class GMBluetooth extends GMBluetoothInternal
 
         for (BluetoothLeScanFilter filter : filters)
         {
-            ScanFilter.Builder builder = new ScanFilter.Builder();
-
             if (present(filter.service_uuid()))
-                builder.setServiceUuid(new ParcelUuid(parseUuid(filter.service_uuid().get())));
+                addScanFilter(out, new ScanFilter.Builder()
+                    .setServiceUuid(new ParcelUuid(parseUuid(filter.service_uuid().get())))
+                    .build());
 
             if (present(filter.name()))
-                builder.setDeviceName(filter.name().get());
+                addScanFilter(out, new ScanFilter.Builder()
+                    .setDeviceName(filter.name().get())
+                    .build());
 
             // An empty data prefix matches any payload for the company.
             if (present(filter.company_id()))
-                builder.setManufacturerData(filter.company_id().get(), new byte[0]);
-
-            out.add(builder.build());
+                addScanFilter(out, new ScanFilter.Builder()
+                    .setManufacturerData(filter.company_id().get(), new byte[0])
+                    .build());
         }
 
         return out;
+    }
+
+
+    private static void addScanFilter(List<ScanFilter> filters, ScanFilter filter)
+    {
+        if (!filters.contains(filter))
+            filters.add(filter);
+    }
+
+
+    // The core's ScanFilterState.admit: folds the result into the device's
+    // held record and hands that record back, removed, once it matches a
+    // filter; null while it matches none. Under deviceLock.
+    private PendingScanDevice admitScanResult(String id, ScanRecord record)
+    {
+        PendingScanDevice pending = pendingScanDevices.get(id);
+
+        if (pending == null)
+        {
+            if (pendingScanDevices.size() >= MAX_PENDING_SCAN_DEVICES)
+            {
+                Iterator<String> oldest = pendingScanDevices.keySet().iterator();
+                oldest.next();
+                oldest.remove();
+            }
+
+            pending = new PendingScanDevice();
+            pendingScanDevices.put(id, pending);
+        }
+
+        if (record != null)
+        {
+            mergeAdvertisement(pending.merged, record);
+
+            String name = record.getDeviceName();
+            if (name != null && !name.isEmpty())
+                pending.localName = name;
+        }
+
+        for (BluetoothLeScanFilter filter : leScanFilterList)
+        {
+            if (scanFilterMatches(filter, pending))
+            {
+                pendingScanDevices.remove(id);
+                return pending;
+            }
+        }
+
+        return null;
+    }
+
+
+    private static boolean scanFilterMatches(BluetoothLeScanFilter filter, PendingScanDevice device)
+    {
+        if (present(filter.service_uuid()) &&
+            !device.merged.advServiceUuids.contains(parseUuid(filter.service_uuid().get()).toString()))
+            return false;
+
+        if (present(filter.name()) && !filter.name().get().equals(device.localName))
+            return false;
+
+        if (present(filter.company_id()) &&
+            !device.merged.advManufacturerData.containsKey(filter.company_id().get()))
+            return false;
+
+        return true;
+    }
+
+
+    // In place before the stack starts: results can arrive before it returns.
+    private void setScanFilters(List<BluetoothLeScanFilter> filters)
+    {
+        synchronized (deviceLock)
+        {
+            leScanFilterList = filters != null ? new ArrayList<>(filters) : new ArrayList<>();
+            pendingScanDevices.clear();
+        }
     }
 
 
@@ -3668,6 +3828,7 @@ public class GMBluetooth extends GMBluetoothInternal
             // No filters is null: every device is reported.
             List<ScanFilter> scanFilters = buildScanFilters(filters);
 
+            setScanFilters(filters);
             leScanner.startScan(
                 scanFilters.isEmpty() ? null : scanFilters,
                 settings,
@@ -3678,12 +3839,14 @@ public class GMBluetooth extends GMBluetoothInternal
         }
         catch (SecurityException exception)
         {
+            setScanFilters(null);
             return result(
                 PERMISSION_DENIED,
                 throwableMessage(exception));
         }
         catch (Throwable throwable)
         {
+            setScanFilters(null);
             return result(
                 OPERATION_FAILED,
                 throwableMessage(throwable));
@@ -7869,6 +8032,7 @@ public class GMBluetooth extends GMBluetoothInternal
             deviceById.clear();
             devices.clear();
             deviceOrder.clear();
+            pendingScanDevices.clear();
         }
     }
 

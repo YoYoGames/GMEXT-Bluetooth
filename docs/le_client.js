@@ -955,7 +955,7 @@
  * @struct BluetoothLeScanFilter
  * @desc This struct is one filter for ${function.bluetooth_le_scan_start}. A device matches when every field the filter sets matches what the device has advertised, merged over every advertisement and scan response it has sent since it entered the device cache (see ${struct.BluetoothLeAdvertisement}). A field left `undefined` is not checked, and a filter must set at least one field, otherwise the scan start is InvalidArgument.
  *
- * [[Note: On Android the filters are applied by the Bluetooth stack to each scan result.]]
+ * [[Note: On Android, while a filtered scan runs, the Bluetooth stack delivers only the advertisements that carry a field one of the filters sets, so a found device's other advertisements do not update its signal strength or advertisement until the scan stops.]]
  * @member {String} [service_uuid] The service UUID the device must advertise, in 4-digit, 8-digit or 36-character form.
  * @member {String} [name] The advertised local name the device must have, matched exactly.
  * @member {Real} [company_id] The Bluetooth SIG company identifier (0-65535) the device must advertise manufacturer data for.

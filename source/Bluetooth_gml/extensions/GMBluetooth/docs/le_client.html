@@ -4129,7 +4129,7 @@ The above code removes the function that is called for every notification or ind
 <p>This struct is one filter for <a href="le_client.html#bluetooth_le_scan_start">bluetooth_le_scan_start</a>. A device matches when every field the filter sets matches what the device has advertised, merged over every advertisement and scan response it has sent since it entered the device cache (see <a href="devices.html#bluetoothleadvertisement">BluetoothLeAdvertisement</a>). A field left <code>undefined</code> is not checked, and a filter must set at least one field, otherwise the scan start is InvalidArgument.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>On Android the filters are applied by the Bluetooth stack to each scan result.</p>
+<p>On Android, while a filtered scan runs, the Bluetooth stack delivers only the advertisements that carry a field one of the filters sets, so a found device's other advertisements do not update its signal strength or advertisement until the scan stops.</p>
 </div>
 <p>This struct is referenced by the following functions:</p>
 <ul>
