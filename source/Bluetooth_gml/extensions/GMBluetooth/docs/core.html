@@ -513,6 +513,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#structs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Structs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#constants" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -667,6 +678,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#bluetooth_value_to_buffer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_value_to_buffer
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_value_append" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_value_append
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#bluetooth_set_callback_state_changed" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -737,6 +770,17 @@
     <span class="md-ellipsis">
       
         BluetoothTransport
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetoothconnectoptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothConnectOptions
       
     </span>
   </a>
@@ -917,6 +961,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#structs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Structs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#constants" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1071,6 +1126,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#bluetooth_value_to_buffer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_value_to_buffer
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bluetooth_value_append" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bluetooth_value_append
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#bluetooth_set_callback_state_changed" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1147,6 +1224,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#bluetoothconnectoptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BluetoothConnectOptions
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1170,6 +1258,7 @@
 <p><a id="top"></a></p>
 <h1 id="core"><strong>Core</strong><a class="headerlink" href="#core" title="Permanent link">&para;</a></h1>
 <p>The functions to start and stop the extension, read the error of a failed call, check the platform's capabilities and permissions, turn the radio on, read the bytes that callbacks deliver, and follow the state of the local Bluetooth adapter.</p>
+<p>Two of the value functions, <a href="core.html#bluetooth_value_to_buffer">bluetooth_value_to_buffer</a> and <a href="core.html#bluetooth_value_append">bluetooth_value_append</a>, are GML helpers written in the <code>GMBluetooth_helpers</code> script that ships with the extension, built on <a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a>.</p>
 <h2 id="functions">Functions<a class="headerlink" href="#functions" title="Permanent link">&para;</a></h2>
 <p>These are the core functions of the extension.</p>
 <ul>
@@ -1184,8 +1273,15 @@
 <li><a href="core.html#bluetooth_request_enable">bluetooth_request_enable</a></li>
 <li><a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a></li>
 <li><a href="core.html#bluetooth_value_release">bluetooth_value_release</a></li>
+<li><a href="core.html#bluetooth_value_to_buffer">bluetooth_value_to_buffer</a></li>
+<li><a href="core.html#bluetooth_value_append">bluetooth_value_append</a></li>
 <li><a href="core.html#bluetooth_set_callback_state_changed">bluetooth_set_callback_state_changed</a></li>
 <li><a href="core.html#bluetooth_remove_callback_state_changed">bluetooth_remove_callback_state_changed</a></li>
+</ul>
+<h2 id="structs">Structs<a class="headerlink" href="#structs" title="Permanent link">&para;</a></h2>
+<p>This is the struct shared by the LE and Classic connect functions.</p>
+<ul>
+<li><a href="core.html#bluetoothconnectoptions">BluetoothConnectOptions</a></li>
 </ul>
 <h2 id="constants">Constants<a class="headerlink" href="#constants" title="Permanent link">&para;</a></h2>
 <p>These are the constants used across the extension.</p>
@@ -1242,7 +1338,7 @@ The above code initialises the extension in the Create Event of a controller obj
 
 <h1 id="bluetooth_shutdown">bluetooth_shutdown<a class="headerlink" href="#bluetooth_shutdown" title="Permanent link">&para;</a></h1>
 <p>This function stops the extension. It ends every connection, scan, advertisement and server, and frees every value still held for <a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a>. Every device, connection and value handle the extension gave out is no longer valid afterwards.</p>
-<p>Every callback that is still waiting for the outcome of an operation (a connect, a read, a pairing, a permission or enable request, and so on) is called once with <a href="core.html#bluetootherror">BluetoothError</a>.NotInitialized. The callbacks you registered with the <code>bluetooth_set_callback_*</code> functions stay registered, so they are used again after the next call to <a href="core.html#bluetooth_initialize">bluetooth_initialize</a>.</p>
+<p>Every callback that is still waiting for the outcome of an operation (a connect, a read, a pairing, a permission or enable request, and so on) is called once with <a href="core.html#bluetootherror">BluetoothError</a>.NotInitialized. Every event callback you passed to a call that starts something, such as the <code>on_found</code> of a scan or the <code>on_disconnected</code> of a connection, is dropped without being called. The callback set with <a href="core.html#bluetooth_set_callback_state_changed">bluetooth_set_callback_state_changed</a> stays registered, so it is used again after the next call to <a href="core.html#bluetooth_initialize">bluetooth_initialize</a>.</p>
 <p>You should call this function when the game no longer needs Bluetooth, for example in the Clean Up Event of the object that initialised it. Calling it when the extension is not running does nothing.</p>
 <p><br></p>
 <p><strong>Syntax:</strong></p>
@@ -1260,7 +1356,7 @@ The above code initialises the extension in the Create Event of a controller obj
 {
     bluetooth_shutdown();
 }</code></pre>
-The above code, placed in the Clean Up Event of the controller object, stops the extension if it is running. Any operation still in progress reports <a href="core.html#bluetootherror">BluetoothError</a>.NotInitialized to its callback.</p>
+The above code, placed in the Clean Up Event of the controller object, stops the extension if it is running. Any operation still in progress reports <a href="core.html#bluetootherror">BluetoothError</a>.NotInitialized to its callback, and no event callback is called.</p>
 <p><br></p>
 <hr />
 <p align="right"><a href="#top">Back To Top</a></p>
@@ -1290,7 +1386,7 @@ The above code initialises the extension only when it is not already running.</p
 <p align="right"><a href="#top">Back To Top</a></p>
 
 <h1 id="bluetooth_last_error_code">bluetooth_last_error_code<a class="headerlink" href="#bluetooth_last_error_code" title="Permanent link">&para;</a></h1>
-<p>This function returns the error code of the most recent call that failed. Every function that can fail sets it when it fails: a function that returns a <a href="core.html#bluetootherror">BluetoothError</a> returns the same code, <a href="le_client.html#bluetooth_le_connect">bluetooth_le_connect</a> and <a href="classic.html#bluetooth_classic_connect">bluetooth_classic_connect</a> return 0, <a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a> returns -1, and <a href="core.html#bluetooth_initialize">bluetooth_initialize</a> returns <code>false</code>.</p>
+<p>This function returns the error code of the most recent call that failed. Every function that can fail sets it when it fails: a function that returns a <a href="core.html#bluetootherror">BluetoothError</a> returns the same code, <a href="le_client.html#bluetooth_le_connect">bluetooth_le_connect</a>, <a href="classic.html#bluetooth_classic_connect">bluetooth_classic_connect</a>, <a href="devices.html#bluetooth_device_from_id">bluetooth_device_from_id</a>, <a href="le_client.html#bluetooth_le_service_find">bluetooth_le_service_find</a>, <a href="le_client.html#bluetooth_le_characteristic_find">bluetooth_le_characteristic_find</a> and <a href="le_client.html#bluetooth_le_descriptor_find">bluetooth_le_descriptor_find</a> return 0, and <a href="core.html#bluetooth_initialize">bluetooth_initialize</a> returns <code>false</code>.</p>
 <p>A call that succeeds leaves the last error as it was, so you should read it straight after the call that failed, not to check whether a call succeeded. It is <a href="core.html#bluetootherror">BluetoothError</a>.Ok until the first failure. The outcome of an operation that completes later is reported to its callback in the callback's own <code>error_code</code> argument, not here.</p>
 <p>Use <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a> to get a description of the same failure.</p>
 <p><br></p>
@@ -1343,8 +1439,8 @@ The above code writes the reason to the output log when the extension could not 
 <p align="right"><a href="#top">Back To Top</a></p>
 
 <h1 id="bluetooth_feature_is_supported">bluetooth_feature_is_supported<a class="headerlink" href="#bluetooth_feature_is_supported" title="Permanent link">&para;</a></h1>
-<p>This function checks whether the current platform and Bluetooth adapter can do the given feature. Use it to decide which parts of your game's Bluetooth support to offer before you call the functions that need them: a function that uses a feature the platform cannot do returns <a href="core.html#bluetootherror">BluetoothError</a>.NotSupported.</p>
-<p>The function returns <code>false</code> before <a href="core.html#bluetooth_initialize">bluetooth_initialize</a> has been called, on a device without Bluetooth, and for a value that is not a <a href="core.html#bluetoothfeature">BluetoothFeature</a> member. The answers for <a href="core.html#bluetoothfeature">BluetoothFeature</a>.LeCentral, <a href="core.html#bluetoothfeature">BluetoothFeature</a>.LeAdvertise, <a href="core.html#bluetoothfeature">BluetoothFeature</a>.LeServer, <a href="core.html#bluetoothfeature">BluetoothFeature</a>.Classic and <a href="core.html#bluetoothfeature">BluetoothFeature</a>.ClassicServer are the same as those of <a href="le_client.html#bluetooth_le_is_supported">bluetooth_le_is_supported</a>, <a href="le_server.html#bluetooth_le_advertise_is_supported">bluetooth_le_advertise_is_supported</a>, <a href="le_server.html#bluetooth_le_server_is_supported">bluetooth_le_server_is_supported</a>, <a href="classic.html#bluetooth_classic_is_supported">bluetooth_classic_is_supported</a> and <a href="classic.html#bluetooth_classic_server_is_supported">bluetooth_classic_server_is_supported</a>.</p>
+<p>This function checks whether the current platform and Bluetooth adapter can do the given feature. It is the one capability query of the extension: use it to decide which parts of your game's Bluetooth support to offer before you call the functions that need them. A function that uses a feature the platform cannot do returns <a href="core.html#bluetootherror">BluetoothError</a>.NotSupported.</p>
+<p>The function returns <code>false</code> before <a href="core.html#bluetooth_initialize">bluetooth_initialize</a> has been called, on a device without Bluetooth, and for a value that is not a <a href="core.html#bluetoothfeature">BluetoothFeature</a> member.</p>
 <p>The table below shows what each platform can do when its hardware allows it. "Adapter" means the answer depends on the Bluetooth adapter or the OS version of the device the game runs on.</p>
 <table>
 <thead>
@@ -1370,6 +1466,13 @@ The above code writes the reason to the output log when the extension could not 
 <td>No</td>
 <td>No</td>
 <td>No</td>
+</tr>
+<tr>
+<td><code>LeScanMode</code></td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+<td>Yes</td>
 </tr>
 <tr>
 <td><code>LeAdvertise</code>, <code>LeAdvertiseName</code>, <code>LeAdvertiseServiceUuids</code></td>
@@ -1756,20 +1859,20 @@ The above code first checks with <a href="core.html#bluetooth_feature_is_support
 <h1 id="bluetooth_value_fetch">bluetooth_value_fetch<a class="headerlink" href="#bluetooth_value_fetch" title="Permanent link">&para;</a></h1>
 <p>This function copies the bytes of a value into the given buffer, and frees the value. It is the one way to read every byte payload the extension delivers: an LE characteristic or descriptor read, a notification or indication, a write request to your LE server, and a chunk of data received on a Classic connection.</p>
 <p>The callbacks that deliver bytes do not pass them directly. They pass a value handle and the number of bytes it holds, <code>value</code> and <code>size</code>, and you call this function with that handle to get the bytes. A handle can be fetched only once: the value is freed when it has been copied.</p>
-<p>The buffer must have room for all <code>size</code> bytes at the given offset, that is, <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_get_size.htm">buffer_get_size</a> of the buffer must be at least <code>offset + size</code>; the whole value is copied, never a part of it. A <code>buffer_fixed</code> buffer of <code>size</code> bytes is the usual choice. The function returns the number of bytes it copied, which is always the <code>size</code> the callback reported.</p>
-<p>On failure the function returns -1 and the reason is in <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>:</p>
+<p>The buffer must have room for all <code>size</code> bytes at the given offset, that is, <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_get_size.htm">buffer_get_size</a> of the buffer must be at least <code>offset + size</code>; the whole value is copied, never a part of it. A <code>buffer_fixed</code> buffer of <code>size</code> bytes is the usual choice.</p>
+<p>The function returns <a href="core.html#bluetootherror">BluetoothError</a>.Ok when the bytes were copied. Otherwise it returns the reason, which is also in <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>:</p>
 <ul>
 <li><a href="core.html#bluetootherror">BluetoothError</a>.InvalidHandle for a value that is unknown, has already been fetched or released, or has expired. A failed read passes the value 0, which is always unknown.</li>
-<li><a href="core.html#bluetootherror">BluetoothError</a>.InvalidArgument for a buffer that is too small. Nothing is copied and the value is kept, so you can call the function again with a larger buffer.</li>
+<li><a href="core.html#bluetootherror">BluetoothError</a>.InvalidArgument for a buffer that is too small. Nothing is copied and the value is kept, so you can call the function again with a larger buffer, or free it with <a href="core.html#bluetooth_value_release">bluetooth_value_release</a>.</li>
 </ul>
-<p>The bytes are written straight into the buffer's memory, so neither the buffer's used size nor its seek position changes. Read them with <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_peek.htm">buffer_peek</a>, or with <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_read.htm">buffer_read</a> after <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_seek.htm">buffer_seek</a> to <code>offset</code>, and use the returned count rather than the buffer's used size. Call <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_set_used_size.htm">buffer_set_used_size</a> before you pass the buffer to a function that only works on its used size, such as <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_copy.htm">buffer_copy</a> or <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_save.htm">buffer_save</a>.</p>
+<p>The bytes are written straight into the buffer's memory, so neither the buffer's used size nor its seek position changes. Read them with <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_peek.htm">buffer_peek</a>, or with <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_read.htm">buffer_read</a> after <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_seek.htm">buffer_seek</a> to <code>offset</code>. Call <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_set_used_size.htm">buffer_set_used_size</a> before you pass the buffer to a function that only works on its used size, such as <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_copy.htm">buffer_copy</a> or <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_save.htm">buffer_save</a>, or use <a href="core.html#bluetooth_value_to_buffer">bluetooth_value_to_buffer</a> and <a href="core.html#bluetooth_value_append">bluetooth_value_append</a>, which set the used size for you.</p>
 <h3 id="usage-notes">Usage Notes<a class="headerlink" href="#usage-notes" title="Permanent link">&para;</a></h3>
 <p>The extension holds each value until you fetch or release it, within these limits:</p>
 <ul>
 <li>A value expires 30 seconds after its callback was queued. Fetch it in the callback that delivers it.</li>
 <li>At most 256 values from LE reads and notifications are held. Past that, the oldest of them is dropped.</li>
 <li>The value of a write request to your LE server is freed with its request, when you answer it with <a href="le_server.html#bluetooth_le_server_respond_write">bluetooth_le_server_respond_write</a>, so fetch it before you answer.</li>
-<li>The values of a Classic connection count toward a limit of 1 MiB per connection. While its unfetched values hold more than that, Windows and Android stop reading from the peer until some are fetched or released; macOS ends the connection with <a href="core.html#bluetootherror">BluetoothError</a>.Disconnected. A Classic value that expires unfetched also ends its connection with <a href="core.html#bluetootherror">BluetoothError</a>.Disconnected, rather than leave a gap in the data.</li>
+<li>The values of a Classic connection count toward a limit of 1 MiB per connection (see <a href="classic.html#bluetooth_classic_connect">bluetooth_classic_connect</a>). While its unfetched values hold more than that, Windows and Android stop reading from the peer until some are fetched or released; macOS ends the connection with <a href="core.html#bluetootherror">BluetoothError</a>.Disconnected. A Classic value that expires unfetched also ends its connection with <a href="core.html#bluetootherror">BluetoothError</a>.Disconnected, rather than leave a gap in the data.</li>
 <li>A value stays available after its connection ends, so bytes delivered just before a disconnect can still be fetched.</li>
 <li><a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a> frees every value.</li>
 </ul>
@@ -1808,9 +1911,9 @@ The above code first checks with <a href="core.html#bluetooth_feature_is_support
 <p><br></p>
 <p><strong>Returns:</strong></p>
 <blockquote>
-<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></p>
+<p><a href="core.html#bluetootherror">BluetoothError</a></p>
 </blockquote>
-<p>The number of bytes copied, or -1 if the value could not be fetched.</p>
+<p><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the bytes were copied, otherwise the reason they were not.</p>
 <p><br></p>
 <p><strong>Example:</strong></p>
 <p><pre class="highlight"><code class="language-gml">var _error = bluetooth_le_characteristic_read(characteristic, function(_error_code, _message, _characteristic, _value, _size)
@@ -1822,15 +1925,14 @@ The above code first checks with <a href="core.html#bluetooth_feature_is_support
     }
 
     var _buffer = buffer_create(max(_size, 1), buffer_fixed, 1);
-    var _copied = bluetooth_value_fetch(_value, _buffer, 0);
-    if (_copied &lt; 0)
+    if (bluetooth_value_fetch(_value, _buffer, 0) != BluetoothError.Ok)
     {
         show_debug_message($"Fetch failed: {bluetooth_last_error_message()}");
     }
-    else if (_copied &gt; 0)
+    else if (_size &gt; 0)
     {
         var _first = buffer_peek(_buffer, 0, buffer_u8);
-        show_debug_message($"Read {_copied} bytes, the first is {_first}");
+        show_debug_message($"Read {_size} bytes, the first is {_first}");
     }
     buffer_delete(_buffer);
 });
@@ -1839,13 +1941,13 @@ if (_error != BluetoothError.Ok)
 {
     show_debug_message($"Read did not start: {bluetooth_last_error_message()}");
 }</code></pre>
-The above code reads the characteristic stored in the instance variable <code>characteristic</code> with <a href="le_client.html#bluetooth_le_characteristic_read">bluetooth_le_characteristic_read</a>. When the read succeeds, a fixed buffer the size of the value is created (at least 1 byte, since a value can be empty) and <a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a> copies the bytes into it at offset 0, freeing the value. The first byte is then read with <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_peek.htm">buffer_peek</a>, which reads the buffer's memory directly, and the buffer is deleted. If the read could not start, the reason is read with <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a> and the callback is never called.</p>
+The above code reads the characteristic stored in the instance variable <code>characteristic</code> with <a href="le_client.html#bluetooth_le_characteristic_read">bluetooth_le_characteristic_read</a>. When the read succeeds, a fixed buffer the size of the value is created (at least 1 byte, since a value can be empty) and <a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a> copies the bytes into it at offset 0, freeing the value. Since the buffer holds the whole value, the fetch can only fail for a value that has expired. The first byte is then read with <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_peek.htm">buffer_peek</a>, which reads the buffer's memory directly, and the buffer is deleted. If the read could not start, the reason is read with <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a> and the callback is never called.</p>
 <p><br></p>
 <hr />
 <p align="right"><a href="#top">Back To Top</a></p>
 
 <h1 id="bluetooth_value_release">bluetooth_value_release<a class="headerlink" href="#bluetooth_value_release" title="Permanent link">&para;</a></h1>
-<p>This function frees a value without copying its bytes. Use it for a value whose bytes you do not need, so that it does not count toward the limits described in <a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a> until it expires: on a Classic connection, this lets the connection keep receiving.</p>
+<p>This function frees a value without copying its bytes. Use it for a value whose bytes you do not need, so that it does not count toward the limits described in <a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a> until it expires: on a Classic connection, this lets the connection keep receiving. Every callback that delivers a value should either fetch it or release it, including on an early return.</p>
 <p>The function returns <a href="core.html#bluetootherror">BluetoothError</a>.Ok when the value was freed, and <a href="core.html#bluetootherror">BluetoothError</a>.InvalidHandle for a value that is unknown, has already been fetched or released, or has expired; the reason is then in <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>.</p>
 <p><br></p>
 <p><strong>Syntax:</strong></p>
@@ -1876,24 +1978,168 @@ The above code reads the characteristic stored in the instance variable <code>ch
 <p><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the value was freed, otherwise <a href="core.html#bluetootherror">BluetoothError</a>.InvalidHandle.</p>
 <p><br></p>
 <p><strong>Example:</strong></p>
-<p><pre class="highlight"><code class="language-gml">bluetooth_set_callback_le_characteristic_value_changed(function(_characteristic, _connection, _value, _size)
+<p><pre class="highlight"><code class="language-gml">measurement_buffer = buffer_create(64, buffer_fixed, 1);
+
+on_measurement = function(_characteristic, _connection, _value, _size)
 {
-    if (_characteristic != heart_rate_characteristic)
+    if (_connection != connection || paused || _size &gt; buffer_get_size(measurement_buffer))
     {
         bluetooth_value_release(_value);
         return;
     }
 
-    bluetooth_value_fetch(_value, heart_rate_buffer, 0);
-});</code></pre>
-The above code registers a callback for notifications. A notification from any characteristic other than the one stored in <code>heart_rate_characteristic</code> is freed with <a href="core.html#bluetooth_value_release">bluetooth_value_release</a> without being read; the bytes of the wanted one are copied into the buffer <code>heart_rate_buffer</code> with <a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a>.</p>
+    if (bluetooth_value_fetch(_value, measurement_buffer, 0) != BluetoothError.Ok)
+    {
+        show_debug_message($"Fetch failed: {bluetooth_last_error_message()}");
+        return;
+    }
+    measurement_size = _size;
+};</code></pre>
+The above code creates a 64-byte buffer and the method <code>on_measurement</code>, which is passed as the <code>on_value</code> callback of <a href="le_client.html#bluetooth_le_characteristic_subscribe">bluetooth_le_characteristic_subscribe</a>. A value that arrives for a connection other than the one stored in <code>connection</code>, while the instance's <code>paused</code> flag is set, or that is too large for the buffer is freed with <a href="core.html#bluetooth_value_release">bluetooth_value_release</a> without being read. Any other value is copied into the buffer with <a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a>; since the buffer is known to be large enough, the fetch can only fail for a value that has expired, and the failure is written to the output log. On success the number of bytes is kept in <code>measurement_size</code>.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_value_to_buffer">bluetooth_value_to_buffer<a class="headerlink" href="#bluetooth_value_to_buffer" title="Permanent link">&para;</a></h1>
+<p>This function copies a value into a new buffer. It fetches the value with <a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a>, which frees it, and sets the used size of the new buffer to the size of the value, so the buffer can be passed straight to functions that work on the used size, such as <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_copy.htm">buffer_copy</a> or <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_save.htm">buffer_save</a>. You must delete the buffer when you no longer need it.</p>
+<p>If the value cannot be fetched, the function returns -1 and leaves nothing for you to free; the reason, normally <a href="core.html#bluetootherror">BluetoothError</a>.InvalidHandle for a value that has expired or was already fetched, is in <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This function is a GML helper written in the <code>GMBluetooth_helpers</code> script that ships with the extension, not a function of the native extension. It calls only the public functions documented here.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_value_to_buffer(value, size)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>value</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The value handle a callback delivered.</td>
+</tr>
+<tr>
+<td>size</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The size of the value (in bytes), as the callback reported it.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/Buffers.htm">Buffer</a> or <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></p>
+</blockquote>
+<p>The new buffer holding the value, or -1 if the value could not be fetched.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">var _error = bluetooth_le_characteristic_read(battery_level, function(_error_code, _message, _characteristic, _value, _size)
+{
+    if (_error_code != BluetoothError.Ok)
+    {
+        show_debug_message($"Read failed: {_message}");
+        return;
+    }
+
+    var _buffer = bluetooth_value_to_buffer(_value, _size);
+    if (_buffer == -1)
+    {
+        show_debug_message($"Fetch failed: {bluetooth_last_error_message()}");
+        return;
+    }
+    buffer_save(_buffer, "battery_level.bin");
+    buffer_delete(_buffer);
+});
+
+if (_error != BluetoothError.Ok)
+{
+    show_debug_message($"Read did not start: {bluetooth_last_error_message()}");
+}</code></pre>
+The above code reads the characteristic stored in <code>battery_level</code>. On success the callback copies the value into a new buffer with <a href="core.html#bluetooth_value_to_buffer">bluetooth_value_to_buffer</a>, saves it to a file with <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/buffer_save.htm">buffer_save</a>, which writes the buffer's used size, and deletes the buffer. If the value could not be fetched, or the read failed or could not start, the reason is written to the output log instead.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_value_append">bluetooth_value_append<a class="headerlink" href="#bluetooth_value_append" title="Permanent link">&para;</a></h1>
+<p>This function adds a value to the end of the data in the given buffer. It grows the buffer when the value does not fit after the buffer's used size, fetches the value there with <a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a>, which frees it, and moves the used size past the new bytes. This makes it the simplest way to collect the chunks of a Classic connection, which arrive in order but with no message boundaries.</p>
+<p>The function returns the <a href="core.html#bluetootherror">BluetoothError</a> of the fetch: <a href="core.html#bluetootherror">BluetoothError</a>.Ok when the bytes were added, otherwise the reason, which is also in <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>, normally <a href="core.html#bluetootherror">BluetoothError</a>.InvalidHandle for a value that has expired or was already fetched.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This function is a GML helper written in the <code>GMBluetooth_helpers</code> script that ships with the extension, not a function of the native extension. It calls only the public functions documented here.</p>
+</div>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_value_append(value, size, buffer)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>value</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The value handle a callback delivered.</td>
+</tr>
+<tr>
+<td>size</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The size of the value (in bytes), as the callback reported it.</td>
+</tr>
+<tr>
+<td>buffer</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Buffers/Buffers.htm">Buffer</a></td>
+<td>The buffer to add the bytes to, at its used size.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a></p>
+</blockquote>
+<p><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the bytes were added, otherwise the reason they were not.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">receive_buffer = buffer_create(1024, buffer_grow, 1);
+
+on_data = function(_connection, _value, _size)
+{
+    if (_connection != connection)
+    {
+        bluetooth_value_release(_value);
+        return;
+    }
+
+    if (bluetooth_value_append(_value, _size, receive_buffer) != BluetoothError.Ok)
+    {
+        show_debug_message($"Receive failed: {bluetooth_last_error_message()}");
+        return;
+    }
+    show_debug_message($"{buffer_get_used_size(receive_buffer)} bytes received so far");
+};</code></pre>
+The above code creates a buffer for the bytes a Classic connection receives and the method <code>on_data</code>, which is passed as the <code>on_data</code> callback of <a href="classic.html#bluetooth_classic_connect">bluetooth_classic_connect</a>. A chunk for a connection other than the one stored in <code>connection</code> is freed with <a href="core.html#bluetooth_value_release">bluetooth_value_release</a>. Any other chunk is added to the end of <code>receive_buffer</code> with <a href="core.html#bluetooth_value_append">bluetooth_value_append</a>, which grows the buffer when needed and moves its used size, so the game can look for complete messages in the buffer's used bytes.</p>
 <p><br></p>
 <hr />
 <p align="right"><a href="#top">Back To Top</a></p>
 
 <h1 id="bluetooth_set_callback_state_changed">bluetooth_set_callback_state_changed<a class="headerlink" href="#bluetooth_set_callback_state_changed" title="Permanent link">&para;</a></h1>
-<p>This function sets the function to call when the state of the local Bluetooth adapter changes, for example when the user turns Bluetooth on or off. It replaces the callback set by an earlier call.</p>
+<p>This function sets the function to call when the state of the local Bluetooth adapter changes, for example when the user turns Bluetooth on or off. It replaces the callback set by an earlier call. It is the one global callback of the extension: every other event is passed to the call that starts its subject, such as a scan or a connection.</p>
 <p>The callback is called with the current state when you set it, again when <a href="core.html#bluetooth_initialize">bluetooth_initialize</a> succeeds, and then whenever the state changes. Before <a href="core.html#bluetooth_initialize">bluetooth_initialize</a> the current state is <a href="core.html#bluetoothstate">BluetoothState</a>.Unknown. The callback stays set across <a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a> and the next <a href="core.html#bluetooth_initialize">bluetooth_initialize</a>, until you remove it with <a href="core.html#bluetooth_remove_callback_state_changed">bluetooth_remove_callback_state_changed</a>.</p>
+<p>When the state becomes anything but <a href="core.html#bluetoothstate">BluetoothState</a>.PoweredOn or <a href="core.html#bluetoothstate">BluetoothState</a>.Unknown, everything that was running ends before the callback is called: see <a href="core.html#bluetoothstate">BluetoothState</a>.</p>
 <p>The function always returns <code>true</code>.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
@@ -1990,8 +2236,8 @@ The above code stops the reporting of adapter state changes.</p>
 <p align="right"><a href="#top">Back To Top</a></p>
 
 <h1 id="bluetootherror">BluetoothError<a class="headerlink" href="#bluetootherror" title="Permanent link">&para;</a></h1>
-<p>This enum holds the result codes of the extension. Every function that can fail returns one of them, except <a href="le_client.html#bluetooth_le_connect">bluetooth_le_connect</a> and <a href="classic.html#bluetooth_classic_connect">bluetooth_classic_connect</a>, which return the new connection handle or 0. After a failed call, <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> returns the code and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a> describes it. A call that fails never calls its callback.</p>
-<p>A callback that reports the outcome of an operation receives one of these codes as its first argument, <code>error_code</code>, followed by a <code>message</code> that describes a failure.</p>
+<p>This enum holds the result codes of the extension. Every function that can fail returns one of them, except those that return a handle: <a href="le_client.html#bluetooth_le_connect">bluetooth_le_connect</a> and <a href="classic.html#bluetooth_classic_connect">bluetooth_classic_connect</a> (so that a disconnect can cancel a connect still in progress), <a href="devices.html#bluetooth_device_from_id">bluetooth_device_from_id</a>, <a href="le_client.html#bluetooth_le_service_find">bluetooth_le_service_find</a>, <a href="le_client.html#bluetooth_le_characteristic_find">bluetooth_le_characteristic_find</a> and <a href="le_client.html#bluetooth_le_descriptor_find">bluetooth_le_descriptor_find</a>, which return 0 when they fail. After a failed call, <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> returns the code and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a> describes it. A call that fails never calls its callbacks.</p>
+<p>A callback that reports the outcome of an operation receives one of these codes as its first argument, <code>error_code</code>, followed by a <code>message</code> that describes a failure. An event that cannot fail, such as a device found by a scan, carries data only.</p>
 <p>The same condition fails with the same code on every platform, and these conditions are checked before anything starts, so they come back from the call itself:</p>
 <table>
 <thead>
@@ -2010,7 +2256,7 @@ The above code stops the reporting of adapter state changes.</p>
 <td><code>InvalidArgument</code></td>
 </tr>
 <tr>
-<td>The radio is off</td>
+<td>The radio is off or resetting</td>
 <td><code>BluetoothDisabled</code></td>
 </tr>
 <tr>
@@ -2026,12 +2272,12 @@ The above code stops the reporting of adapter state changes.</p>
 <td><code>OperationFailed</code></td>
 </tr>
 <tr>
-<td>A second advertisement, a duplicate service, or a full send or notify queue</td>
+<td>A start while it already runs, a subscribe while subscribed, a duplicate service, or a full send or notify queue</td>
 <td><code>Busy</code></td>
 </tr>
 </tbody>
 </table>
-<p>Starting a scan or a server that is already running returns <code>Ok</code> and starts nothing new, and stopping one that is not running returns <code>Ok</code> and calls nothing. A disconnect that you ask for takes effect when the call returns: the handle is no longer valid and no disconnected callback is called for it.</p>
+<p>A stop while nothing runs returns <code>Ok</code> and calls nothing. What the game ends fires no event: a stop or a disconnect that you ask for takes effect when the call returns, and no <code>on_stopped</code> or <code>on_disconnected</code> callback is called for it, nor for the centrals and the advertisement that <a href="le_server.html#bluetooth_le_server_stop">bluetooth_le_server_stop</a> ends.</p>
 <p>These constants are referenced by the following functions:</p>
 <ul>
 <li><a href="classic.html#bluetooth_classic_scan_start">bluetooth_classic_scan_start</a></li>
@@ -2043,14 +2289,14 @@ The above code stops the reporting of adapter state changes.</p>
 <li><a href="classic.html#bluetooth_classic_server_stop">bluetooth_classic_server_stop</a></li>
 <li><a href="classic.html#bluetooth_classic_discoverable_start">bluetooth_classic_discoverable_start</a></li>
 <li><a href="classic.html#bluetooth_classic_discoverable_stop">bluetooth_classic_discoverable_stop</a></li>
-<li><a href="classic.html#bluetooth_set_callback_classic_disconnected">bluetooth_set_callback_classic_disconnected</a></li>
 <li><a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a></li>
 <li><a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a></li>
 <li><a href="core.html#bluetooth_request_enable">bluetooth_request_enable</a></li>
+<li><a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a></li>
 <li><a href="core.html#bluetooth_value_release">bluetooth_value_release</a></li>
+<li><a href="core.html#bluetooth_value_append">bluetooth_value_append</a></li>
 <li><a href="devices.html#bluetooth_paired_devices_query">bluetooth_paired_devices_query</a></li>
 <li><a href="devices.html#bluetooth_pair">bluetooth_pair</a></li>
-<li><a href="devices.html#bluetooth_set_callback_scan_stopped">bluetooth_set_callback_scan_stopped</a></li>
 <li><a href="le_client.html#bluetooth_le_scan_start">bluetooth_le_scan_start</a></li>
 <li><a href="le_client.html#bluetooth_le_scan_stop">bluetooth_le_scan_stop</a></li>
 <li><a href="le_client.html#bluetooth_le_connected_devices_query">bluetooth_le_connected_devices_query</a></li>
@@ -2065,6 +2311,7 @@ The above code stops the reporting of adapter state changes.</p>
 <li><a href="le_client.html#bluetooth_le_characteristic_read">bluetooth_le_characteristic_read</a></li>
 <li><a href="le_client.html#bluetooth_le_characteristic_write">bluetooth_le_characteristic_write</a></li>
 <li><a href="le_client.html#bluetooth_le_characteristic_subscribe">bluetooth_le_characteristic_subscribe</a></li>
+<li><a href="le_client.html#bluetooth_le_characteristic_unsubscribe">bluetooth_le_characteristic_unsubscribe</a></li>
 <li><a href="le_client.html#bluetooth_le_descriptor_read">bluetooth_le_descriptor_read</a></li>
 <li><a href="le_client.html#bluetooth_le_descriptor_write">bluetooth_le_descriptor_write</a></li>
 <li><a href="le_server.html#bluetooth_le_advertise_start">bluetooth_le_advertise_start</a></li>
@@ -2074,9 +2321,9 @@ The above code stops the reporting of adapter state changes.</p>
 <li><a href="le_server.html#bluetooth_le_server_add_service">bluetooth_le_server_add_service</a></li>
 <li><a href="le_server.html#bluetooth_le_server_clear_services">bluetooth_le_server_clear_services</a></li>
 <li><a href="le_server.html#bluetooth_le_server_respond_read">bluetooth_le_server_respond_read</a></li>
+<li><a href="le_server.html#bluetooth_le_server_respond_read_error">bluetooth_le_server_respond_read_error</a></li>
 <li><a href="le_server.html#bluetooth_le_server_respond_write">bluetooth_le_server_respond_write</a></li>
 <li><a href="le_server.html#bluetooth_le_server_notify_value">bluetooth_le_server_notify_value</a></li>
-<li><a href="le_client.html#bluetooth_set_callback_le_disconnected">bluetooth_set_callback_le_disconnected</a></li>
 </ul>
 <p><br></p>
 <table>
@@ -2105,7 +2352,7 @@ The above code stops the reporting of adapter state changes.</p>
 </tr>
 <tr>
 <td><code>BluetoothDisabled</code></td>
-<td>The Bluetooth radio is off, or the user declined to turn it on.</td>
+<td>The Bluetooth radio is off or resetting, or the user declined to turn it on. Also the reason a scan, connection, advertisement or server ended when the radio turned off.</td>
 </tr>
 <tr>
 <td><code>PermissionDenied</code></td>
@@ -2121,7 +2368,7 @@ The above code stops the reporting of adapter state changes.</p>
 </tr>
 <tr>
 <td><code>Busy</code></td>
-<td>The operation cannot start while another one is in progress, such as a second advertisement, a duplicate service or a full send or notify queue.</td>
+<td>The operation cannot start while it, or another one, is in progress: a start while the scan, server or advertisement already runs, a subscribe while subscribed, a duplicate service or a full send or notify queue.</td>
 </tr>
 <tr>
 <td><code>Timeout</code></td>
@@ -2159,6 +2406,7 @@ The above code stops the reporting of adapter state changes.</p>
 
 <h1 id="bluetoothstate">BluetoothState<a class="headerlink" href="#bluetoothstate" title="Permanent link">&para;</a></h1>
 <p>This enum holds the states of the local Bluetooth adapter, which the callback set with <a href="core.html#bluetooth_set_callback_state_changed">bluetooth_set_callback_state_changed</a> receives.</p>
+<p>When the state becomes anything but PoweredOn or Unknown, everything running ends, before the state callback is called: each LE and Classic scan and the advertisement call their <code>on_stopped</code> with <a href="core.html#bluetootherror">BluetoothError</a>.BluetoothDisabled, each connection, LE or Classic, and each central of the LE server call their <code>on_disconnected</code> with <a href="core.html#bluetootherror">BluetoothError</a>.BluetoothDisabled, a connect in progress fails with <a href="core.html#bluetootherror">BluetoothError</a>.BluetoothDisabled, the Classic server calls its <code>on_stopped</code> with <a href="core.html#bluetootherror">BluetoothError</a>.BluetoothDisabled, the LE server calls its <code>on_stopped</code> after its centrals, with its services and attribute handles gone, and discoverability ends. Nothing restarts when the radio comes back: start what you need again once the state is PoweredOn.</p>
 <p>These constants are referenced by the following functions:</p>
 <ul>
 <li><a href="core.html#bluetooth_set_callback_state_changed">bluetooth_set_callback_state_changed</a></li>
@@ -2174,11 +2422,11 @@ The above code stops the reporting of adapter state changes.</p>
 <tbody>
 <tr>
 <td><code>Unknown</code></td>
-<td>The state is not known yet, for example before <a href="core.html#bluetooth_initialize">bluetooth_initialize</a> or while the platform is starting.</td>
+<td>The state is not known yet, for example before <a href="core.html#bluetooth_initialize">bluetooth_initialize</a> or while the platform is starting. A scan started now begins once the radio is ready.</td>
 </tr>
 <tr>
 <td><code>Resetting</code></td>
-<td>The adapter is changing state, for example turning on or off.</td>
+<td>The adapter is changing state, for example turning on or off. Calls that use the radio return <a href="core.html#bluetootherror">BluetoothError</a>.BluetoothDisabled while it lasts.</td>
 </tr>
 <tr>
 <td><code>Unsupported</code></td>
@@ -2253,15 +2501,15 @@ The above code stops the reporting of adapter state changes.</p>
 <tbody>
 <tr>
 <td><code>LeCentral</code></td>
-<td>The game can scan for LE devices and connect to them, as <a href="le_client.html#bluetooth_le_is_supported">bluetooth_le_is_supported</a> reports.</td>
+<td>The game can scan for LE devices and connect to them as a client.</td>
 </tr>
 <tr>
 <td><code>LePassiveScan</code></td>
-<td><a href="le_client.html#bluetooth_le_scan_start">bluetooth_le_scan_start</a> with <code>active</code> set to <code>false</code> really scans passively; elsewhere the argument is ignored.</td>
+<td>An LE scan whose <a href="le_client.html#bluetoothlescansettings">BluetoothLeScanSettings</a> sets <code>active</code> to <code>false</code> really scans passively; elsewhere <code>active</code> is ignored.</td>
 </tr>
 <tr>
 <td><code>LeAdvertise</code></td>
-<td>The game can advertise, as <a href="le_server.html#bluetooth_le_advertise_is_supported">bluetooth_le_advertise_is_supported</a> reports.</td>
+<td>The game can advertise.</td>
 </tr>
 <tr>
 <td><code>LeAdvertiseName</code></td>
@@ -2293,11 +2541,11 @@ The above code stops the reporting of adapter state changes.</p>
 </tr>
 <tr>
 <td><code>LeServer</code></td>
-<td>The game can run an LE GATT server, as <a href="le_server.html#bluetooth_le_server_is_supported">bluetooth_le_server_is_supported</a> reports.</td>
+<td>The game can run an LE GATT server.</td>
 </tr>
 <tr>
 <td><code>LeServerDescriptorRequests</code></td>
-<td>Reads and writes of a server descriptor reach the read and write request callbacks.</td>
+<td>Reads and writes of a server descriptor with no static value reach the server's <code>on_read</code> and <code>on_write</code>.</td>
 </tr>
 <tr>
 <td><code>LeServerSignedWrite</code></td>
@@ -2305,7 +2553,7 @@ The above code stops the reporting of adapter state changes.</p>
 </tr>
 <tr>
 <td><code>LeServerConnectionEvents</code></td>
-<td>The server connection callback reports a central's connect and disconnect as they happen, not only around its requests and subscriptions.</td>
+<td>The server's <code>on_connected</code> and <code>on_disconnected</code> report a central as it connects and disconnects, not only around its requests and subscriptions.</td>
 </tr>
 <tr>
 <td><code>LePairing</code></td>
@@ -2313,11 +2561,11 @@ The above code stops the reporting of adapter state changes.</p>
 </tr>
 <tr>
 <td><code>Classic</code></td>
-<td>The game can scan for and connect to Classic devices, as <a href="classic.html#bluetooth_classic_is_supported">bluetooth_classic_is_supported</a> reports.</td>
+<td>The game can scan for and connect to Classic devices.</td>
 </tr>
 <tr>
 <td><code>ClassicServer</code></td>
-<td>The game can run a Classic server, as <a href="classic.html#bluetooth_classic_server_is_supported">bluetooth_classic_server_is_supported</a> reports.</td>
+<td>The game can run a Classic server.</td>
 </tr>
 <tr>
 <td><code>ClassicPairing</code></td>
@@ -2355,6 +2603,10 @@ The above code stops the reporting of adapter state changes.</p>
 <td><code>PairedDevicesQuery</code></td>
 <td><a href="devices.html#bluetooth_paired_devices_query">bluetooth_paired_devices_query</a> can list the paired devices.</td>
 </tr>
+<tr>
+<td><code>LeScanMode</code></td>
+<td>The <code>mode</code> of a <a href="le_client.html#bluetoothlescansettings">BluetoothLeScanSettings</a> changes how the scan runs; elsewhere it is ignored.</td>
+</tr>
 </tbody>
 </table>
 <p><br></p>
@@ -2366,7 +2618,6 @@ The above code stops the reporting of adapter state changes.</p>
 <p>These constants are referenced by the following functions:</p>
 <ul>
 <li><a href="devices.html#bluetooth_device_get_transport">bluetooth_device_get_transport</a></li>
-<li><a href="devices.html#bluetooth_set_callback_scan_stopped">bluetooth_set_callback_scan_stopped</a></li>
 </ul>
 <p><br></p>
 <table>
@@ -2388,6 +2639,34 @@ The above code stops the reporting of adapter state changes.</p>
 <tr>
 <td><code>LowEnergy</code></td>
 <td>Bluetooth Low Energy, which the <code>bluetooth_le_*</code> functions use.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetoothconnectoptions">BluetoothConnectOptions<a class="headerlink" href="#bluetoothconnectoptions" title="Permanent link">&para;</a></h1>
+<p>This struct says how <a href="le_client.html#bluetooth_le_connect">bluetooth_le_connect</a> and <a href="classic.html#bluetooth_classic_connect">bluetooth_classic_connect</a> run a connect. You create it with <code>new BluetoothConnectOptions()</code>; a variable left <code>undefined</code> takes its default, and you can pass <code>undefined</code> instead of the struct to use the defaults for everything.</p>
+<p>This struct is referenced by the following functions:</p>
+<ul>
+<li><a href="classic.html#bluetooth_classic_connect">bluetooth_classic_connect</a></li>
+<li><a href="le_client.html#bluetooth_le_connect">bluetooth_le_connect</a></li>
+</ul>
+<p><br></p>
+<table>
+<thead>
+<tr>
+<th>Member</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>timeout_ms</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The whole time from the call to an open link (in milliseconds), a pairing prompt included: 1000 to 300000, or <code>undefined</code> for 15000. A connect that is still not open when it runs out fails with <a href="core.html#bluetootherror">BluetoothError</a>.Timeout on every platform; a value outside the range makes the connect return 0 with <a href="core.html#bluetootherror">BluetoothError</a>.InvalidArgument.</td>
 </tr>
 </tbody>
 </table>

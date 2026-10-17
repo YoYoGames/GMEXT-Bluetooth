@@ -1,10 +1,8 @@
 event_inherited();
 
-// Placed in the room; the demo controller is created before this button
-// (see the room's instance creation order).
-owner = instance_find(obj_bt_le_client, 0);
-
-// Stay locked if the controller bailed out early (Bluetooth unavailable).
-locked = !instance_exists(owner) || !owner.bt_ready;
+// The controller is found in Room Start, once every instance in the room
+// exists, so the room's instance order does not matter.
+owner = noone;
+locked = true;
 
 text = "START SCAN";

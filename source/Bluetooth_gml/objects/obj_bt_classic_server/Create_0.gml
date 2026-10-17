@@ -9,181 +9,171 @@ permission_request_sent = false;
 conn = 0;
 conn_inst = noone;
 
+// Callbacks reach GML after the call that queued them, even after this room
+// is left, so each one is bound to this struct and checks the owner first.
+callback_ctx = { owner: id };
+
 // Why this room cannot run on this platform, or "" when it can.
 unavailable_reason = "";
 
-if (!bt_ready)
-{
-    unavailable_reason = "Bluetooth is not initialized";
-}
-else if (!bluetooth_classic_is_supported())
-{
-    bt_ready = false;
-    unavailable_reason = "Bluetooth Classic is not supported on this platform";
-}
-else if (!bluetooth_classic_server_is_supported())
-{
-    bt_ready = false;
-    unavailable_reason = "Bluetooth Classic server is not supported on this platform";
+if (!bt_ready) {
+	unavailable_reason = "Bluetooth is not initialized";
+} else if (!bluetooth_feature_is_supported(BluetoothFeature.Classic)) {
+	bt_ready = false;
+	unavailable_reason = "Bluetooth Classic is not supported on this platform";
+} else if (!bluetooth_feature_is_supported(BluetoothFeature.ClassicServer)) {
+	bt_ready = false;
+	unavailable_reason = "Bluetooth Classic server is not supported on this platform";
 }
 
-// Defined before the room gives up on an unsupported platform, so Step can
-// always call it.
-start_classic_server_demo = function()
-{
-    if (!bt_ready || server_started) return;
+// The methods are defined before the room gives up on an unsupported
+// platform, so Step can always call them.
+on_permission_result = function(_error_code, _message, _status) {
+	obj_bt_init.bt_permission_status = _status;
+	show_debug_message($"[GML] permission request: {_error_code} {_message}, status: {_status}");
 
-    if (bluetooth_permission_get_status() != BluetoothPermissionStatus.Granted)
-    {
-        if (!permission_request_sent)
-        {
-            permission_request_sent = true;
+	if (_status == BluetoothPermissionStatus.Granted) {
+		start_classic_server_demo();
+	}
+};
 
-            var _error = bluetooth_permission_request(function(_error_code, _message, _status)
-            {
-                obj_bt_init.bt_permission_status = _status;
+start_classic_server_demo = function() {
+	if (!bt_ready || server_started) return;
 
-                show_debug_message(
-                    "[GML] permission request: " + string(_error_code)
-                    + " " + _message
-                    + ", status: " + string(_status)
-                );
+	if (bluetooth_permission_get_status() != BluetoothPermissionStatus.Granted) {
+		if (!permission_request_sent) {
+			permission_request_sent = true;
 
-                if (_status == BluetoothPermissionStatus.Granted)
-                {
-                    start_classic_server_demo();
-                }
-            });
+			var _error = bluetooth_permission_request(method(callback_ctx, function(_error_code, _message, _status) {
+				if (instance_exists(owner)) {
+					owner.on_permission_result(_error_code, _message, _status);
+				}
+			}));
 
-            show_debug_message(
-                "[GML] bluetooth_permission_request = " + string(_error)
-            );
+			show_debug_message($"[GML] bluetooth_permission_request = {_error}");
 
-            if (_error != BluetoothError.Ok)
-            {
-                show_debug_message(
-                    "[GML] permission request failed: " + bluetooth_last_error_message()
-                );
-            }
-        }
+			if (_error != BluetoothError.Ok) {
+				show_debug_message($"[GML] permission request failed: {bluetooth_last_error_message()}");
+			}
+		}
 
-        return;
-    }
+		return;
+	}
 
-    var _server_error = bluetooth_classic_server_start(
-        DEMO_CLASSIC_SERVICE_NAME,
-        DEMO_CLASSIC_SERVICE_UUID
-    );
+	var _server_error = bluetooth_classic_server_start(
+		DEMO_CLASSIC_SERVICE_NAME,
+		DEMO_CLASSIC_SERVICE_UUID,
+		method(callback_ctx, function(_connection, _device) {
+			if (instance_exists(owner)) {
+				owner.on_client_connected(_connection, _device);
+			} else {
+				// The room was left: close a link it accepted meanwhile.
+				bluetooth_classic_disconnect(_connection);
+			}
+		}),
+		method(callback_ctx, function(_connection, _value, _size) {
+			if (instance_exists(owner)) {
+				owner.on_data(_connection, _value, _size);
+			} else {
+				bluetooth_value_release(_value);
+			}
+		}),
+		method(callback_ctx, function(_error_code, _message, _connection) {
+			if (instance_exists(owner)) {
+				owner.on_disconnected(_error_code, _message, _connection);
+			}
+		}),
+		method(callback_ctx, function(_error_code, _message) {
+			if (instance_exists(owner)) {
+				owner.on_server_stopped(_error_code, _message);
+			}
+		})
+	);
 
-    show_debug_message(
-        "[GML] classic_server_start = " + string(_server_error)
-    );
+	show_debug_message($"[GML] classic_server_start = {_server_error}");
 
-    if (_server_error == BluetoothError.Ok)
-    {
-        server_started = true;
-    }
-    else
-    {
-        show_debug_message(
-            "[GML] classic server failed to start: " + bluetooth_last_error_message()
-        );
-    }
+	if (_server_error == BluetoothError.Ok) {
+		server_started = true;
+	} else {
+		show_debug_message($"[GML] classic server failed to start: {bluetooth_last_error_message()}");
+	}
+};
+
+on_client_connected = function(_connection, _device) {
+	show_debug_message($"[GML] classic client connected conn={_connection}");
+
+	// Destroyed before conn is assigned: its Clean Up clears conn while it is still current.
+	if (instance_exists(conn_inst)) {
+		instance_destroy(conn_inst);
+	}
+
+	conn = _connection;
+	conn_inst = instance_create_depth(0, 0, 0, obj_bt_classic_connection, { connection: _connection, owner: id });
+};
+
+// The server's on_data serves every inbound link; only the one shown is fed
+// to its connection object, any other chunk is released.
+on_data = function(_connection, _value, _size) {
+	if (_connection != conn || !instance_exists(conn_inst)) {
+		bluetooth_value_release(_value);
+		return;
+	}
+
+	conn_inst.on_receive_value(_value, _size);
+};
+
+// Also fires with BluetoothDisabled when the radio turns off.
+on_disconnected = function(_error_code, _message, _connection) {
+	show_debug_message($"[GML] classic client disconnected: {_error_code} {_message}");
+
+	if (_connection != conn) return;
+
+	if (instance_exists(conn_inst)) {
+		instance_destroy(conn_inst);
+	}
+
+	conn = 0;
+	conn_inst = noone;
+};
+
+// Only for an end the game did not ask for, such as the radio turning off
+// (BluetoothDisabled); nothing restarts it, so the room has to be entered again.
+on_server_stopped = function(_error_code, _message) {
+	show_debug_message($"[GML] classic server stopped: {_error_code} {_message}");
+	server_started = false;
 };
 
 // Draw only draws: Step calls this every frame to take what Draw shows.
-refresh_status = function()
-{
-    status_running = bt_ready && bluetooth_classic_server_is_running();
-    status_discoverable = bt_ready && bluetooth_classic_discoverable_is_running();
-    status_connected = false;
-    status_device_name = "-";
-    status_device_address = "-";
+refresh_status = function() {
+	status_running = bt_ready && bluetooth_classic_server_is_running();
+	status_discoverable = bt_ready && bluetooth_classic_discoverable_is_running();
+	status_connected = false;
+	status_device_name = "-";
+	status_device_address = "-";
 
-    var _conn = conn;
+	if (conn == 0 || !bluetooth_classic_connection_is_valid(conn)) return;
 
-    if (_conn == 0 || !bluetooth_classic_connection_is_valid(_conn)) return;
+	status_connected = bluetooth_classic_connection_is_connected(conn);
 
-    status_connected = bluetooth_classic_connection_is_connected(_conn);
+	if (!status_connected) return;
 
-    if (!status_connected) return;
+	var _device = bluetooth_classic_connection_get_device(conn);
 
-    var _device = bluetooth_classic_connection_get_device(_conn);
+	if (!bluetooth_device_is_valid(_device)) return;
 
-    if (!bluetooth_device_is_valid(_device)) return;
+	status_device_name = bluetooth_device_get_name(_device);
 
-    status_device_name = bluetooth_device_get_name(_device);
-
-    if (bluetooth_device_has_address(_device))
-    {
-        status_device_address = bluetooth_device_get_address(_device);
-    }
+	var _address = bluetooth_device_get_address(_device);
+	if (!is_undefined(_address)) {
+		status_device_address = _address;
+	}
 };
 
 refresh_status();
 
-if (!bt_ready)
-{
-    show_debug_message("[GML] " + unavailable_reason);
-    exit;
+if (!bt_ready) {
+	show_debug_message($"[GML] {unavailable_reason}");
+	exit;
 }
-
-bluetooth_set_callback_classic_client_connected(
-    function(_connection, _device)
-    {
-        conn = _connection;
-
-        if (instance_exists(conn_inst))
-        {
-            instance_destroy(conn_inst);
-        }
-
-        conn_inst = instance_create_depth(
-            0,
-            0,
-            0,
-            obj_bt_classic_connection,
-            {connection: _connection, owner: id}
-        );
-
-        show_debug_message(
-            "[GML] classic client connected conn=" + string(_connection)
-        );
-    }
-);
-
-bluetooth_set_callback_classic_data(function(_connection, _value, _size)
-{
-    if (!instance_exists(conn_inst))
-    {
-        bluetooth_value_release(_value);
-        return;
-    }
-
-    var _buf = buffer_create(max(_size, 1), buffer_fixed, 1);
-    var _n = bluetooth_value_fetch(_value, _buf, 0);
-
-    if (_n > 0)
-    {
-        conn_inst.on_receive(_buf, _n);
-    }
-
-    buffer_delete(_buf);
-});
-
-bluetooth_set_callback_classic_disconnected(
-    function(_error_code, _message, _connection)
-    {
-        show_debug_message("[GML] classic client disconnected: " + _message);
-
-        if (instance_exists(conn_inst))
-        {
-            instance_destroy(conn_inst);
-        }
-
-        conn = 0;
-        conn_inst = noone;
-    }
-);
 
 start_classic_server_demo();

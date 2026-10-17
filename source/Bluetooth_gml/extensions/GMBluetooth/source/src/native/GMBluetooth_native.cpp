@@ -77,19 +77,11 @@ namespace
         return false;
     }
 
-    // Callback storage
+    // The one global slot: the adapter has no start call to take it (rule 1 of
+    // the spec's conventions). Every other event goes to the call that started
+    // its subject.
     std::mutex g_callback_mutex;
     GMFunction g_callback_state_changed;
-    GMFunction g_callback_device_found;
-    GMFunction g_callback_scan_stopped;
-    GMFunction g_callback_classic_client_connected;
-    GMFunction g_callback_classic_data;
-    GMFunction g_callback_classic_disconnected;
-    GMFunction g_callback_le_disconnected;
-    GMFunction g_callback_le_characteristic_value_changed;
-    GMFunction g_callback_le_server_connection_state_changed;
-    GMFunction g_callback_le_server_read_request;
-    GMFunction g_callback_le_server_write_request;
 
     // Counts every event the backend hands up that the core then drops, so the
     // gap between "the backend is working" and "GML sees nothing" is visible in
@@ -103,13 +95,17 @@ namespace
         return slot;
     }
 
-    // The registered callback an event goes to; none set drops the event.
-    GMFunction event_callback(const GMFunction& slot)
+    // An event's receiver; an empty one drops the event.
+    GMFunction counted(GMFunction callback)
     {
-        GMFunction callback = registered_callback(slot);
         if (!callback)
             g_dropped_events++;
         return callback;
+    }
+
+    GMFunction optional_callback(const std::optional<GMFunction>& callback)
+    {
+        return callback ? *callback : GMFunction();
     }
 
     // Calls a callback, if there is one, and logs what it throws. Never called
@@ -337,26 +333,40 @@ namespace
     class DeviceManager
     {
     public:
-        // created says whether this call added the device: device_found fires
-        // once per device, not once per advertisement (R1-43).
-        std::uint64_t upsert_device(const DiscoveredDevice& device, bool* created = nullptr)
+        // created says whether this call added the device. scanned stamps the
+        // time a scan saw it, for get_last_seen_age.
+        std::uint64_t upsert_device(const DiscoveredDevice& device, bool scanned, bool* created = nullptr)
         {
             std::scoped_lock lock(mutex_);
+            std::uint64_t handle = 0;
             if (const auto it = by_id_.find(device.id); it != by_id_.end())
             {
-                merge_device(devices_.at(it->second), device);
+                handle = it->second;
+                merge_device(devices_.at(handle), device);
                 if (created)
                     *created = false;
-                return it->second;
             }
-
-            const std::uint64_t handle = make_handle(HandleKind::Device, next_handle_++);
-            devices_.emplace(handle, normalized_device(device));
-            by_id_.emplace(device.id, handle);
-            order_.push_back(handle);
-            if (created)
-                *created = true;
+            else
+            {
+                handle = make_handle(HandleKind::Device, next_handle_++);
+                devices_.emplace(handle, normalized_device(device));
+                by_id_.emplace(device.id, handle);
+                order_.push_back(handle);
+                if (created)
+                    *created = true;
+            }
+            if (scanned)
+                seen_at_[handle] = std::chrono::steady_clock::now();
             return handle;
+        }
+
+        std::optional<std::chrono::steady_clock::duration> last_seen_age(std::uint64_t handle) const
+        {
+            std::scoped_lock lock(mutex_);
+            const auto it = seen_at_.find(handle);
+            if (it == seen_at_.end())
+                return std::nullopt;
+            return std::chrono::steady_clock::now() - it->second;
         }
 
         void clear()
@@ -365,6 +375,7 @@ namespace
             devices_.clear();
             by_id_.clear();
             order_.clear();
+            seen_at_.clear();
         }
 
         int get_count() const
@@ -411,18 +422,20 @@ namespace
         std::unordered_map<std::uint64_t, DiscoveredDevice> devices_;
         std::unordered_map<std::string, std::uint64_t> by_id_;
         std::vector<std::uint64_t> order_;
+        std::unordered_map<std::uint64_t, std::chrono::steady_clock::time_point> seen_at_;
         std::uint64_t next_handle_ = 1;
     };
 
     DeviceManager g_device_manager;
 
-    // The filters of the LE scan that is running, and the devices it has heard
-    // that match none of them yet (R1-139). A device enters the cache, firing
-    // device_found, when its merged advertisement first matches: Windows reports
-    // an advertisement and its scan response separately, so a filter on a name
-    // in one and a service in the other matches only the merged record. The
-    // held devices are bounded, the oldest dropped, and emptied by every scan
-    // start and by bluetooth_device_clear.
+    // The filters of the LE scan that is running, and the uncached devices it
+    // has heard that match none of them yet (R1-139). A device enters the cache
+    // when its merged advertisement first matches: Windows reports an
+    // advertisement and its scan response separately, so a filter on a name in
+    // one and a service in the other matches only the merged record. A device
+    // already cached is matched on its cached record. The held devices are
+    // bounded, the oldest dropped, and emptied by every scan start and by
+    // bluetooth_device_clear.
     class ScanFilterState
     {
     public:
@@ -439,6 +452,12 @@ namespace
             std::scoped_lock lock(mutex_);
             pending_.clear();
             order_.clear();
+        }
+
+        bool admits(const DiscoveredDevice& device) const
+        {
+            std::scoped_lock lock(mutex_);
+            return filters_.empty() || matches_any(device);
         }
 
         // The device to put in the cache now, merged with what was held for
@@ -477,6 +496,24 @@ namespace
     private:
         static constexpr std::size_t kMaxPending = 256;
 
+        // data's first data.size() bytes equal pattern under mask, all ones
+        // when there is none (Android's ScanFilter rule).
+        static bool data_matches(const std::vector<std::uint8_t>& data,
+            const std::optional<std::vector<std::uint8_t>>& pattern, const std::optional<std::vector<std::uint8_t>>& mask)
+        {
+            if (!pattern)
+                return true;
+            if (data.size() < pattern->size())
+                return false;
+            for (std::size_t i = 0; i < pattern->size(); ++i)
+            {
+                const std::uint8_t m = mask ? (*mask)[i] : std::uint8_t{ 0xFF };
+                if ((data[i] & m) != ((*pattern)[i] & m))
+                    return false;
+            }
+            return true;
+        }
+
         static bool matches(const LeScanFilter& filter, const DiscoveredDevice& device)
         {
             const LeAdvertisement empty;
@@ -489,11 +526,24 @@ namespace
             }
             if (filter.name && device.name != *filter.name)
                 return false;
+            if (filter.name_prefix && device.name.compare(0, filter.name_prefix->size(), *filter.name_prefix) != 0)
+                return false;
             if (filter.company_id)
             {
                 const auto& entries = advertisement.manufacturer_data;
-                if (std::none_of(entries.begin(), entries.end(),
-                    [&](const LeAdvertiseManufacturerData& e) { return e.company_id == *filter.company_id; }))
+                if (std::none_of(entries.begin(), entries.end(), [&](const LeAdvertiseManufacturerData& e) {
+                        return e.company_id == *filter.company_id &&
+                            data_matches(e.data, filter.manufacturer_data, filter.manufacturer_data_mask);
+                    }))
+                    return false;
+            }
+            if (filter.service_data_uuid)
+            {
+                const auto& entries = advertisement.service_data;
+                if (std::none_of(entries.begin(), entries.end(), [&](const LeAdvertiseServiceData& e) {
+                        return e.uuid == *filter.service_data_uuid &&
+                            data_matches(e.data, filter.service_data, filter.service_data_mask);
+                    }))
                     return false;
             }
             return true;
@@ -505,13 +555,22 @@ namespace
                 [&](const LeScanFilter& filter) { return matches(filter, device); });
         }
 
-        std::mutex mutex_;
+        mutable std::mutex mutex_;
         std::vector<LeScanFilter> filters_;
         std::unordered_map<std::string, DiscoveredDevice> pending_;
         std::vector<std::string> order_;
     };
 
     ScanFilterState g_scan_filters;
+
+    // A connection's device and the event callbacks its connect call (or, for
+    // an inbound Classic link, its server) gave it: on_data for Classic only.
+    struct ConnectionRecord
+    {
+        std::uint64_t device = 0;
+        GMFunction on_data;
+        GMFunction on_disconnected;
+    };
 
     // The connections of one transport, each to the device it was made for,
     // and the one-shot callback of each connect still in flight. Classic and LE
@@ -522,18 +581,49 @@ namespace
     class ConnectionRegistry
     {
     public:
-        std::uint64_t create_connection(std::uint64_t device)
+        std::uint64_t create_connection(ConnectionRecord record)
         {
             std::scoped_lock lock(mutex_);
             const std::uint64_t handle = make_handle(Kind, next_handle_++);
-            connections_[handle] = device;
+            connections_[handle] = std::move(record);
             return handle;
+        }
+
+        // The record of a connection that leaves now; empty when it had left.
+        std::optional<ConnectionRecord> take_connection(std::uint64_t handle)
+        {
+            std::scoped_lock lock(mutex_);
+            const auto it = connections_.find(handle);
+            if (it == connections_.end())
+                return std::nullopt;
+            ConnectionRecord record = std::move(it->second);
+            connections_.erase(it);
+            return record;
         }
 
         bool remove_connection(std::uint64_t handle)
         {
+            return take_connection(handle).has_value();
+        }
+
+        GMFunction get_on_data(std::uint64_t handle) const
+        {
             std::scoped_lock lock(mutex_);
-            return connections_.erase(handle) != 0;
+            const auto it = connections_.find(handle);
+            return it != connections_.end() ? it->second.on_data : GMFunction();
+        }
+
+        std::vector<std::uint64_t> handles() const
+        {
+            std::scoped_lock lock(mutex_);
+            std::vector<std::uint64_t> out;
+            out.reserve(connections_.size());
+            for (const auto& [handle, record] : connections_)
+            {
+                (void)record;
+                out.push_back(handle);
+            }
+            return out;
         }
 
         // A handle from the same counter that names no connection: the LE
@@ -560,7 +650,7 @@ namespace
         {
             std::scoped_lock lock(mutex_);
             const auto it = connections_.find(handle);
-            return it != connections_.end() ? it->second : 0;
+            return it != connections_.end() ? it->second.device : 0;
         }
 
         // A device has at most one LE client connection, connecting or
@@ -568,13 +658,19 @@ namespace
         bool has_device(std::uint64_t device) const
         {
             std::scoped_lock lock(mutex_);
-            for (const auto& [handle, connected_device] : connections_)
+            for (const auto& [handle, record] : connections_)
             {
                 (void)handle;
-                if (connected_device == device)
+                if (record.device == device)
                     return true;
             }
             return false;
+        }
+
+        bool has_connect_callback(std::uint64_t handle) const
+        {
+            std::scoped_lock lock(mutex_);
+            return connect_callbacks_.find(handle) != connect_callbacks_.end();
         }
 
         // Registered before the backend is asked: a connect runs
@@ -612,7 +708,7 @@ namespace
 
     private:
         mutable std::mutex mutex_;
-        std::unordered_map<std::uint64_t, std::uint64_t> connections_;
+        std::map<std::uint64_t, ConnectionRecord> connections_;
         std::unordered_map<std::uint64_t, GMFunction> connect_callbacks_;
         std::uint64_t next_handle_ = 1;
     };
@@ -681,9 +777,9 @@ namespace
 
     // The radio and permission pre-flight every call that starts radio work
     // makes, so the same condition fails the same way, synchronously, on every
-    // platform (R1-66, R1-68). Unknown and Resetting pass: a backend may still
-    // be waiting for its first state, and starts the work once it has one.
-    // Assumes g_backend.
+    // platform (R1-66, R1-68). Unknown passes: a backend may still be waiting
+    // for its first state, and starts the work once it has one. Resetting is
+    // off, as Android's isEnabled() has it (R2-114). Assumes g_backend.
     bool check_radio()
     {
         if (g_backend->permission_status() == PermissionStatus::Denied)
@@ -695,6 +791,9 @@ namespace
         // BluetoothState raw values from spec.gmidl.
         switch (g_backend->current_bluetooth_state())
         {
+            case 1: // Resetting
+                fail(Error::BluetoothDisabled, "Bluetooth is resetting");
+                return false;
             case 2: // Unsupported
                 fail(Error::NotSupported, "Bluetooth is not supported on this device");
                 return false;
@@ -832,6 +931,31 @@ namespace
             std::scoped_lock lock(mutex_);
             const auto it = entries_.find(handle);
             return it != entries_.end() ? it->second.parent : 0;
+        }
+
+        // The parent's first entry with this canonical UUID, in discovery
+        // order; 0 when it has none.
+        std::uint64_t find_by_uuid(std::uint64_t parent, const std::string& uuid) const
+        {
+            std::scoped_lock lock(mutex_);
+            for (const auto& [handle, entry] : entries_)
+            {
+                if (entry.parent == parent && entry.uuid == uuid)
+                    return handle;
+            }
+            return 0;
+        }
+
+        std::vector<std::uint64_t> children(std::uint64_t parent) const
+        {
+            std::scoped_lock lock(mutex_);
+            std::vector<std::uint64_t> out;
+            for (const auto& [handle, entry] : entries_)
+            {
+                if (entry.parent == parent)
+                    out.push_back(handle);
+            }
+            return out;
         }
 
         // The backend's instance for the handle; 0 when the handle is unknown.
@@ -1160,7 +1284,8 @@ namespace
     // a gap in its stream, as macOS ends one at the byte budget.
     void end_classic_connection_on_expiry(std::uint64_t connection)
     {
-        if (!g_classic_connection_manager.remove_connection(connection))
+        const auto record = g_classic_connection_manager.take_connection(connection);
+        if (!record)
             return;
 
         GMBT_LOG("classic connection %llu: receive data expired, ending it", static_cast<unsigned long long>(connection));
@@ -1170,8 +1295,8 @@ namespace
             g_backend->classic_disconnect(connection, message);
         }
 
-        // callback(error_code, message, connection)
-        invoke_callback("classic_disconnected", event_callback(g_callback_classic_disconnected),
+        // on_disconnected(error_code, message, connection)
+        invoke_callback("classic on_disconnected", counted(record->on_disconnected),
             static_cast<double>(Error::Disconnected), std::string("receive data expired"), static_cast<double>(connection));
     }
 
@@ -1221,12 +1346,58 @@ namespace
         settle_left_values(left);
     }
 
+    // The on_value of each subscribed characteristic, set by the subscribe call
+    // and held until unsubscribe, a failed subscribe, the characteristic
+    // leaving the cache (a disconnect, a rediscovery) or shutdown. token tells
+    // a later subscription of the same handle from the one a late failure is for.
+    struct Subscription
+    {
+        std::uint64_t token = 0;
+        GMFunction on_value;
+    };
+
+    std::mutex g_subscriptions_mutex;
+    std::unordered_map<std::uint64_t, Subscription> g_subscriptions;
+    std::uint64_t g_next_subscription_token = 1;
+
+    // 0 when the characteristic is already subscribed.
+    std::uint64_t add_subscription(std::uint64_t characteristic, const GMFunction& on_value)
+    {
+        std::scoped_lock lock(g_subscriptions_mutex);
+        const std::uint64_t token = g_next_subscription_token++;
+        if (!g_subscriptions.emplace(characteristic, Subscription{ token, on_value }).second)
+            return 0;
+        return token;
+    }
+
+    // token 0 drops whatever subscription the characteristic has. True when
+    // one was dropped.
+    bool drop_subscription(std::uint64_t characteristic, std::uint64_t token = 0)
+    {
+        std::scoped_lock lock(g_subscriptions_mutex);
+        const auto it = g_subscriptions.find(characteristic);
+        if (it == g_subscriptions.end() || (token != 0 && it->second.token != token))
+            return false;
+        g_subscriptions.erase(it);
+        return true;
+    }
+
+    GMFunction subscription_receiver(std::uint64_t characteristic)
+    {
+        std::scoped_lock lock(g_subscriptions_mutex);
+        const auto it = g_subscriptions.find(characteristic);
+        return it != g_subscriptions.end() ? it->second.on_value : GMFunction();
+    }
+
     // Drops what discovery cached for one LE connection: its services, their
-    // characteristics and those characteristics' descriptors.
+    // characteristics and those characteristics' descriptors and subscriptions.
     void erase_le_descriptors_of(const std::vector<std::uint64_t>& characteristics)
     {
-        if (!characteristics.empty())
-            g_descriptor_cache.erase_children(characteristics);
+        if (characteristics.empty())
+            return;
+        g_descriptor_cache.erase_children(characteristics);
+        for (const std::uint64_t characteristic : characteristics)
+            drop_subscription(characteristic);
     }
 
     void erase_le_characteristics_of(const std::vector<std::uint64_t>& services)
@@ -1249,6 +1420,7 @@ namespace
         CharacteristicWrite,
         CharacteristicWriteWithoutResponse,
         CharacteristicSubscribe,
+        CharacteristicUnsubscribe,
         DescriptorRead,
         DescriptorWrite,
         AdvertiseStart,
@@ -1268,6 +1440,7 @@ namespace
             case LeOpKind::CharacteristicWriteWithoutResponse:
                 return "le_characteristic_write";
             case LeOpKind::CharacteristicSubscribe: return "le_characteristic_subscribe";
+            case LeOpKind::CharacteristicUnsubscribe: return "le_characteristic_unsubscribe";
             case LeOpKind::DescriptorRead:          return "le_descriptor_read";
             case LeOpKind::DescriptorWrite:         return "le_descriptor_write";
             case LeOpKind::AdvertiseStart:          return "le_advertise_start";
@@ -1287,6 +1460,12 @@ namespace
         // The LE connection the op runs on, so a disconnect can fail it; 0 for
         // advertise start and add_service, which belong to no connection.
         std::uint64_t connection = 0;
+        // The discovery job a step of a deeper discovery reports to instead of
+        // a callback of its own.
+        std::uint64_t job = 0;
+        // A subscribe's subscription token, or an advertise start's session
+        // token: what a failure of the op ends.
+        std::uint64_t token = 0;
     };
 
     // Every LE call that completes asynchronously is registered here under an
@@ -1299,11 +1478,11 @@ namespace
     class PendingLeOps
     {
     public:
-        std::uint64_t add(LeOpKind kind, GMFunction callback, std::uint64_t context, std::uint64_t connection)
+        std::uint64_t add(PendingLeOp op)
         {
             const std::uint64_t op_id = next_id_++;
             std::scoped_lock lock(mutex_);
-            ops_.emplace(op_id, PendingLeOp{ kind, std::move(callback), context, connection });
+            ops_.emplace(op_id, std::move(op));
             return op_id;
         }
 
@@ -1360,6 +1539,25 @@ namespace
             return n;
         }
 
+        std::vector<PendingLeOp> take_kind(LeOpKind kind)
+        {
+            std::vector<PendingLeOp> out;
+            std::scoped_lock lock(mutex_);
+            for (auto it = ops_.begin(); it != ops_.end();)
+            {
+                if (it->second.kind == kind)
+                {
+                    out.push_back(std::move(it->second));
+                    it = ops_.erase(it);
+                }
+                else
+                {
+                    ++it;
+                }
+            }
+            return out;
+        }
+
         std::vector<PendingLeOp> take_all()
         {
             std::vector<PendingLeOp> out;
@@ -1385,19 +1583,29 @@ namespace
     // Registers an asynchronous LE call under a fresh op id, asks the backend,
     // and takes the op back out if the backend refused before starting.
     template <typename Start>
+    Error start_le_op_quiet(PendingLeOp op, Start start, std::string& message)
+    {
+        const auto op_id = g_le_ops.add(std::move(op));
+        const Error error = start(op_id, message);
+        if (error != Error::Ok)
+            g_le_ops.erase(op_id);
+        return error;
+    }
+
+    template <typename Start>
+    BluetoothError start_le_op(PendingLeOp op, Start start)
+    {
+        std::string message;
+        const Error error = start_le_op_quiet(std::move(op), start, message);
+        set_last_error(error, message);
+        return to_gm(error);
+    }
+
+    template <typename Start>
     BluetoothError start_le_op(LeOpKind kind, const GMFunction& callback, std::uint64_t context,
         std::uint64_t connection, Start start)
     {
-        const auto op_id = g_le_ops.add(kind, callback, context, connection);
-
-        std::string message;
-        const Error error = start(op_id, message);
-        set_last_error(error, message);
-
-        if (error != Error::Ok)
-            g_le_ops.erase(op_id);
-
-        return to_gm(error);
+        return start_le_op(PendingLeOp{ kind, callback, context, connection }, start);
     }
 
     constexpr std::size_t k_max_pending_writes_without_response = 64;
@@ -1534,6 +1742,285 @@ namespace
         return attribute->children[static_cast<std::size_t>(index)];
     }
 
+    // The subjects that run one at a time, each holding the callbacks of the
+    // call that started it until it ends (rule 1). A start while one runs is
+    // Busy (rule 2); a stop the game asks for ends it without an event (rule
+    // 3); every other end fires its on_stopped once, from the path that ends it.
+    std::mutex g_session_mutex;
+
+    struct ScanSession
+    {
+        bool running = false;
+        GMFunction on_found;
+        GMFunction on_updated;
+        GMFunction on_stopped;
+        std::chrono::milliseconds update_interval{ 0 };
+        // When this scan last announced each device; absent until on_found.
+        std::unordered_map<std::uint64_t, std::chrono::steady_clock::time_point> announced;
+    };
+
+    ScanSession g_le_scan;
+    ScanSession g_classic_scan;
+
+    ScanSession& scan_session(Transport transport)
+    {
+        return transport == Transport::Classic ? g_classic_scan : g_le_scan;
+    }
+
+    struct AdvertiseSession
+    {
+        bool running = false;
+        std::uint64_t token = 0;
+        GMFunction on_stopped;
+    };
+
+    AdvertiseSession g_advertise;
+    std::uint64_t g_next_advertise_token = 1;
+
+    struct LeServerSession
+    {
+        bool running = false;
+        GMFunction on_connected;
+        GMFunction on_disconnected;
+        GMFunction on_read;
+        GMFunction on_write;
+        GMFunction on_stopped;
+    };
+
+    LeServerSession g_le_server;
+
+    struct ClassicServerSession
+    {
+        bool running = false;
+        GMFunction on_connected;
+        GMFunction on_data;
+        GMFunction on_disconnected;
+        GMFunction on_stopped;
+    };
+
+    ClassicServerSession g_classic_server;
+
+    template <typename Session>
+    bool session_running(const Session& session)
+    {
+        std::scoped_lock lock(g_session_mutex);
+        return session.running;
+    }
+
+    // Starts a session unless one runs; false when one does.
+    template <typename Session>
+    bool begin_session(Session& session, Session started)
+    {
+        std::scoped_lock lock(g_session_mutex);
+        if (session.running)
+            return false;
+        session = std::move(started);
+        session.running = true;
+        return true;
+    }
+
+    // Ends a session and hands back what it held: running is false when it had
+    // already ended.
+    template <typename Session>
+    Session end_session(Session& session)
+    {
+        std::scoped_lock lock(g_session_mutex);
+        Session ended = std::move(session);
+        session = Session();
+        return ended;
+    }
+
+    void fire_stopped(const char* name, const GMFunction& on_stopped, Error error, const std::string& message)
+    {
+        // on_stopped(error_code, message)
+        invoke_callback(name, on_stopped, static_cast<double>(error), message);
+    }
+
+    // Reports a device a scan saw to the running scan of its transport: on_found
+    // the first time this scan sees it, then on_updated at most once per update
+    // interval. Nothing runs, nothing is announced.
+    void announce_device(Transport transport, std::uint64_t device)
+    {
+        if (transport != Transport::LowEnergy && transport != Transport::Classic)
+            return;
+
+        GMFunction callback;
+        const char* name = "scan on_found";
+        {
+            std::scoped_lock lock(g_session_mutex);
+            ScanSession& session = scan_session(transport);
+            if (!session.running)
+                return;
+            const auto now = std::chrono::steady_clock::now();
+            const auto [it, first] = session.announced.try_emplace(device, now);
+            if (first)
+            {
+                callback = session.on_found;
+            }
+            else if (session.on_updated && now - it->second >= session.update_interval)
+            {
+                it->second = now;
+                callback = session.on_updated;
+                name = "scan on_updated";
+            }
+        }
+        // on_found(device), on_updated(device)
+        invoke_callback(name, callback, static_cast<double>(device));
+    }
+
+    // A bluetooth_le_services_discover with options: the services step, a
+    // characteristics step for each service the filter takes, a descriptors
+    // step for each of their characteristics. The one callback fires once the
+    // last step settles, with the first failure (R2-35).
+    struct DiscoveryJob
+    {
+        GMFunction callback;
+        std::uint64_t connection = 0;
+        std::vector<std::string> service_uuids; // canonical; empty takes every service
+        bool characteristics = false;
+        bool descriptors = false;
+        std::size_t outstanding = 0;
+        Error error = Error::Ok;
+        std::string message;
+    };
+
+    std::mutex g_discovery_jobs_mutex;
+    std::unordered_map<std::uint64_t, DiscoveryJob> g_discovery_jobs;
+    std::uint64_t g_next_discovery_job = 1;
+
+    void settle_discovery_step(std::uint64_t job_id, Error error, const std::string& message)
+    {
+        std::optional<DiscoveryJob> done;
+        {
+            std::scoped_lock lock(g_discovery_jobs_mutex);
+            const auto it = g_discovery_jobs.find(job_id);
+            if (it == g_discovery_jobs.end())
+                return;
+            DiscoveryJob& job = it->second;
+            if (error != Error::Ok && job.error == Error::Ok)
+            {
+                job.error = error;
+                job.message = message;
+            }
+            if (--job.outstanding == 0)
+            {
+                done = std::move(job);
+                g_discovery_jobs.erase(it);
+            }
+        }
+
+        if (done)
+        {
+            // callback(error_code, message, connection)
+            invoke_callback("le_services_discover", done->callback, static_cast<double>(done->error), done->message,
+                static_cast<double>(done->connection));
+        }
+    }
+
+    // Counts the step before it starts: the backend may complete it before
+    // the call returns.
+    Error start_discovery_step(std::uint64_t job_id, LeOpKind kind, std::uint64_t context, std::uint64_t connection,
+        std::string& message)
+    {
+        {
+            std::scoped_lock lock(g_discovery_jobs_mutex);
+            const auto it = g_discovery_jobs.find(job_id);
+            if (it == g_discovery_jobs.end())
+                return Error::Ok;
+            ++it->second.outstanding;
+        }
+
+        PendingLeOp op{ kind, GMFunction(), context, connection, job_id };
+        return start_le_op_quiet(std::move(op), [&](std::uint64_t op_id, std::string& msg) {
+            if (!g_backend)
+            {
+                msg = "Bluetooth backend is not initialized";
+                return Error::NotInitialized;
+            }
+            switch (kind)
+            {
+                case LeOpKind::ServicesDiscover:
+                    return g_backend->le_services_discover(op_id, connection, msg);
+                case LeOpKind::CharacteristicsDiscover:
+                    return g_backend->le_characteristics_discover(op_id, connection, service_ref(context), msg);
+                default:
+                    return g_backend->le_descriptors_discover(op_id, connection, characteristic_ref(context), msg);
+            }
+        }, message);
+    }
+
+    void start_discovery_child(std::uint64_t job_id, LeOpKind kind, std::uint64_t context, std::uint64_t connection)
+    {
+        std::string message;
+        const Error error = start_discovery_step(job_id, kind, context, connection, message);
+        if (error != Error::Ok)
+            settle_discovery_step(job_id, error, message);
+    }
+
+    // One step of a job completed or failed: the level under it starts, then
+    // the step settles, so the job cannot finish in between.
+    void advance_discovery_job(const PendingLeOp& op, Error error, const std::string& message)
+    {
+        std::vector<std::string> service_uuids;
+        bool characteristics = false;
+        bool descriptors = false;
+        {
+            std::scoped_lock lock(g_discovery_jobs_mutex);
+            const auto it = g_discovery_jobs.find(op.job);
+            if (it == g_discovery_jobs.end())
+                return;
+            service_uuids = it->second.service_uuids;
+            characteristics = it->second.characteristics;
+            descriptors = it->second.descriptors;
+        }
+
+        if (error == Error::Ok && op.kind == LeOpKind::ServicesDiscover && characteristics)
+        {
+            for (const std::uint64_t service : g_service_cache.children(op.connection))
+            {
+                const std::string uuid = g_service_cache.get_uuid(service);
+                if (service_uuids.empty() || std::find(service_uuids.begin(), service_uuids.end(), uuid) != service_uuids.end())
+                    start_discovery_child(op.job, LeOpKind::CharacteristicsDiscover, service, op.connection);
+            }
+        }
+        else if (error == Error::Ok && op.kind == LeOpKind::CharacteristicsDiscover && descriptors)
+        {
+            for (const std::uint64_t characteristic : g_characteristic_cache.children(op.context))
+                start_discovery_child(op.job, LeOpKind::DescriptorsDiscover, characteristic, op.connection);
+        }
+
+        settle_discovery_step(op.job, error, message);
+    }
+
+    // A failed advertise start ends the session it began, unless the game
+    // already stopped it and started another.
+    void end_advertise_session_of(std::uint64_t token)
+    {
+        std::scoped_lock lock(g_session_mutex);
+        if (g_advertise.running && g_advertise.token == token)
+            g_advertise = AdvertiseSession();
+    }
+
+    // Settles a taken op: a job step goes to its job, a failure undoes what
+    // the call began, and the callback fires.
+    void finish_le_op(const PendingLeOp& op, Error error, const std::string& message,
+        std::uint64_t value = 0, std::size_t size = 0, std::int32_t number = 0)
+    {
+        if (op.job != 0)
+        {
+            advance_discovery_job(op, error, message);
+            return;
+        }
+        if (error != Error::Ok)
+        {
+            if (op.kind == LeOpKind::CharacteristicSubscribe)
+                drop_subscription(op.context, op.token);
+            else if (op.kind == LeOpKind::AdvertiseStart)
+                end_advertise_session_of(op.token);
+        }
+        fire_le_op(op, error, message, value, size, number);
+    }
+
     void complete_le_op(const BackendEvent& event)
     {
         const auto op = g_le_ops.take(event.op_id);
@@ -1592,36 +2079,40 @@ namespace
             }
         }
 
-        fire_le_op(*op, event.error, event.message, value, size, number);
+        finish_le_op(*op, event.error, event.message, value, size, number);
     }
 
     void fail_le_ops(std::vector<PendingLeOp> ops, Error error, const std::string& message)
     {
         for (const auto& op : ops)
-            fire_le_op(op, error, message);
+            finish_le_op(op, error, message);
     }
 
     // Fails every op still waiting on this connection. The link is gone, so no
     // completion will arrive for them; a late one finds no id and is dropped.
-    void purge_le_connection(std::uint64_t connection)
+    void purge_le_connection(std::uint64_t connection, Error error, const std::string& message)
     {
         auto ops = g_le_ops.take_connection(connection);
         if (ops.empty())
             return;
         GMBT_LOG("LE connection %llu closed with %zu op(s) pending, failing them",
             static_cast<unsigned long long>(connection), ops.size());
-        fail_le_ops(std::move(ops), Error::Disconnected, "LE connection closed before the operation completed");
+        fail_le_ops(std::move(ops), error, message);
     }
 
-    // Retires an LE connection whose link is gone: its waiting ops fail, its
-    // handle stops validating and what discovery cached for it is dropped.
-    void retire_le_connection(std::uint64_t connection)
+    // Retires an LE connection whose link is gone: its handle stops
+    // validating, its waiting ops fail and what discovery cached for it is
+    // dropped, subscriptions included. Returns its record, empty when it had
+    // already been retired.
+    std::optional<ConnectionRecord> retire_le_connection(std::uint64_t connection, Error error = Error::Disconnected,
+        const std::string& message = "LE connection closed before the operation completed")
     {
         if (connection == 0)
-            return;
-        purge_le_connection(connection);
-        g_le_connection_manager.remove_connection(connection);
+            return std::nullopt;
+        auto record = g_le_connection_manager.take_connection(connection);
+        purge_le_connection(connection, error, message);
         erase_le_connection_attributes(connection);
+        return record;
     }
 
     struct PendingLeServerRequest

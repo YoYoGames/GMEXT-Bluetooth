@@ -11,7 +11,7 @@ import java.util.List;
 
 public record BluetoothLeAdvertiseServiceData(String uuid, java.util.List<Byte> data) implements GMExtWire.ITypedStruct
 {
-    public static final int CODEC_ID = 2;
+    public static final int CODEC_ID = 3;
     @Override
     public void encode(GMExtWire.IByteWriter b)
     {

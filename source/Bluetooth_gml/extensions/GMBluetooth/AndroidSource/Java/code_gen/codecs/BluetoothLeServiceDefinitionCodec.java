@@ -6,6 +6,7 @@ import java.nio.ByteBuffer;
 
 import ${YYAndroidPackageName}.GMExtWire;
 import ${YYAndroidPackageName}.GMExtWire.GMValue;
+import java.util.Optional;
 import java.util.List;
 import ${YYAndroidPackageName}.records.*;
 
@@ -17,7 +18,12 @@ public final class BluetoothLeServiceDefinitionCodec {
     {
         String uuid = GMExtWire.readString(b);
 
-        java.util.List<BluetoothLeCharacteristicDefinition> characteristics = GMExtWire.readList(b, bb -> BluetoothLeCharacteristicDefinitionCodec.read(bb));
+        java.util.Optional<java.util.List<BluetoothLeCharacteristicDefinition>> characteristics = java.util.Optional.empty();
+        if (GMExtWire.readBool(b))
+        {
+            java.util.List<BluetoothLeCharacteristicDefinition> __opt_characteristics = GMExtWire.readList(b, bb -> BluetoothLeCharacteristicDefinitionCodec.read(bb));
+            characteristics = java.util.Optional.of(__opt_characteristics);
+        }
 
         return new BluetoothLeServiceDefinition(uuid, characteristics);
     }
@@ -26,7 +32,11 @@ public final class BluetoothLeServiceDefinitionCodec {
     {
         GMExtWire.writeString(b, obj.uuid());
 
-        GMExtWire.writeList(b, obj.characteristics(), (bb, x) -> BluetoothLeCharacteristicDefinitionCodec.write(bb, x));
+        GMExtWire.writeBool(b, obj.characteristics() != null && obj.characteristics().isPresent());
+        if (obj.characteristics() != null && obj.characteristics().isPresent())
+        {
+            GMExtWire.writeList(b, obj.characteristics().get(), (bb, x) -> BluetoothLeCharacteristicDefinitionCodec.write(bb, x));
+        }
 
     }
 }

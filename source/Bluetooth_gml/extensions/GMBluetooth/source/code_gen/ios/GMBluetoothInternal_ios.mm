@@ -108,26 +108,6 @@ static void GMInjectSelectorsIntoSubclass(Class subclass, Class base)
 {
     return __EXT_NATIVE__bluetooth_last_error_message();
 }
-- (double)__EXT_NATIVE__bluetooth_le_is_supported
-{
-    return __EXT_NATIVE__bluetooth_le_is_supported();
-}
-- (double)__EXT_NATIVE__bluetooth_le_advertise_is_supported
-{
-    return __EXT_NATIVE__bluetooth_le_advertise_is_supported();
-}
-- (double)__EXT_NATIVE__bluetooth_le_server_is_supported
-{
-    return __EXT_NATIVE__bluetooth_le_server_is_supported();
-}
-- (double)__EXT_NATIVE__bluetooth_classic_is_supported
-{
-    return __EXT_NATIVE__bluetooth_classic_is_supported();
-}
-- (double)__EXT_NATIVE__bluetooth_classic_server_is_supported
-{
-    return __EXT_NATIVE__bluetooth_classic_server_is_supported();
-}
 - (double)__EXT_NATIVE__bluetooth_feature_is_supported:(char*)__arg_buffer arg1:(double)__arg_buffer_length
 {
     return __EXT_NATIVE__bluetooth_feature_is_supported(__arg_buffer, __arg_buffer_length);
@@ -156,9 +136,9 @@ static void GMInjectSelectorsIntoSubclass(Class subclass, Class base)
 {
     return __EXT_NATIVE__bluetooth_le_scan_is_running();
 }
-- (double)__EXT_NATIVE__bluetooth_classic_scan_start:(char*)__ret_buffer arg1:(double)__ret_buffer_length
+- (double)__EXT_NATIVE__bluetooth_classic_scan_start:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length
 {
-    return __EXT_NATIVE__bluetooth_classic_scan_start(__ret_buffer, __ret_buffer_length);
+    return __EXT_NATIVE__bluetooth_classic_scan_start(__arg_buffer, __arg_buffer_length, __ret_buffer, __ret_buffer_length);
 }
 - (double)__EXT_NATIVE__bluetooth_classic_scan_stop:(char*)__ret_buffer arg1:(double)__ret_buffer_length
 {
@@ -196,21 +176,17 @@ static void GMInjectSelectorsIntoSubclass(Class subclass, Class base)
 {
     return __EXT_NATIVE__bluetooth_device_get_name(__arg_buffer, __arg_buffer_length);
 }
-- (double)__EXT_NATIVE__bluetooth_device_has_address:(char*)__arg_buffer arg1:(double)__arg_buffer_length
+- (double)__EXT_NATIVE__bluetooth_device_get_address:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length
 {
-    return __EXT_NATIVE__bluetooth_device_has_address(__arg_buffer, __arg_buffer_length);
+    return __EXT_NATIVE__bluetooth_device_get_address(__arg_buffer, __arg_buffer_length, __ret_buffer, __ret_buffer_length);
 }
-- (char*)__EXT_NATIVE__bluetooth_device_get_address:(char*)__arg_buffer arg1:(double)__arg_buffer_length
+- (double)__EXT_NATIVE__bluetooth_device_get_rssi:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length
 {
-    return __EXT_NATIVE__bluetooth_device_get_address(__arg_buffer, __arg_buffer_length);
+    return __EXT_NATIVE__bluetooth_device_get_rssi(__arg_buffer, __arg_buffer_length, __ret_buffer, __ret_buffer_length);
 }
-- (double)__EXT_NATIVE__bluetooth_device_has_rssi:(char*)__arg_buffer arg1:(double)__arg_buffer_length
+- (double)__EXT_NATIVE__bluetooth_device_get_last_seen_age:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length
 {
-    return __EXT_NATIVE__bluetooth_device_has_rssi(__arg_buffer, __arg_buffer_length);
-}
-- (double)__EXT_NATIVE__bluetooth_device_get_rssi:(char*)__arg_buffer arg1:(double)__arg_buffer_length
-{
-    return __EXT_NATIVE__bluetooth_device_get_rssi(__arg_buffer, __arg_buffer_length);
+    return __EXT_NATIVE__bluetooth_device_get_last_seen_age(__arg_buffer, __arg_buffer_length, __ret_buffer, __ret_buffer_length);
 }
 - (double)__EXT_NATIVE__bluetooth_device_is_connectable:(char*)__arg_buffer arg1:(double)__arg_buffer_length
 {
@@ -256,9 +232,9 @@ static void GMInjectSelectorsIntoSubclass(Class subclass, Class base)
 {
     return __EXT_NATIVE__bluetooth_classic_send(__arg_buffer, __arg_buffer_length, __ret_buffer, __ret_buffer_length);
 }
-- (double)__EXT_NATIVE__bluetooth_classic_server_start:(char*)name arg1:(char*)service_uuid arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length
+- (double)__EXT_NATIVE__bluetooth_classic_server_start:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length
 {
-    return __EXT_NATIVE__bluetooth_classic_server_start(name, service_uuid, __ret_buffer, __ret_buffer_length);
+    return __EXT_NATIVE__bluetooth_classic_server_start(__arg_buffer, __arg_buffer_length, __ret_buffer, __ret_buffer_length);
 }
 - (double)__EXT_NATIVE__bluetooth_classic_server_stop:(char*)__ret_buffer arg1:(double)__ret_buffer_length
 {
@@ -268,9 +244,9 @@ static void GMInjectSelectorsIntoSubclass(Class subclass, Class base)
 {
     return __EXT_NATIVE__bluetooth_classic_server_is_running();
 }
-- (double)__EXT_NATIVE__bluetooth_classic_discoverable_start:(double)duration_seconds arg1:(char*)__ret_buffer arg2:(double)__ret_buffer_length
+- (double)__EXT_NATIVE__bluetooth_classic_discoverable_start:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length
 {
-    return __EXT_NATIVE__bluetooth_classic_discoverable_start(duration_seconds, __ret_buffer, __ret_buffer_length);
+    return __EXT_NATIVE__bluetooth_classic_discoverable_start(__arg_buffer, __arg_buffer_length, __ret_buffer, __ret_buffer_length);
 }
 - (double)__EXT_NATIVE__bluetooth_classic_discoverable_stop:(char*)__ret_buffer arg1:(double)__ret_buffer_length
 {
@@ -344,6 +320,10 @@ static void GMInjectSelectorsIntoSubclass(Class subclass, Class base)
 {
     return __EXT_NATIVE__bluetooth_le_service_get_uuid(__arg_buffer, __arg_buffer_length);
 }
+- (double)__EXT_NATIVE__bluetooth_le_service_find:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length
+{
+    return __EXT_NATIVE__bluetooth_le_service_find(__arg_buffer, __arg_buffer_length, __ret_buffer, __ret_buffer_length);
+}
 - (double)__EXT_NATIVE__bluetooth_le_characteristics_discover:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length
 {
     return __EXT_NATIVE__bluetooth_le_characteristics_discover(__arg_buffer, __arg_buffer_length, __ret_buffer, __ret_buffer_length);
@@ -359,6 +339,10 @@ static void GMInjectSelectorsIntoSubclass(Class subclass, Class base)
 - (char*)__EXT_NATIVE__bluetooth_le_characteristic_get_uuid:(char*)__arg_buffer arg1:(double)__arg_buffer_length
 {
     return __EXT_NATIVE__bluetooth_le_characteristic_get_uuid(__arg_buffer, __arg_buffer_length);
+}
+- (double)__EXT_NATIVE__bluetooth_le_characteristic_find:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length
+{
+    return __EXT_NATIVE__bluetooth_le_characteristic_find(__arg_buffer, __arg_buffer_length, __ret_buffer, __ret_buffer_length);
 }
 - (double)__EXT_NATIVE__bluetooth_le_characteristic_get_properties:(char*)__arg_buffer arg1:(double)__arg_buffer_length
 {
@@ -380,6 +364,10 @@ static void GMInjectSelectorsIntoSubclass(Class subclass, Class base)
 {
     return __EXT_NATIVE__bluetooth_le_descriptor_get_uuid(__arg_buffer, __arg_buffer_length);
 }
+- (double)__EXT_NATIVE__bluetooth_le_descriptor_find:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length
+{
+    return __EXT_NATIVE__bluetooth_le_descriptor_find(__arg_buffer, __arg_buffer_length, __ret_buffer, __ret_buffer_length);
+}
 - (double)__EXT_NATIVE__bluetooth_le_characteristic_read:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length
 {
     return __EXT_NATIVE__bluetooth_le_characteristic_read(__arg_buffer, __arg_buffer_length, __ret_buffer, __ret_buffer_length);
@@ -392,6 +380,10 @@ static void GMInjectSelectorsIntoSubclass(Class subclass, Class base)
 {
     return __EXT_NATIVE__bluetooth_le_characteristic_subscribe(__arg_buffer, __arg_buffer_length, __ret_buffer, __ret_buffer_length);
 }
+- (double)__EXT_NATIVE__bluetooth_le_characteristic_unsubscribe:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length
+{
+    return __EXT_NATIVE__bluetooth_le_characteristic_unsubscribe(__arg_buffer, __arg_buffer_length, __ret_buffer, __ret_buffer_length);
+}
 - (double)__EXT_NATIVE__bluetooth_le_descriptor_read:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length
 {
     return __EXT_NATIVE__bluetooth_le_descriptor_read(__arg_buffer, __arg_buffer_length, __ret_buffer, __ret_buffer_length);
@@ -400,9 +392,9 @@ static void GMInjectSelectorsIntoSubclass(Class subclass, Class base)
 {
     return __EXT_NATIVE__bluetooth_le_descriptor_write(__arg_buffer, __arg_buffer_length, __ret_buffer, __ret_buffer_length);
 }
-- (double)__EXT_NATIVE__bluetooth_value_fetch:(char*)__arg_buffer arg1:(double)__arg_buffer_length
+- (double)__EXT_NATIVE__bluetooth_value_fetch:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length
 {
-    return __EXT_NATIVE__bluetooth_value_fetch(__arg_buffer, __arg_buffer_length);
+    return __EXT_NATIVE__bluetooth_value_fetch(__arg_buffer, __arg_buffer_length, __ret_buffer, __ret_buffer_length);
 }
 - (double)__EXT_NATIVE__bluetooth_value_release:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length
 {
@@ -420,9 +412,9 @@ static void GMInjectSelectorsIntoSubclass(Class subclass, Class base)
 {
     return __EXT_NATIVE__bluetooth_le_advertise_is_running();
 }
-- (double)__EXT_NATIVE__bluetooth_le_server_start:(char*)__ret_buffer arg1:(double)__ret_buffer_length
+- (double)__EXT_NATIVE__bluetooth_le_server_start:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length
 {
-    return __EXT_NATIVE__bluetooth_le_server_start(__ret_buffer, __ret_buffer_length);
+    return __EXT_NATIVE__bluetooth_le_server_start(__arg_buffer, __arg_buffer_length, __ret_buffer, __ret_buffer_length);
 }
 - (double)__EXT_NATIVE__bluetooth_le_server_stop:(char*)__ret_buffer arg1:(double)__ret_buffer_length
 {
@@ -444,6 +436,10 @@ static void GMInjectSelectorsIntoSubclass(Class subclass, Class base)
 {
     return __EXT_NATIVE__bluetooth_le_server_respond_read(__arg_buffer, __arg_buffer_length, __ret_buffer, __ret_buffer_length);
 }
+- (double)__EXT_NATIVE__bluetooth_le_server_respond_read_error:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length
+{
+    return __EXT_NATIVE__bluetooth_le_server_respond_read_error(__arg_buffer, __arg_buffer_length, __ret_buffer, __ret_buffer_length);
+}
 - (double)__EXT_NATIVE__bluetooth_le_server_respond_write:(char*)__arg_buffer arg1:(double)__arg_buffer_length arg2:(char*)__ret_buffer arg3:(double)__ret_buffer_length
 {
     return __EXT_NATIVE__bluetooth_le_server_respond_write(__arg_buffer, __arg_buffer_length, __ret_buffer, __ret_buffer_length);
@@ -459,86 +455,6 @@ static void GMInjectSelectorsIntoSubclass(Class subclass, Class base)
 - (double)__EXT_NATIVE__bluetooth_remove_callback_state_changed
 {
     return __EXT_NATIVE__bluetooth_remove_callback_state_changed();
-}
-- (double)__EXT_NATIVE__bluetooth_set_callback_device_found:(char*)__arg_buffer arg1:(double)__arg_buffer_length
-{
-    return __EXT_NATIVE__bluetooth_set_callback_device_found(__arg_buffer, __arg_buffer_length);
-}
-- (double)__EXT_NATIVE__bluetooth_remove_callback_device_found
-{
-    return __EXT_NATIVE__bluetooth_remove_callback_device_found();
-}
-- (double)__EXT_NATIVE__bluetooth_set_callback_scan_stopped:(char*)__arg_buffer arg1:(double)__arg_buffer_length
-{
-    return __EXT_NATIVE__bluetooth_set_callback_scan_stopped(__arg_buffer, __arg_buffer_length);
-}
-- (double)__EXT_NATIVE__bluetooth_remove_callback_scan_stopped
-{
-    return __EXT_NATIVE__bluetooth_remove_callback_scan_stopped();
-}
-- (double)__EXT_NATIVE__bluetooth_set_callback_classic_client_connected:(char*)__arg_buffer arg1:(double)__arg_buffer_length
-{
-    return __EXT_NATIVE__bluetooth_set_callback_classic_client_connected(__arg_buffer, __arg_buffer_length);
-}
-- (double)__EXT_NATIVE__bluetooth_remove_callback_classic_client_connected
-{
-    return __EXT_NATIVE__bluetooth_remove_callback_classic_client_connected();
-}
-- (double)__EXT_NATIVE__bluetooth_set_callback_classic_data:(char*)__arg_buffer arg1:(double)__arg_buffer_length
-{
-    return __EXT_NATIVE__bluetooth_set_callback_classic_data(__arg_buffer, __arg_buffer_length);
-}
-- (double)__EXT_NATIVE__bluetooth_remove_callback_classic_data
-{
-    return __EXT_NATIVE__bluetooth_remove_callback_classic_data();
-}
-- (double)__EXT_NATIVE__bluetooth_set_callback_classic_disconnected:(char*)__arg_buffer arg1:(double)__arg_buffer_length
-{
-    return __EXT_NATIVE__bluetooth_set_callback_classic_disconnected(__arg_buffer, __arg_buffer_length);
-}
-- (double)__EXT_NATIVE__bluetooth_remove_callback_classic_disconnected
-{
-    return __EXT_NATIVE__bluetooth_remove_callback_classic_disconnected();
-}
-- (double)__EXT_NATIVE__bluetooth_set_callback_le_disconnected:(char*)__arg_buffer arg1:(double)__arg_buffer_length
-{
-    return __EXT_NATIVE__bluetooth_set_callback_le_disconnected(__arg_buffer, __arg_buffer_length);
-}
-- (double)__EXT_NATIVE__bluetooth_remove_callback_le_disconnected
-{
-    return __EXT_NATIVE__bluetooth_remove_callback_le_disconnected();
-}
-- (double)__EXT_NATIVE__bluetooth_set_callback_le_characteristic_value_changed:(char*)__arg_buffer arg1:(double)__arg_buffer_length
-{
-    return __EXT_NATIVE__bluetooth_set_callback_le_characteristic_value_changed(__arg_buffer, __arg_buffer_length);
-}
-- (double)__EXT_NATIVE__bluetooth_remove_callback_le_characteristic_value_changed
-{
-    return __EXT_NATIVE__bluetooth_remove_callback_le_characteristic_value_changed();
-}
-- (double)__EXT_NATIVE__bluetooth_set_callback_le_server_connection_state_changed:(char*)__arg_buffer arg1:(double)__arg_buffer_length
-{
-    return __EXT_NATIVE__bluetooth_set_callback_le_server_connection_state_changed(__arg_buffer, __arg_buffer_length);
-}
-- (double)__EXT_NATIVE__bluetooth_remove_callback_le_server_connection_state_changed
-{
-    return __EXT_NATIVE__bluetooth_remove_callback_le_server_connection_state_changed();
-}
-- (double)__EXT_NATIVE__bluetooth_set_callback_le_server_read_request:(char*)__arg_buffer arg1:(double)__arg_buffer_length
-{
-    return __EXT_NATIVE__bluetooth_set_callback_le_server_read_request(__arg_buffer, __arg_buffer_length);
-}
-- (double)__EXT_NATIVE__bluetooth_remove_callback_le_server_read_request
-{
-    return __EXT_NATIVE__bluetooth_remove_callback_le_server_read_request();
-}
-- (double)__EXT_NATIVE__bluetooth_set_callback_le_server_write_request:(char*)__arg_buffer arg1:(double)__arg_buffer_length
-{
-    return __EXT_NATIVE__bluetooth_set_callback_le_server_write_request(__arg_buffer, __arg_buffer_length);
-}
-- (double)__EXT_NATIVE__bluetooth_remove_callback_le_server_write_request
-{
-    return __EXT_NATIVE__bluetooth_remove_callback_le_server_write_request();
 }
 - (double)__EXT_NATIVE__GMBluetooth_invocation_handler:(char*)__arg_buffer arg1:(double)__arg_buffer_length
 {

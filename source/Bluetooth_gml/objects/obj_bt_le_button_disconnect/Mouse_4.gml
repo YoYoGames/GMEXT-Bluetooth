@@ -11,7 +11,7 @@ if (_r != BluetoothError.Ok)
     exit;
 }
 
-// A disconnect we asked for fires no le_disconnected, so tear the connection
+// A disconnect we asked for fires no on_disconnected, so tear the connection
 // UI down here. Its CleanUp resets obj_bt_le_client's conn, which unlocks the
 // device list again.
 show_debug_message("[GML] disconnected by user");

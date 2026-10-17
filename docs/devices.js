@@ -1,5 +1,5 @@
-// Devices: the shared device cache that LE and Classic scans fill, device ids, pairing, and the
-// device_found and scan_stopped callbacks.
+// Devices: the shared device cache that LE and Classic scans fill, device ids, signal strength and
+// last-seen age, and pairing.
 
 /**
  * @function bluetooth_device_clear
@@ -8,9 +8,8 @@
  *
  * The cache keeps every device seen since the last clear, whichever scan found it, so you should
  * call this function from time to time during a long scan in a busy place. Device handles are never
- * reused: a device found again after the clear enters the cache under a new handle, and the
- * device_found callback set with ${function.bluetooth_set_callback_device_found} is called for it
- * again. An old handle can therefore never name a different device.
+ * reused: a device seen again after the clear enters the cache under a new handle, which the running
+ * scan reports. An old handle can therefore never name a different device.
  *
  * Clearing the cache does not close anything. A connection made to a device stays open, and a
  * pairing still in progress still calls its callback with the old handle, but the device getters
@@ -21,11 +20,10 @@
  * ```gml
  * bluetooth_device_clear();
  * devices = [];
- * bluetooth_le_scan_start(true, []);
  * ```
- * The above code empties the device cache and the instance's own `devices` array before it starts a
- * new LE scan with ${function.bluetooth_le_scan_start}, so every device the scan reports gets a new
- * handle.
+ * The above code empties the device cache and the instance's own `devices` array. A scan that is
+ * running keeps running and reports each device it sees again under a new handle, so the `devices`
+ * array can fill up again with valid handles.
  * @function_end
  */
 
@@ -35,7 +33,7 @@
  * device found by an LE or a Classic scan since the last call to ${function.bluetooth_device_clear},
  * as well as the devices added by ${function.bluetooth_device_from_id}, by
  * ${function.bluetooth_paired_devices_query} and ${function.bluetooth_le_connected_devices_query},
- * and the centrals that connect to the LE server.
+ * and the devices that connect to the LE or Classic server.
  * @returns {Real} The number of devices in the cache.
  * @example
  * ```gml
@@ -90,24 +88,28 @@
 /**
  * @function bluetooth_device_from_id
  * @desc This function returns the handle of the device that the given id names. The id is one that
- * ${function.bluetooth_device_get_id} returned, possibly in an earlier run of the game, so you can
- * store it and use this function to reconnect to the same device later without scanning for it.
+ * ${function.bluetooth_device_get_id} returned, possibly in an earlier run of the game or on another
+ * platform, so you can store it and use this function to connect to the same device later without
+ * scanning for it.
  *
  * A device already in the cache keeps its handle and that handle is returned. Otherwise the device
- * enters the cache under a new handle without calling the device_found callback, and its name is an
- * empty string until the platform knows it.
+ * enters the cache under a new handle without calling any scan callback, and its name is an empty
+ * string until the platform knows it.
  *
- * The function returns 0 when it cannot make a handle, and the reason is then in
+ * Every platform reads every form of id, but not every platform can use every form. The function
+ * returns 0 when it cannot make a handle, and the reason is then in
  * ${function.bluetooth_last_error_code} and ${function.bluetooth_last_error_message}:
- * NotInitialized, or InvalidArgument for a malformed id or an id issued by another platform (a
- * Windows id on Android, for example).
+ * NotInitialized before ${function.bluetooth_initialize}, or InvalidArgument for a malformed id or
+ * one this platform cannot address, with a message that says why: an `le:apple:` id on Windows or
+ * Android, or an id holding an LE address on macOS or iOS.
  *
  * [[Note: On Apple platforms an LE id names a peripheral that CoreBluetooth must already know: the
  * function fails with BluetoothDisabled while the radio is off, NotFound for an id the system does not
  * know, and PermissionDenied until ${function.bluetooth_permission_request} has been called.]]
  *
  * [[Note: On Android the function fails with NotSupported on a device with no Bluetooth adapter,
- * and with OperationFailed when the device cannot be added to the cache.]]
+ * and with OperationFailed when the device cannot be added to the cache. From Android 13 a device
+ * whose id holds the address type (`le:public:` or `le:random:`) is connected with that type.]]
  *
  * [[Note: On Windows the device is built from the address in the id, so the function succeeds
  * without contacting the device.]]
@@ -121,11 +123,18 @@
  *     show_debug_message($"Unknown device: {bluetooth_last_error_message()}");
  *     exit;
  * }
- * connection = bluetooth_le_connect(_device, on_connected);
+ *
+ * connection = bluetooth_le_connect(_device, undefined, on_disconnected, on_connected);
+ * if (connection == 0)
+ * {
+ *     show_debug_message($"Connect did not start: {bluetooth_last_error_message()}");
+ * }
  * ```
  * The above code turns the id stored in the instance's `saved_id` variable back into a device handle
- * and connects to it with ${function.bluetooth_le_connect}, without a scan. If the id cannot be used,
- * the reason is shown with ${function.bluetooth_last_error_message}.
+ * and connects to it with ${function.bluetooth_le_connect}, without a scan, passing the instance's
+ * own `on_disconnected` and `on_connected` methods as the connection's callbacks. If the id cannot
+ * be used, or the connect cannot start, the reason is shown with
+ * ${function.bluetooth_last_error_message}.
  * @function_end
  */
 
@@ -143,11 +152,11 @@
  * ```gml
  * if (bluetooth_device_get_transport(device) == BluetoothTransport.Classic)
  * {
- *     bluetooth_classic_connect(device, service_uuid, on_connected);
+ *     connection = bluetooth_classic_connect(device, service_uuid, undefined, on_data, on_disconnected, on_connected);
  * }
  * ```
  * The above code connects with ${function.bluetooth_classic_connect} only when the device is a
- * Classic device.
+ * Classic device, passing the instance's own methods as the connection's callbacks.
  * @function_end
  */
 
@@ -155,36 +164,40 @@
  * @function bluetooth_device_get_id
  * @desc This function returns the id of the given device, a string you can store and later pass to
  * ${function.bluetooth_device_from_id} to get the device back without a scan. It returns an empty
- * string for a handle that is not valid.
+ * string for a handle that is not valid and for a device with no address.
  *
- * The id is opaque and specific to the platform: you should not parse it or assume it holds a MAC
- * address. Each platform prefixes its ids with its own name and the transport, so an id from one
- * platform is refused on another:
+ * The id has the same form on every platform that can address the device, with the address written
+ * as `AA:BB:CC:DD:EE:FF` in uppercase:
  *
- * * Windows: `win:ble:` or `win:classic:` followed by the device address.
- * * Android: `android:ble:` or `android:classic:` followed by the device address.
- * * macOS and iOS: `apple:ble:` followed by the identifier CoreBluetooth assigned to the peripheral,
- *   or on macOS `apple:classic:` followed by the device address.
+ * * `classic:` followed by the address, for a Classic device.
+ * * `le:public:` or `le:random:` followed by the address, for an LE device whose address type the
+ *   platform knows.
+ * * `le:` followed by the address, for an LE device whose address type the platform does not know,
+ *   as on Android before Android 15.
+ * * `le:apple:` followed by the identifier CoreBluetooth assigned to the peripheral, for an LE device
+ *   on macOS and iOS, which never expose an LE address.
  *
- * [[Note: CoreBluetooth makes up the identifier of an LE peripheral itself, so an Apple LE id only
- * names the device on the system that issued it.]]
+ * [[Note: CoreBluetooth makes up the identifier of an LE peripheral itself, so an `le:apple:` id only
+ * names the device on the system that issued it, and Windows and Android cannot use it.]]
  * @param {Real} device The handle of the device.
- * @returns {String} The id of the device, or an empty string if the handle is not valid.
+ * @returns {String} The id of the device, or an empty string if the handle is not valid or the device
+ * has no address.
  * @example
  * ```gml
  * saved_id = bluetooth_device_get_id(device);
  * ```
  * The above code stores the id of the device in the instance's `saved_id` variable, so the game can
- * save it and reconnect to the device later with ${function.bluetooth_device_from_id}.
+ * save it and connect to the device later with ${function.bluetooth_device_from_id}.
  * @function_end
  */
 
 /**
  * @function bluetooth_device_get_name
  * @desc This function returns the name of the given device. The name is updated whenever a later
- * advertisement or inquiry result carries one, so it can be an empty string when the device is first
- * found and filled in later. It is also an empty string for a device that has never reported a name
- * and for a handle that is not valid.
+ * advertisement or inquiry result carries one, which the scan reports through its `on_updated`
+ * callback, so it can be an empty string when the device is first found and filled in later. It is
+ * also an empty string for a device that has never reported a name and for a handle that is not
+ * valid.
  * @param {Real} device The handle of the device.
  * @returns {String} The name of the device, or an empty string if it is not known.
  * @example
@@ -201,83 +214,46 @@
  */
 
 /**
- * @function bluetooth_device_has_address
- * @desc This function checks whether the address of the given device is known. You should call this
- * function before you use ${function.bluetooth_device_get_address}.
- *
- * [[Note: Apple platforms never expose the address of an LE device, so this function returns
- * `false` for every LE device on macOS and iOS. It returns `true` for a Classic device on macOS.]]
- * @param {Real} device The handle of the device.
- * @returns {Bool} `true` if the address of the device is known, otherwise `false`.
- * @example
- * ```gml
- * if (bluetooth_device_has_address(device))
- * {
- *     show_debug_message($"Address: {bluetooth_device_get_address(device)}");
- * }
- * ```
- * The above code shows the address of the device, read with ${function.bluetooth_device_get_address},
- * only when it is known.
- * @function_end
- */
-
-/**
  * @function bluetooth_device_get_address
  * @desc This function returns the Bluetooth address of the given device, in the form
- * `AA:BB:CC:DD:EE:FF`. It returns an empty string when the address is not known (see
- * ${function.bluetooth_device_has_address}) and for a handle that is not valid.
+ * `AA:BB:CC:DD:EE:FF`, or `undefined` when the platform does not expose it.
  *
  * To remember a device between runs of the game, store its id from
  * ${function.bluetooth_device_get_id} instead: not every platform exposes an address.
+ *
+ * [[Note: Apple platforms never expose the address of an LE device, so this function returns
+ * `undefined` for every LE device on macOS and iOS.]]
  * @param {Real} device The handle of the device.
- * @returns {String} The address of the device, or an empty string if it is not known.
+ * @returns {String} The address of the device, or `undefined` if the platform does not expose it.
  * @example
  * ```gml
  * var _address = bluetooth_device_get_address(device);
- * if (_address != "")
+ * if (_address != undefined)
  * {
  *     show_debug_message($"Address: {_address}");
  * }
  * ```
- * The above code shows the address of the device in the output log when it is known.
- * @function_end
- */
-
-/**
- * @function bluetooth_device_has_rssi
- * @desc This function checks whether a signal strength (RSSI) has been reported for the given
- * device. You should call this function before you use ${function.bluetooth_device_get_rssi}.
- *
- * Scans report the signal strength. A device that entered the cache without a scan (through
- * ${function.bluetooth_device_from_id} or a device query, for example) has none until a scan sees
+ * The above code shows the address of the device in the output log only when the platform exposes
  * it.
- *
- * [[Note: Classic scans on Windows and macOS report no signal strength, so this function returns
- * `false` for those devices.]]
- * @param {Real} device The handle of the device.
- * @returns {Bool} `true` if a signal strength has been reported for the device, otherwise `false`.
- * @example
- * ```gml
- * if (bluetooth_device_has_rssi(device))
- * {
- *     show_debug_message($"RSSI: {bluetooth_device_get_rssi(device)} dBm");
- * }
- * ```
- * The above code shows the signal strength of the device, read with
- * ${function.bluetooth_device_get_rssi}, only when one has been reported.
  * @function_end
  */
 
 /**
  * @function bluetooth_device_get_rssi
  * @desc This function returns the most recent signal strength (RSSI) reported for the given device,
- * in dBm. Values are negative, and a value closer to 0 means a stronger signal. The value is updated
- * by every later advertisement or inquiry result the device sends while a scan runs.
+ * in dBm, or `undefined` when none has been reported. Values are negative, and a value closer to 0
+ * means a stronger signal. The value is updated by every later advertisement or inquiry result the
+ * device sends while a scan runs.
  *
- * The function returns 0 when no signal strength has been reported (see
- * ${function.bluetooth_device_has_rssi}) and for a handle that is not valid.
+ * Scans report the signal strength. A device that entered the cache without a scan (through
+ * ${function.bluetooth_device_from_id} or a device query, for example) has none until a scan sees
+ * it.
+ *
+ * [[Note: Classic scans on Windows and macOS report no signal strength, so this function returns
+ * `undefined` for those devices.]]
  * @param {Real} device The handle of the device.
- * @returns {Real} The signal strength of the device (in dBm), or 0 if none has been reported.
+ * @returns {Real} The signal strength of the device (in dBm), or `undefined` if none has been
+ * reported.
  * @example
  * ```gml
  * var _closest = 0;
@@ -286,15 +262,45 @@
  * for (var i = 0; i < _count; i++)
  * {
  *     var _device = bluetooth_device_get_at(i);
- *     if (bluetooth_device_has_rssi(_device) && bluetooth_device_get_rssi(_device) > _best)
+ *     var _rssi = bluetooth_device_get_rssi(_device);
+ *     if (_rssi != undefined && _rssi > _best)
  *     {
- *         _best = bluetooth_device_get_rssi(_device);
+ *         _best = _rssi;
  *         _closest = _device;
  *     }
  * }
  * ```
  * The above code goes through every device in the cache and keeps the handle of the one with the
- * strongest signal in the local variable `_closest`.
+ * strongest signal in the local variable `_closest`, skipping the devices that have no signal
+ * strength.
+ * @function_end
+ */
+
+/**
+ * @function bluetooth_device_get_last_seen_age
+ * @desc This function returns how long ago a scan last saw the given device, in milliseconds, or
+ * `undefined` when no scan has seen it: a device added with ${function.bluetooth_device_from_id}, by
+ * a device query, or by connecting to the LE or Classic server.
+ *
+ * The age grows while the device stays silent, so you can use it to drop devices that have gone out
+ * of range from your own list, instead of waiting for an event: no callback reports a device that has
+ * stopped advertising.
+ * @param {Real} device The handle of the device.
+ * @returns {Real} The time since a scan last saw the device (in milliseconds), or `undefined` if no
+ * scan has seen it.
+ * @example
+ * ```gml
+ * for (var i = array_length(devices) - 1; i >= 0; i--)
+ * {
+ *     var _age = bluetooth_device_get_last_seen_age(devices[i]);
+ *     if (_age != undefined && _age > 10000)
+ *     {
+ *         array_delete(devices, i, 1);
+ *     }
+ * }
+ * ```
+ * The above code, run in a Step Event, removes from the instance's `devices` array every device that
+ * no scan has seen for more than 10 seconds. A device that no scan has ever seen is kept.
  * @function_end
  */
 
@@ -313,11 +319,11 @@
  * ```gml
  * if (bluetooth_device_is_connectable(device))
  * {
- *     connection = bluetooth_le_connect(device, on_connected);
+ *     connection = bluetooth_le_connect(device, undefined, on_disconnected, on_connected);
  * }
  * ```
  * The above code connects to the device with ${function.bluetooth_le_connect} only when it
- * accepts connections.
+ * accepts connections, using the default connect options.
  * @function_end
  */
 
@@ -350,7 +356,7 @@
  * @function bluetooth_paired_devices_query
  * @desc This function lists the devices that are paired (bonded) with this system, without a scan.
  * The callback is called once with the handles of the paired devices. A paired device that is not
- * yet in the cache enters it without calling the device_found callback.
+ * yet in the cache enters it without calling any scan callback.
  *
  * The function returns a ${constant.BluetoothError}, and the callback is never called when it is
  * not Ok: NotInitialized, NotSupported where the platform cannot list paired devices or there is no
@@ -516,113 +522,6 @@
  */
 
 /**
- * @function bluetooth_set_callback_device_found
- * @desc This function sets the function to call when a scan adds a new device to the device cache.
- * Both LE scans (${function.bluetooth_le_scan_start}) and Classic scans
- * (${function.bluetooth_classic_scan_start}) call it, so use
- * ${function.bluetooth_device_get_transport} to tell them apart. Setting a new function replaces the
- * previous one.
- *
- * The callback is called once per device, not once per advertisement: later advertisements and
- * inquiry results from the same device update its name, signal strength and advertisement in the
- * cache, which the device getters return, without calling the callback again. After
- * ${function.bluetooth_device_clear} a device found again is a new device and the callback is called
- * for it again. When an LE scan has filters, a device is added, and the callback called, once its
- * merged advertisement first matches one of them.
- *
- * A device that entered the cache without a scan is never reported here, even when a scan sees it
- * later: one added with ${function.bluetooth_device_from_id}, ${function.bluetooth_paired_devices_query}
- * or ${function.bluetooth_le_connected_devices_query}, or a central that connects to the LE server.
- *
- * The callback stays set across ${function.bluetooth_shutdown} and ${function.bluetooth_initialize},
- * until you call ${function.bluetooth_remove_callback_device_found}.
- * @param {Function} callback The function to call for each new device.
- * @returns {Bool} Always `true`.
- * @event callback
- * @desc Called once for each device a scan adds to the cache.
- * @member {Real} device The handle of the new device.
- * @event_end
- * @example
- * ```gml
- * bluetooth_set_callback_device_found(function(_device)
- * {
- *     var _kind = (bluetooth_device_get_transport(_device) == BluetoothTransport.LowEnergy) ? "LE" : "Classic";
- *     show_debug_message($"Found {_kind} device {bluetooth_device_get_name(_device)}");
- *     array_push(devices, _device);
- * });
- * ```
- * The above code sets a function that shows the transport and name of every new device in the
- * output log and adds its handle to the instance's `devices` array.
- * @function_end
- */
-
-/**
- * @function bluetooth_remove_callback_device_found
- * @desc This function removes the function set with ${function.bluetooth_set_callback_device_found}.
- * Scans keep adding devices to the cache, but nothing is called for them.
- * @returns {Bool} Always `true`.
- * @example
- * ```gml
- * bluetooth_remove_callback_device_found();
- * ```
- * The above code stops the game from being told about new devices.
- * @function_end
- */
-
-/**
- * @function bluetooth_set_callback_scan_stopped
- * @desc This function sets the function to call when an LE or a Classic scan stops. Setting a new
- * function replaces the previous one.
- *
- * The callback is called once per scan, whether the game stopped the scan with
- * ${function.bluetooth_le_scan_stop} or ${function.bluetooth_classic_scan_stop}, the scan ended on
- * its own (a Classic inquiry lasts a limited time), or the system ended it, for example because the
- * radio was turned off. A stop while no scan is running calls nothing.
- *
- * The callback stays set across ${function.bluetooth_shutdown} and ${function.bluetooth_initialize},
- * until you call ${function.bluetooth_remove_callback_scan_stopped}.
- * @param {Function} callback The function to call when a scan stops.
- * @returns {Bool} Always `true`.
- * @event callback
- * @desc Called once each time an LE or a Classic scan stops.
- * @member {Enum.BluetoothError} error_code ${constant.BluetoothError}.Ok if the scan ended without
- * an error, otherwise the reason it ended, such as BluetoothDisabled when the radio was turned off.
- * @member {String} message A description of the failure, or an empty string on success.
- * @member {Enum.BluetoothTransport} transport The transport of the scan that stopped.
- * @event_end
- * @example
- * ```gml
- * bluetooth_set_callback_scan_stopped(function(_error_code, _message, _transport)
- * {
- *     var _kind = (_transport == BluetoothTransport.Classic) ? "Classic" : "LE";
- *     if (_error_code != BluetoothError.Ok)
- *     {
- *         show_debug_message($"{_kind} scan ended: {_message}");
- *         exit;
- *     }
- *     show_debug_message($"{_kind} scan stopped, {bluetooth_device_get_count()} devices cached");
- * });
- * ```
- * The above code sets a function that shows why a scan ended when it ended with an error, or
- * otherwise shows how many devices are in the cache, read with
- * ${function.bluetooth_device_get_count}.
- * @function_end
- */
-
-/**
- * @function bluetooth_remove_callback_scan_stopped
- * @desc This function removes the function set with ${function.bluetooth_set_callback_scan_stopped}.
- * Scans still stop as before, but nothing is called when they do.
- * @returns {Bool} Always `true`.
- * @example
- * ```gml
- * bluetooth_remove_callback_scan_stopped();
- * ```
- * The above code stops the game from being told when a scan stops.
- * @function_end
- */
-
-/**
  * @struct BluetoothLeAdvertisement
  * @desc This struct holds what an LE device has advertised, as returned by
  * ${function.bluetooth_device_get_advertisement}. It merges every advertisement and scan response
@@ -643,19 +542,21 @@
  * @module devices
  * @title Devices
  * @desc The device cache that LE and Classic scans fill, and the functions to read the devices in
- * it, get a device back from a saved id, list and pair devices, and hear about new devices and
- * stopped scans.
+ * it, get a device back from a saved id, and list and pair devices.
  *
  * Scans are started with ${function.bluetooth_le_scan_start} and
- * ${function.bluetooth_classic_scan_start}. Every device they find is added to one shared cache and
- * given a device handle, a number that stays valid until ${function.bluetooth_device_clear} or
- * ${function.bluetooth_shutdown} empties the cache. Handles are never reused. To remember a device
- * between runs of the game, store its id from ${function.bluetooth_device_get_id} and get a handle
- * back with ${function.bluetooth_device_from_id}.
+ * ${function.bluetooth_classic_scan_start}, which pass each device to their own `on_found` callback
+ * the first time that scan sees it, also a device already cached by an earlier scan, and its later
+ * advertisements or answers to `on_updated`. Every device is added to one shared cache and given a
+ * device handle, a number
+ * that stays valid until ${function.bluetooth_device_clear} or ${function.bluetooth_shutdown} empties
+ * the cache. Handles are never reused. A device only reaches the running scan of its own transport,
+ * and a device that enters the cache in any other way (from an id, a query or an incoming connection)
+ * calls no scan callback. To remember a device between runs of the game, store its id from
+ * ${function.bluetooth_device_get_id} and get a handle back with ${function.bluetooth_device_from_id}.
  *
  * @section_func
- * @desc These are the functions to manage and read the device cache, to pair devices, and to be told
- * about new devices and stopped scans.
+ * @desc These are the functions to manage and read the device cache and to pair devices.
  * @ref bluetooth_device_clear
  * @ref bluetooth_device_get_count
  * @ref bluetooth_device_get_at
@@ -664,20 +565,15 @@
  * @ref bluetooth_device_get_transport
  * @ref bluetooth_device_get_id
  * @ref bluetooth_device_get_name
- * @ref bluetooth_device_has_address
  * @ref bluetooth_device_get_address
- * @ref bluetooth_device_has_rssi
  * @ref bluetooth_device_get_rssi
+ * @ref bluetooth_device_get_last_seen_age
  * @ref bluetooth_device_is_connectable
  * @ref bluetooth_device_get_advertisement
  * @ref bluetooth_paired_devices_query
  * @ref bluetooth_pairing_is_supported
  * @ref bluetooth_pair
  * @ref bluetooth_device_is_paired
- * @ref bluetooth_set_callback_device_found
- * @ref bluetooth_remove_callback_device_found
- * @ref bluetooth_set_callback_scan_stopped
- * @ref bluetooth_remove_callback_scan_stopped
  * @section_end
  *
  * @section_struct

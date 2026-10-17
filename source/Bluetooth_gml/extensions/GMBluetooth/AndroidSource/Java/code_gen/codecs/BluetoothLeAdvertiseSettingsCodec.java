@@ -16,7 +16,12 @@ public final class BluetoothLeAdvertiseSettingsCodec {
     }
     public static BluetoothLeAdvertiseSettings read(ByteBuffer b)
     {
-        boolean connectable = GMExtWire.readBool(b);
+        java.util.Optional<Boolean> connectable = java.util.Optional.empty();
+        if (GMExtWire.readBool(b))
+        {
+            boolean __opt_connectable = GMExtWire.readBool(b);
+            connectable = java.util.Optional.of(__opt_connectable);
+        }
 
         java.util.Optional<BluetoothLeAdvertiseTxPower> tx_power = java.util.Optional.empty();
         if (GMExtWire.readBool(b))
@@ -30,7 +35,11 @@ public final class BluetoothLeAdvertiseSettingsCodec {
 
     public static void write(GMExtWire.IByteWriter b, BluetoothLeAdvertiseSettings obj)
     {
-        GMExtWire.writeBool(b, obj.connectable());
+        GMExtWire.writeBool(b, obj.connectable() != null && obj.connectable().isPresent());
+        if (obj.connectable() != null && obj.connectable().isPresent())
+        {
+            GMExtWire.writeBool(b, obj.connectable().get());
+        }
 
         GMExtWire.writeBool(b, obj.tx_power() != null && obj.tx_power().isPresent());
         if (obj.tx_power() != null && obj.tx_power().isPresent())

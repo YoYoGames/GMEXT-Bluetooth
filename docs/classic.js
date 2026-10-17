@@ -1,77 +1,34 @@
-// Bluetooth Classic (RFCOMM): support queries, discovery, client connections, sending, the server,
-// discoverability and the Classic event callbacks.
-
-/**
- * @function bluetooth_classic_is_supported
- * @desc This function checks whether Bluetooth Classic (RFCOMM) client connections and Classic
- * discovery are available on this platform and adapter. It returns `false` before
- * ${function.bluetooth_initialize} has been called, so ask after initialising. It gives the same
- * answer as ${function.bluetooth_feature_is_supported} with ${constant.BluetoothFeature}.Classic.
- *
- * [[Note: Bluetooth Classic is available on Windows, Android and macOS. On iOS this function always
- * returns `false`, and every Classic call that starts radio work fails with
- * ${constant.BluetoothError}.NotSupported.]]
- *
- * [[Note: On Windows the answer comes from the adapter, so a machine with an LE-only adapter returns
- * `false`. On macOS it is `true` once initialised. On Android it is `true` when the device has a
- * Bluetooth adapter.]]
- * @returns {Bool} `true` if Bluetooth Classic is supported, otherwise `false`.
- * @example
- * ```gml
- * if (!bluetooth_classic_is_supported())
- * {
- *     show_debug_message("Bluetooth Classic is not available on this device");
- * }
- * ```
- * The above code checks whether Bluetooth Classic can be used and shows a debug message when it
- * cannot.
- * @function_end
- */
-
-/**
- * @function bluetooth_classic_server_is_supported
- * @desc This function checks whether this platform and adapter can run a Bluetooth Classic RFCOMM
- * server with ${function.bluetooth_classic_server_start}. It returns `false` before
- * ${function.bluetooth_initialize} has been called. It gives the same answer as
- * ${function.bluetooth_feature_is_supported} with ${constant.BluetoothFeature}.ClassicServer.
- *
- * [[Note: The server is available on Windows, Android and macOS wherever
- * ${function.bluetooth_classic_is_supported} returns `true`. On iOS this function always returns
- * `false`.]]
- * @returns {Bool} `true` if a Classic server can be started, otherwise `false`.
- * @example
- * ```gml
- * if (bluetooth_classic_server_is_supported())
- * {
- *     bluetooth_classic_server_start("My Game", "00001101-0000-1000-8000-00805F9B34FB");
- * }
- * ```
- * The above code starts an RFCOMM server that uses the Serial Port Profile UUID, but only when the
- * platform supports a Classic server.
- * @function_end
- */
+// Bluetooth Classic (RFCOMM): discovery, client connections, sending and receiving, the server and
+// discoverability, each with the event callbacks of the call that starts it.
 
 /**
  * @function bluetooth_classic_scan_start
  * @desc This function starts a Bluetooth Classic discovery (an inquiry scan) for nearby Classic
- * devices. Every new device the scan finds enters the device cache and fires the callback set with
- * ${function.bluetooth_set_callback_device_found}, with a device whose transport is
- * ${constant.BluetoothTransport}.Classic. The scan ends on its own after one inquiry, and the
- * callback set with ${function.bluetooth_set_callback_scan_stopped} is then called with the
- * transport ${constant.BluetoothTransport}.Classic, and with an error when the inquiry could not run.
+ * devices. Every device the scan sees enters the device cache, with the transport
+ * ${constant.BluetoothTransport}.Classic, and the scan calls its own callbacks for it: `on_found`
+ * the first time this scan sees the device, also when an earlier scan already put it in the cache,
+ * and `on_updated` each time the device answers the inquiry again or its name is resolved later.
  *
- * Starting a scan while one is already running returns ${constant.BluetoothError}.Ok and starts
- * nothing new.
+ * The scan keeps its callbacks until it ends. It ends on its own after one inquiry, and `on_stopped`
+ * is then called once; it is also called when the inquiry could not run or the radio is turned off,
+ * with the reason. A scan you stop with ${function.bluetooth_classic_scan_stop} calls nothing. Only
+ * a Classic scan reports Classic devices, and a device that enters the cache in another way calls no
+ * scan callback.
+ *
+ * Only one Classic scan runs at a time: a start while one is running returns
+ * ${constant.BluetoothError}.Busy.
  *
  * The function returns a ${constant.BluetoothError}. When it is not
  * ${constant.BluetoothError}.Ok the scan did not start, no callback is called, and the reason is in
  * ${function.bluetooth_last_error_code} and ${function.bluetooth_last_error_message}:
- * NotInitialized before ${function.bluetooth_initialize}, PermissionDenied when the Bluetooth
- * permission is missing or was refused, BluetoothDisabled when the radio is off, NotSupported where
- * Classic is not available, or OperationFailed when the system could not start the inquiry.
+ * NotInitialized before ${function.bluetooth_initialize}, Busy while a Classic scan runs,
+ * PermissionDenied when the Bluetooth permission is missing or was refused, BluetoothDisabled when
+ * the radio is off, NotSupported where Classic is not available, or OperationFailed when the system
+ * could not start the inquiry.
  *
- * [[Note: An inquiry runs for about 5 seconds on Windows and 10 seconds on macOS; on Android it lasts
- * as long as the system's discovery.]]
+ * [[Note: An inquiry runs for about 5 seconds on Windows, which reports every device at the end of
+ * it, and for about 10 seconds on macOS. Android and macOS report devices as they answer, and on
+ * Android the inquiry lasts as long as the system's discovery.]]
  *
  * [[Note: On Windows the inquiry also returns every device that Windows remembers, in range or not.
  * The extension reports only the remembered devices that answered this inquiry. If Windows cannot
@@ -82,44 +39,87 @@
  * versions before 12 the Location setting must be on; otherwise the call returns PermissionDenied.
  * On macOS it returns PermissionDenied until ${function.bluetooth_permission_request} has been
  * called. On iOS it returns NotSupported.]]
- * @returns {Enum.BluetoothError} ${constant.BluetoothError}.Ok if the scan started or was already
- * running, otherwise the reason it did not start.
+ * @param {Function} on_found The function to call the first time this scan sees a device.
+ * @param {Function} [on_updated] The function to call when a device this scan has reported answers
+ * again or its name is resolved, or `undefined`.
+ * @param {Function} [on_stopped] The function to call when the scan ends without
+ * ${function.bluetooth_classic_scan_stop}, or `undefined`.
+ * @returns {Enum.BluetoothError} ${constant.BluetoothError}.Ok if the scan started, otherwise the
+ * reason it did not.
+ * @event callback:on_found
+ * @desc Called once for each device, the first time this scan sees it.
+ * @member {Real} device The handle of the device.
+ * @event_end
+ * @event callback:on_updated
+ * @desc Called each time a device this scan has already reported answers the inquiry again or has
+ * its name resolved.
+ * @member {Real} device The handle of the device.
+ * @event_end
+ * @event callback:on_stopped
+ * @desc Called once, when the scan ends without ${function.bluetooth_classic_scan_stop}, also when
+ * the inquiry has run its course. It is the last callback of the scan.
+ * @member {Enum.BluetoothError} error_code ${constant.BluetoothError}.Ok when the inquiry ran its
+ * course, otherwise the reason the scan ended, such as ${constant.BluetoothError}.BluetoothDisabled
+ * when the radio was turned off.
+ * @member {String} message A description of why the scan ended, or an empty string when the inquiry
+ * ran its course.
+ * @event_end
  * @example
  * ```gml
- * var _result = bluetooth_classic_scan_start();
- * if (_result != BluetoothError.Ok)
+ * var _error = bluetooth_classic_scan_start(
+ *     function(_device)
+ *     {
+ *         array_push(devices, _device);
+ *     },
+ *     function(_device)
+ *     {
+ *         show_debug_message($"Updated: {bluetooth_device_get_name(_device)}");
+ *     },
+ *     function(_error_code, _message)
+ *     {
+ *         if (_error_code != BluetoothError.Ok)
+ *         {
+ *             show_debug_message($"Classic scan ended: {_message}");
+ *         }
+ *         scanning = false;
+ *     });
+ *
+ * scanning = (_error == BluetoothError.Ok);
+ * if (!scanning)
  * {
  *     show_debug_message($"Classic scan did not start: {bluetooth_last_error_message()}");
  * }
  * ```
- * The above code starts a Classic scan and shows the reason in a debug message when it could not
- * start. The devices it finds are reported to the callback set with
- * ${function.bluetooth_set_callback_device_found}.
+ * The above code starts a Classic scan. Each device it finds is added to the instance's `devices`
+ * array, and a device whose name arrives later is shown in a debug message. When the inquiry ends,
+ * the instance's `scanning` flag is cleared, and an error is shown when the scan ended for another
+ * reason. If the scan could not start, the reason is shown in a debug message.
  * @function_end
  */
 
 /**
  * @function bluetooth_classic_scan_stop
- * @desc This function stops a running Bluetooth Classic scan. When a scan was running, the callback
- * set with ${function.bluetooth_set_callback_scan_stopped} is called with
- * ${constant.BluetoothError}.Ok and the transport ${constant.BluetoothTransport}.Classic. Stopping
- * when no scan is running returns ${constant.BluetoothError}.Ok and calls nothing.
+ * @desc This function stops a running Bluetooth Classic scan. The scan's `on_stopped` callback is not
+ * called for a stop you ask for. Stopping when no scan is running returns
+ * ${constant.BluetoothError}.Ok and does nothing.
  *
  * The function returns ${constant.BluetoothError}.NotInitialized before
  * ${function.bluetooth_initialize}, with the reason in ${function.bluetooth_last_error_message}.
  *
- * [[Note: Windows cannot cut an inquiry short. The scan is reported as stopped at once and nothing
- * the inquiry still finds is reported.]]
- * @returns {Enum.BluetoothError} ${constant.BluetoothError}.Ok if the scan is stopped, otherwise the
- * reason.
+ * [[Note: Windows cannot cut an inquiry short. The scan is stopped at once and nothing the inquiry
+ * still finds is reported.]]
+ * @returns {Enum.BluetoothError} ${constant.BluetoothError}.Ok if the scan is stopped or none was
+ * running, otherwise the reason.
  * @example
  * ```gml
  * if (bluetooth_classic_scan_is_running())
  * {
  *     bluetooth_classic_scan_stop();
+ *     scanning = false;
  * }
  * ```
- * The above code stops the Classic scan if one is running.
+ * The above code stops the Classic scan if one is running and clears the instance's `scanning`
+ * flag, since no callback reports the stop.
  * @function_end
  */
 
@@ -144,49 +144,90 @@
  * device, which must have been found by a scan, listed by ${function.bluetooth_paired_devices_query}
  * or looked up with ${function.bluetooth_device_from_id}. The service is named by its UUID, either
  * in the full 36-character form or as 4 or 8 hex digits. It returns a connection handle straight
- * away, before the device has answered, and the callback is called once when the connection is made
+ * away, before the device has answered, and `callback` is called once when the connection is made
  * or fails.
  *
  * The function returns 0 when the connect could not be started, and the reason is then in
  * ${function.bluetooth_last_error_code} and ${function.bluetooth_last_error_message}:
  * NotInitialized, InvalidHandle for a device handle that is not valid, InvalidArgument for an LE
- * device or a service UUID that is not valid, BluetoothDisabled, PermissionDenied, or NotSupported
- * where Classic is not available. In that case the callback is never called.
+ * device, a service UUID that is not valid or options that are not valid, BluetoothDisabled,
+ * PermissionDenied, or NotSupported where Classic is not available. In that case no callback is
+ * ever called.
  *
+ * The given `options` is a ${struct.BluetoothConnectOptions}, or `undefined` for the defaults. Its
+ * `timeout_ms`, 15 seconds by default, is one window from the call to an open link, a pairing prompt
+ * included: a connect that is not open by then fails with ${constant.BluetoothError}.Timeout on
+ * every platform. One that is refused or fails reports ${constant.BluetoothError}.ConnectionFailed.
  * You can cancel a connect that is still in progress by passing the returned handle to
- * ${function.bluetooth_classic_disconnect}, and the callback is then called once with
- * ${constant.BluetoothError}.ConnectionFailed. If ${function.bluetooth_shutdown} is called first,
- * the callback is called with ${constant.BluetoothError}.NotInitialized.
+ * ${function.bluetooth_classic_disconnect}, and `callback` is then called once with
+ * ${constant.BluetoothError}.ConnectionFailed. If ${function.bluetooth_shutdown} is called first, it
+ * is called with ${constant.BluetoothError}.NotInitialized, and if the radio turns off first, with
+ * ${constant.BluetoothError}.BluetoothDisabled.
  *
- * Once connected, the bytes the device sends arrive through the callback set with
- * ${function.bluetooth_set_callback_classic_data}, you send bytes with
- * ${function.bluetooth_classic_send}, and the callback set with
- * ${function.bluetooth_set_callback_classic_disconnected} tells you when the device ends the
- * connection.
+ * ### Receiving
  *
- * [[Note: On Windows a device that does not answer within 15 seconds fails with
- * ${constant.BluetoothError}.Timeout. On Android the system's own connect timeout applies, and a
- * failed connect reports ${constant.BluetoothError}.ConnectionFailed.]]
+ * Once connected, `on_data` is called for every chunk of bytes the connection receives, in the order
+ * they arrive, with a value handle that holds the bytes and their number. Copy the bytes into a
+ * buffer of your own with ${function.bluetooth_value_append} or ${function.bluetooth_value_fetch},
+ * which also free the value, or free it without copying with ${function.bluetooth_value_release}. An
+ * RFCOMM connection is a stream and has no message boundaries: the bytes of one send from the device
+ * may arrive in several chunks, and the bytes of several sends may arrive in one, so collect the
+ * chunks in order and split them with your own framing.
+ *
+ * The values a connection has not fetched or released count toward its receive budget of 1 MiB.
+ * While they hold more than that, Windows and Android stop reading from the device until some are
+ * fetched or released, and RFCOMM flow control holds the device back. A value that is left
+ * unfetched for 30 seconds expires, and the connection is then ended with
+ * ${constant.BluetoothError}.Disconnected and the message "receive data expired", rather than leave
+ * a gap in the stream.
+ *
+ * `on_disconnected` is called once when the open link ends without
+ * ${function.bluetooth_classic_disconnect}: the device closed it, the link failed, a send failed,
+ * the radio was turned off, or the connection was ended because its received data expired or, on
+ * macOS, filled the receive budget. It is called after the last `on_data` of the connection, and the
+ * connection handle is no longer valid once it is called; the values already delivered can still be
+ * fetched. A disconnect you ask for never calls it, and neither does a connect that fails, which
+ * reports through `callback`.
+ *
+ * [[Note: macOS cannot pause an RFCOMM channel, so a chunk that would take the unfetched bytes past
+ * 1 MiB ends the connection with ${constant.BluetoothError}.Disconnected and the message "receive
+ * buffer full", after the part that fits is delivered.]]
  *
  * [[Note: On macOS the RFCOMM channel is found by looking up the service UUID in the device's SDP
- * records, through IOBluetooth. The records cached from pairing are used when they hold the
- * service; otherwise an SDP query runs, which fails with ${constant.BluetoothError}.Timeout after 15
- * seconds, and with ${constant.BluetoothError}.NotFound when the device does not offer the service.
- * The call itself returns 0 with NotFound when macOS cannot resolve the device's address, and with
- * PermissionDenied until ${function.bluetooth_permission_request} has been called.]]
+ * records, through IOBluetooth: the records cached from pairing when they hold the service,
+ * otherwise an SDP query, which fails with ${constant.BluetoothError}.NotFound when the device does
+ * not offer the service. The call itself returns 0 with NotFound when macOS cannot resolve the
+ * device's address, and with PermissionDenied until ${function.bluetooth_permission_request} has
+ * been called.]]
  *
  * [[Note: The connection is a secure (authenticated and encrypted) RFCOMM link, so an unpaired device
- * may show a pairing prompt. On Windows the pairing counts toward the 15 seconds. On macOS the
- * authenticated link is opened before the SDP lookup and fails with
- * ${constant.BluetoothError}.Timeout when it is not open after 15 seconds; a link to the device that
- * is already open is used as it is.]]
- *
- * [[Note: On Android a running Classic scan is cancelled before the connect.]]
+ * may show a pairing prompt, which counts toward the timeout. On Android a running Classic scan is
+ * cancelled before the connect.]]
  * @param {Real} device The handle of the Classic device to connect to.
  * @param {String} service_uuid The UUID of the RFCOMM service to connect to.
+ * @param {Struct.BluetoothConnectOptions} [options] How the connect runs, or `undefined` for the
+ * defaults.
+ * @param {Function} on_data The function to call for each chunk of bytes the connection receives.
+ * @param {Function} on_disconnected The function to call once if the open connection ends without
+ * ${function.bluetooth_classic_disconnect}.
  * @param {Function} callback The function to call once the connection is made or fails.
  * @returns {Real} The new connection handle, or 0 if the connect did not start.
- * @event callback
+ * @event callback:on_data
+ * @desc Called once for every chunk of bytes the connection receives, in order.
+ * @member {Real} connection The handle of the connection that received the bytes.
+ * @member {Real} value The value handle that holds the bytes, for ${function.bluetooth_value_fetch}.
+ * @member {Real} size The number of bytes the value holds.
+ * @event_end
+ * @event callback:on_disconnected
+ * @desc Called once, when the open connection ends without
+ * ${function.bluetooth_classic_disconnect}. It is the last callback of the connection.
+ * @member {Enum.BluetoothError} error_code ${constant.BluetoothError}.Disconnected when the device
+ * closed the connection or its received data could not be held, ${constant.BluetoothError}.BluetoothDisabled
+ * when the radio was turned off, otherwise the error that ended it.
+ * @member {String} message A description of why the connection ended.
+ * @member {Real} connection The handle of the connection that ended.
+ * @event_end
+ * @event callback:callback
  * @desc Called once, when the connection is made, fails or is cancelled.
  * @member {Enum.BluetoothError} error_code ${constant.BluetoothError}.Ok if the device is
  * connected, otherwise the reason it is not.
@@ -197,25 +238,53 @@
  * @event_end
  * @example
  * ```gml
- * connection = bluetooth_classic_connect(device, "00001101-0000-1000-8000-00805F9B34FB", function(_error_code, _message, _connection, _device)
- * {
- *     if (_error_code != BluetoothError.Ok)
+ * receive_buffer = buffer_create(1024, buffer_grow, 1);
+ *
+ * connection = bluetooth_classic_connect(device, "00001101-0000-1000-8000-00805F9B34FB", undefined,
+ *     function(_connection, _value, _size)
  *     {
- *         show_debug_message($"Connect failed: {_message}");
+ *         if (_connection != connection)
+ *         {
+ *             bluetooth_value_release(_value);
+ *             return;
+ *         }
+ *         if (bluetooth_value_append(_value, _size, receive_buffer) != BluetoothError.Ok)
+ *         {
+ *             show_debug_message($"Receive failed: {bluetooth_last_error_message()}");
+ *         }
+ *     },
+ *     function(_error_code, _message, _connection)
+ *     {
+ *         if (_connection != connection) return;
+ *         show_debug_message($"Connection ended: {_message}");
  *         connection = 0;
- *         exit;
- *     }
- *     show_debug_message($"Connected to {bluetooth_device_get_name(_device)}");
- * });
+ *     },
+ *     function(_error_code, _message, _connection, _device)
+ *     {
+ *         if (_connection != connection) return;
+ *         if (_error_code != BluetoothError.Ok)
+ *         {
+ *             show_debug_message($"Connect failed: {_message}");
+ *             connection = 0;
+ *             return;
+ *         }
+ *         show_debug_message($"Connected to {bluetooth_device_get_name(_device)}");
+ *     });
  *
  * if (connection == 0)
  * {
  *     show_debug_message($"Connect did not start: {bluetooth_last_error_message()}");
  * }
  * ```
- * The above code starts a connection to the Serial Port Profile service of the device stored in the
- * instance's `device` variable and keeps the returned handle in `connection`. When the callback
- * reports a failure the handle is cleared; on success the name of the device is shown with
+ * The above code creates a grow buffer for the received bytes and starts a connection to the Serial
+ * Port Profile service of the device stored in the instance's `device` variable, with the default
+ * options, keeping the returned handle in `connection`. Every callback first checks that the
+ * connection it reports is still the one stored in `connection`, so a callback for an older
+ * connection the instance has since replaced is ignored, and a chunk for such a connection is freed
+ * with ${function.bluetooth_value_release}. Each chunk for the current connection is added to the
+ * end of `receive_buffer` with ${function.bluetooth_value_append}, which grows the buffer and moves
+ * its used size. When the connect fails, or the open connection ends later, the reason is shown and
+ * the handle is cleared; on success the name of the device is shown with
  * ${function.bluetooth_device_get_name}. If the connect could not be started at all, the returned
  * handle is 0 and the reason is read with ${function.bluetooth_last_error_message}.
  * @function_end
@@ -225,12 +294,11 @@
  * @function bluetooth_classic_disconnect
  * @desc This function ends the given RFCOMM connection, whether it is still connecting or already
  * connected. The disconnect is synchronous: the handle is no longer valid when the function returns,
- * and the callback set with ${function.bluetooth_set_callback_classic_disconnected} is not called
- * for it. A connect that is still in progress is cancelled, and its callback is called once with
- * ${constant.BluetoothError}.ConnectionFailed.
+ * and the connection's `on_disconnected` callback is not called. A connect that is still in progress
+ * is cancelled, and its callback is called once with ${constant.BluetoothError}.ConnectionFailed.
  *
- * Values that the callback set with ${function.bluetooth_set_callback_classic_data} has already
- * delivered can still be fetched with ${function.bluetooth_value_fetch} after the disconnect.
+ * Values that the connection's `on_data` callback has already received can still be fetched with
+ * ${function.bluetooth_value_fetch} after the disconnect.
  *
  * The function returns a ${constant.BluetoothError}: NotInitialized before
  * ${function.bluetooth_initialize}, or InvalidHandle for a handle that is not valid, with the reason
@@ -258,11 +326,10 @@
 /**
  * @function bluetooth_classic_connection_is_valid
  * @desc This function checks whether the given RFCOMM connection handle is valid. A handle is valid
- * from the moment ${function.bluetooth_classic_connect} returns it, or the callback set with
- * ${function.bluetooth_set_callback_classic_client_connected} receives it, until the connect fails,
- * ${function.bluetooth_classic_disconnect} is called, the callback set with
- * ${function.bluetooth_set_callback_classic_disconnected} is called for it, or
- * ${function.bluetooth_shutdown} is called. Handles are never reused.
+ * from the moment ${function.bluetooth_classic_connect} returns it, or the server's `on_connected`
+ * callback receives it, until the connect fails, ${function.bluetooth_classic_disconnect} is called,
+ * the connection's `on_disconnected` callback is called, or ${function.bluetooth_shutdown} is
+ * called. Handles are never reused.
  * @param {Real} connection The connection handle to check.
  * @returns {Bool} `true` if the handle is valid, otherwise `false`.
  * @example
@@ -322,8 +389,8 @@
  * offset, to be sent over the given RFCOMM connection. The bytes are copied when you call the
  * function, so you can change or delete the buffer straight away. The function returns as soon as
  * the bytes are queued, without waiting for them to go out, and there is no callback: a send that
- * later fails ends the connection, and the callback set with
- * ${function.bluetooth_set_callback_classic_disconnected} reports the error.
+ * later fails ends the connection, and the connection's `on_disconnected` callback reports the
+ * error.
  *
  * At most 1 MiB may wait to be sent on a connection. A send that would take the queue past that
  * returns ${constant.BluetoothError}.Busy and queues nothing, so send more than that in parts and
@@ -353,14 +420,14 @@
  * buffer_write(_buffer, buffer_text, "PING\n");
  * var _size = buffer_tell(_buffer);
  *
- * var _result = bluetooth_classic_send(connection, _buffer, 0, _size);
+ * var _error = bluetooth_classic_send(connection, _buffer, 0, _size);
  * buffer_delete(_buffer);
  *
- * if (_result == BluetoothError.Busy)
+ * if (_error == BluetoothError.Busy)
  * {
  *     show_debug_message("Send queue is full, try again later");
  * }
- * else if (_result != BluetoothError.Ok)
+ * else if (_error != BluetoothError.Ok)
  * {
  *     show_debug_message($"Send failed: {bluetooth_last_error_message()}");
  * }
@@ -377,74 +444,143 @@
  * @function bluetooth_classic_server_start
  * @desc This function starts an RFCOMM server that offers a service with the given name and UUID to
  * other devices. The service is published in the SDP records of this device, so a remote device can
- * connect to it by its UUID. Every incoming connection calls the callback set with
- * ${function.bluetooth_set_callback_classic_client_connected} with its new connection handle; set
- * that callback before you start the server. Only one server can run at a time.
+ * connect to it by its UUID. Only one server can run at a time, and it keeps the given callbacks
+ * until it stops.
+ *
+ * `on_connected` is called for every incoming connection, with its new connection handle and the
+ * device that connected; the device enters the device cache without calling any scan callback. The
+ * server's `on_data` and `on_disconnected` serve every connection it accepts, as they do for
+ * ${function.bluetooth_classic_connect}: you send on such a connection with
+ * ${function.bluetooth_classic_send} and end it with ${function.bluetooth_classic_disconnect}.
+ * `on_stopped` is called once if the server ends without ${function.bluetooth_classic_server_stop},
+ * for example with ${constant.BluetoothError}.BluetoothDisabled when the radio is turned off.
  *
  * An unpaired device can only find this device with a Classic scan while it is discoverable: see
  * ${function.bluetooth_classic_discoverable_start}.
  *
  * The function returns a ${constant.BluetoothError}. When it is not
- * ${constant.BluetoothError}.Ok the server did not start, and the reason is in
- * ${function.bluetooth_last_error_code} and ${function.bluetooth_last_error_message}:
+ * ${constant.BluetoothError}.Ok the server did not start, no callback is called, and the reason is
+ * in ${function.bluetooth_last_error_code} and ${function.bluetooth_last_error_message}:
  * NotInitialized, InvalidArgument for a service UUID that is not valid, Busy while a server is
- * already running (stop it first to change its name or UUID), PermissionDenied when the Bluetooth
- * permission is missing or was refused, BluetoothDisabled when the radio is off, NotSupported where
- * the Classic server is not available, or OperationFailed when the system refused to publish the
- * service.
+ * already running (stop it first to change its name, UUID or callbacks), PermissionDenied when the
+ * Bluetooth permission is missing or was refused, BluetoothDisabled when the radio is off,
+ * NotSupported where the Classic server is not available, or OperationFailed when the system refused
+ * to publish the service.
  *
  * [[Note: On Windows and Android an empty name is published as "GMBluetooth RFCOMM", and incoming
  * links are secure (authenticated and encrypted) RFCOMM links. On Android the permission is the
  * Bluetooth connect permission. macOS has no API to require a secure link, so incoming links there
- * use the system's default security, and it returns PermissionDenied until ${function.bluetooth_permission_request}
- * has been called.]]
+ * use the system's default security, and it returns PermissionDenied until
+ * ${function.bluetooth_permission_request} has been called.]]
  * @param {String} name The name of the service, as other devices see it.
  * @param {String} service_uuid The UUID of the service, in the full 36-character form or as 4 or 8
  * hex digits.
+ * @param {Function} on_connected The function to call for each incoming connection.
+ * @param {Function} on_data The function to call for each chunk of bytes an accepted connection
+ * receives.
+ * @param {Function} on_disconnected The function to call when an accepted connection ends without
+ * ${function.bluetooth_classic_disconnect}.
+ * @param {Function} [on_stopped] The function to call when the server ends without
+ * ${function.bluetooth_classic_server_stop}, or `undefined`.
  * @returns {Enum.BluetoothError} ${constant.BluetoothError}.Ok if the server started, otherwise the
  * reason it did not.
+ * @event callback:on_connected
+ * @desc Called once for each connection the server accepts.
+ * @member {Real} connection The handle of the new connection.
+ * @member {Real} device The handle of the device that connected.
+ * @event_end
+ * @event callback:on_data
+ * @desc Called once for every chunk of bytes an accepted connection receives, in order.
+ * @member {Real} connection The handle of the connection that received the bytes.
+ * @member {Real} value The value handle that holds the bytes, for ${function.bluetooth_value_fetch}.
+ * @member {Real} size The number of bytes the value holds.
+ * @event_end
+ * @event callback:on_disconnected
+ * @desc Called once for each accepted connection that ends without
+ * ${function.bluetooth_classic_disconnect}, after its last `on_data`.
+ * @member {Enum.BluetoothError} error_code ${constant.BluetoothError}.Disconnected when the device
+ * closed the connection or its received data could not be held, ${constant.BluetoothError}.BluetoothDisabled
+ * when the radio was turned off, otherwise the error that ended it.
+ * @member {String} message A description of why the connection ended.
+ * @member {Real} connection The handle of the connection that ended.
+ * @event_end
+ * @event callback:on_stopped
+ * @desc Called once, when the server ends without ${function.bluetooth_classic_server_stop}. It is
+ * the last callback of the server itself.
+ * @member {Enum.BluetoothError} error_code The reason the server ended, such as
+ * ${constant.BluetoothError}.BluetoothDisabled when the radio was turned off.
+ * @member {String} message A description of why the server ended.
+ * @event_end
  * @example
  * ```gml
- * bluetooth_set_callback_classic_client_connected(function(_connection, _device)
- * {
- *     show_debug_message($"Client connected: {bluetooth_device_get_name(_device)}");
- *     client_connection = _connection;
- * });
+ * var _error = bluetooth_classic_server_start("My Game", "6E400001-B5A3-F393-E0A9-E50E24DCCA9E",
+ *     function(_connection, _device)
+ *     {
+ *         show_debug_message($"Client connected: {bluetooth_device_get_name(_device)}");
+ *         array_push(clients, _connection);
+ *     },
+ *     function(_connection, _value, _size)
+ *     {
+ *         if (array_get_index(clients, _connection) < 0)
+ *         {
+ *             bluetooth_value_release(_value);
+ *             return;
+ *         }
+ *         if (bluetooth_value_append(_value, _size, receive_buffer) != BluetoothError.Ok)
+ *         {
+ *             show_debug_message($"Receive failed: {bluetooth_last_error_message()}");
+ *         }
+ *     },
+ *     function(_error_code, _message, _connection)
+ *     {
+ *         var _index = array_get_index(clients, _connection);
+ *         if (_index >= 0)
+ *         {
+ *             array_delete(clients, _index, 1);
+ *         }
+ *     },
+ *     function(_error_code, _message)
+ *     {
+ *         show_debug_message($"Server ended: {_message}");
+ *     });
  *
- * var _result = bluetooth_classic_server_start("My Game", "6E400001-B5A3-F393-E0A9-E50E24DCCA9E");
- * if (_result != BluetoothError.Ok)
+ * if (_error != BluetoothError.Ok)
  * {
  *     show_debug_message($"Server did not start: {bluetooth_last_error_message()}");
  * }
  * ```
- * The above code first sets the callback that is called for each incoming connection, which keeps
- * the new connection handle in the instance's `client_connection` variable. It then starts a server
- * named "My Game" with a custom service UUID, and shows the reason in a debug message when the
- * server could not start.
+ * The above code starts a server named "My Game" with a custom service UUID. Each incoming
+ * connection is added to the instance's `clients` array, and removed again when it ends. The bytes
+ * of a connection in the array are added to the instance's `receive_buffer` with
+ * ${function.bluetooth_value_append}, and a chunk for any other connection is freed with
+ * ${function.bluetooth_value_release}. When the server ends on its own, or could not start, the
+ * reason is shown in a debug message.
  * @function_end
  */
 
 /**
  * @function bluetooth_classic_server_stop
  * @desc This function stops the running RFCOMM server: the service is removed from the SDP records
- * and no more incoming connections are accepted. Connections the server has already accepted stay
- * open; end them with ${function.bluetooth_classic_disconnect}. Stopping when no server is running
- * returns ${constant.BluetoothError}.Ok.
+ * and no more incoming connections are accepted. The server's `on_stopped` callback is not called
+ * for a stop you ask for. Connections the server has already accepted stay open and keep their
+ * `on_data` and `on_disconnected` callbacks; end them with ${function.bluetooth_classic_disconnect}.
+ * Stopping when no server is running returns ${constant.BluetoothError}.Ok.
  *
  * The function returns ${constant.BluetoothError}.NotInitialized before
  * ${function.bluetooth_initialize}, with the reason in ${function.bluetooth_last_error_message}.
- * @returns {Enum.BluetoothError} ${constant.BluetoothError}.Ok if the server is stopped, otherwise
- * the reason.
+ * @returns {Enum.BluetoothError} ${constant.BluetoothError}.Ok if the server is stopped or none was
+ * running, otherwise the reason.
  * @example
  * ```gml
  * bluetooth_classic_server_stop();
- * if (bluetooth_classic_connection_is_valid(client_connection))
+ * for (var i = 0; i < array_length(clients); i++)
  * {
- *     bluetooth_classic_disconnect(client_connection);
+ *     bluetooth_classic_disconnect(clients[i]);
  * }
+ * clients = [];
  * ```
- * The above code stops the server and then ends the connection it accepted, which is stored in the
- * instance's `client_connection` variable.
+ * The above code stops the server and then ends every connection it accepted, which are stored in
+ * the instance's `clients` array, before emptying the array.
  * @function_end
  */
 
@@ -455,12 +591,10 @@
  * @returns {Bool} `true` if the server is running, otherwise `false`.
  * @example
  * ```gml
- * if (!bluetooth_classic_server_is_running())
- * {
- *     bluetooth_classic_server_start("My Game", "6E400001-B5A3-F393-E0A9-E50E24DCCA9E");
- * }
+ * server_text = bluetooth_classic_server_is_running() ? "Waiting for players" : "Server stopped";
  * ```
- * The above code starts the server only when it is not already running.
+ * The above code sets the instance's `server_text` variable to a status string that depends on
+ * whether the server is running.
  * @function_end
  */
 
@@ -471,42 +605,66 @@
  * with ${function.bluetooth_classic_server_start}. Use ${function.bluetooth_feature_is_supported}
  * with ${constant.BluetoothFeature}.ClassicDiscoverable to check whether the platform can do this.
  *
- * The function returns a ${constant.BluetoothError}. When it is not
- * ${constant.BluetoothError}.Ok the reason is in ${function.bluetooth_last_error_code} and
- * ${function.bluetooth_last_error_message}: NotInitialized, PermissionDenied when the Bluetooth
- * permission is missing or was refused, BluetoothDisabled when the radio is off, NotSupported where
- * discoverability cannot be controlled, or OperationFailed when the system refused.
+ * The duration is clamped to 1 to 3600 seconds, and 0 or less asks for 120 seconds; there is no
+ * indefinite duration. The callback is called once: with ${constant.BluetoothError}.Ok and the
+ * duration granted, with ${constant.BluetoothError}.PermissionDenied when the user declined, or with
+ * ${constant.BluetoothError}.NotInitialized when ${function.bluetooth_shutdown} is called first.
+ * Turning the radio off ends discoverability.
  *
- * [[Note: On Windows the device becomes discoverable at once and stays so for the given duration,
- * or until ${function.bluetooth_classic_discoverable_stop} when the duration is 0 or less. Incoming
- * connections are also turned on if they were off, and turned back off when discoverability ends.
- * Calling this function again replaces the previous duration. It returns NotSupported when no
+ * The function returns a ${constant.BluetoothError}. When it is not
+ * ${constant.BluetoothError}.Ok the callback is never called, and the reason is in
+ * ${function.bluetooth_last_error_code} and ${function.bluetooth_last_error_message}:
+ * NotInitialized, PermissionDenied when the Bluetooth permission is missing or was refused,
+ * BluetoothDisabled when the radio is off, NotSupported where discoverability cannot be controlled,
+ * or OperationFailed when the system refused.
+ *
+ * [[Note: On Windows the device becomes discoverable at once, the callback is called straight away
+ * with the duration, and discoverability ends when it runs out or on
+ * ${function.bluetooth_classic_discoverable_stop}. Incoming connections are also turned on if they
+ * were off, and turned back off when discoverability ends. It returns NotSupported when no
  * Bluetooth radio is found.]]
  *
  * [[Note: On Android the user is shown a system prompt asking to make the device discoverable, and
- * ${constant.BluetoothError}.Ok only means that the prompt was shown, not that the user accepted:
- * check ${function.bluetooth_classic_discoverable_is_running}. The duration is clamped to 1 to 3600
- * seconds, and 0 or less asks for the Android default of 120 seconds; there is no indefinite
- * duration. The permission is the Bluetooth advertise permission.]]
+ * the callback reports the answer. The permission is the Bluetooth advertise permission.]]
  *
  * [[Note: macOS and iOS have no public API for this, and the function returns NotSupported.]]
- * @param {Real} duration_seconds How long the device stays discoverable (in seconds), or 0 for no
- * limit where the platform allows it.
- * @returns {Enum.BluetoothError} ${constant.BluetoothError}.Ok if the device was made discoverable
- * (or, on Android, the prompt was shown), otherwise the reason.
+ * @param {Real} duration_seconds How long the device stays discoverable (1-3600, in seconds), or 0
+ * for 120 seconds.
+ * @param {Function} callback The function to call once with the outcome.
+ * @returns {Enum.BluetoothError} ${constant.BluetoothError}.Ok if the request was made, otherwise the
+ * reason it was not.
+ * @event callback
+ * @desc Called once, when the device is discoverable, the user declined, or Bluetooth is shut down
+ * before the answer.
+ * @member {Enum.BluetoothError} error_code ${constant.BluetoothError}.Ok if the device is
+ * discoverable, otherwise the reason it is not.
+ * @member {String} message A description of the failure, or an empty string on success.
+ * @member {Real} duration_seconds The number of seconds the device stays discoverable.
+ * @event_end
  * @example
  * ```gml
  * if (bluetooth_feature_is_supported(BluetoothFeature.ClassicDiscoverable))
  * {
- *     var _result = bluetooth_classic_discoverable_start(120);
- *     if (_result != BluetoothError.Ok)
+ *     var _error = bluetooth_classic_discoverable_start(120, function(_error_code, _message, _duration_seconds)
  *     {
- *         show_debug_message($"Could not become discoverable: {bluetooth_last_error_message()}");
+ *         if (_error_code != BluetoothError.Ok)
+ *         {
+ *             show_debug_message($"Not discoverable: {_message}");
+ *             return;
+ *         }
+ *         show_debug_message($"Discoverable for {_duration_seconds} seconds");
+ *     });
+ *
+ *     if (_error != BluetoothError.Ok)
+ *     {
+ *         show_debug_message($"Could not ask to become discoverable: {bluetooth_last_error_message()}");
  *     }
  * }
  * ```
  * The above code asks for the device to be discoverable for two minutes when the platform supports
- * it, and shows the reason in a debug message when the request failed.
+ * it. The callback shows how long the device is discoverable for, or why it is not, for example when
+ * the user declined the prompt on Android. If the request could not be made, the reason is shown in
+ * a debug message.
  * @function_end
  */
 
@@ -557,198 +715,28 @@
  */
 
 /**
- * @function bluetooth_set_callback_classic_client_connected
- * @desc This function sets the function to call when a remote device connects to the RFCOMM server
- * started with ${function.bluetooth_classic_server_start}. The callback receives the handle of the
- * new connection, which you use with ${function.bluetooth_classic_send} and
- * ${function.bluetooth_classic_disconnect}, and the handle of the device that connected. Setting a
- * new function replaces the previous one.
- *
- * You can set the callback before ${function.bluetooth_initialize}, and it stays set across
- * ${function.bluetooth_shutdown}. Set it before you start the server: a connection accepted while
- * no callback is set is still made, and its data arrives through the callback set with
- * ${function.bluetooth_set_callback_classic_data}.
- * @param {Function} callback The function to call for each incoming connection.
- * @returns {Bool} Always `true`.
- * @event callback
- * @desc Called once for each connection the server accepts.
- * @member {Real} connection The handle of the new connection.
- * @member {Real} device The handle of the device that connected.
- * @event_end
- * @example
- * ```gml
- * bluetooth_set_callback_classic_client_connected(function(_connection, _device)
- * {
- *     show_debug_message($"{bluetooth_device_get_name(_device)} connected");
- *     array_push(clients, _connection);
- * });
- * ```
- * The above code sets the callback for incoming server connections. It shows the name of each
- * device that connects and adds the new connection handle to the instance's `clients` array.
- * @function_end
- */
-
-/**
- * @function bluetooth_remove_callback_classic_client_connected
- * @desc This function removes the function set with
- * ${function.bluetooth_set_callback_classic_client_connected}. The server keeps accepting
- * connections, but they are no longer reported.
- * @returns {Bool} Always `true`.
- * @example
- * ```gml
- * bluetooth_remove_callback_classic_client_connected();
- * ```
- * The above code stops incoming server connections from being reported.
- * @function_end
- */
-
-/**
- * @function bluetooth_set_callback_classic_data
- * @desc This function sets the function to call for every chunk of bytes an RFCOMM connection
- * receives, in the order they arrive. The callback receives the connection, a value handle that
- * holds the bytes, and their number. You copy the bytes into a buffer of your own with
- * ${function.bluetooth_value_fetch}, which also frees the value, or free it without copying with
- * ${function.bluetooth_value_release}. Setting a new function replaces the previous one, and you can
- * set it before ${function.bluetooth_initialize}.
- *
- * An RFCOMM connection is a stream and has no message boundaries: the bytes of one send from the
- * device may arrive in several chunks, and the bytes of several sends may arrive in one. Collect the
- * chunks in order and split them with your own framing.
- *
- * The values a connection has not fetched or released count toward its receive budget of 1 MiB.
- * While they hold more than that, Windows and Android stop reading from the device until some are
- * fetched or released, and RFCOMM flow control holds the device back. A value that is left
- * unfetched for 30 seconds expires, and the connection is then ended with
- * ${constant.BluetoothError}.Disconnected and the message "receive data expired", rather than leave
- * a gap in the stream. For a connection the device ends, the callback set with
- * ${function.bluetooth_set_callback_classic_disconnected} is called after its last chunk.
- *
- * [[Warning: While no callback is set, the bytes every connection receives are discarded.]]
- *
- * [[Note: macOS cannot pause an RFCOMM channel, so a chunk that would take the unfetched bytes past
- * 1 MiB ends the connection with ${constant.BluetoothError}.Disconnected and the message "receive
- * buffer full", after the part that fits is delivered.]]
- * @param {Function} callback The function to call for each chunk of received bytes.
- * @returns {Bool} Always `true`.
- * @event callback
- * @desc Called once for every chunk of bytes a connection receives, in order.
- * @member {Real} connection The handle of the connection that received the bytes.
- * @member {Real} value The value handle that holds the bytes, for ${function.bluetooth_value_fetch}.
- * @member {Real} size The number of bytes the value holds.
- * @event_end
- * @example
- * ```gml
- * bluetooth_set_callback_classic_data(function(_connection, _value, _size)
- * {
- *     if (receive_length + _size > buffer_get_size(receive_buffer))
- *     {
- *         buffer_resize(receive_buffer, (receive_length + _size) * 2);
- *     }
- *
- *     var _copied = bluetooth_value_fetch(_value, receive_buffer, receive_length);
- *     if (_copied < 0)
- *     {
- *         show_debug_message($"Fetch failed: {bluetooth_last_error_message()}");
- *         exit;
- *     }
- *     receive_length += _copied;
- * });
- * ```
- * The above code sets the callback for received Classic data. The instance keeps a buffer in its
- * `receive_buffer` variable and the number of bytes it holds in `receive_length`. For each chunk the
- * buffer is first made large enough with `buffer_resize`, since ${function.bluetooth_value_fetch}
- * writes straight into the buffer's memory and never grows it. The bytes are then copied to the end
- * of the data received so far and the count is advanced by the number of bytes copied. The game can
- * then look for complete messages in the first `receive_length` bytes of the buffer.
- * @function_end
- */
-
-/**
- * @function bluetooth_remove_callback_classic_data
- * @desc This function removes the function set with
- * ${function.bluetooth_set_callback_classic_data}. Note that while no callback is set, the bytes
- * every connection receives are discarded.
- * @returns {Bool} Always `true`.
- * @example
- * ```gml
- * bluetooth_remove_callback_classic_data();
- * ```
- * The above code removes the callback for received Classic data.
- * @function_end
- */
-
-/**
- * @function bluetooth_set_callback_classic_disconnected
- * @desc This function sets the function to call when an established RFCOMM connection ends without
- * ${function.bluetooth_classic_disconnect}: the device closed it, the link failed, a send failed, or
- * the connection was ended because its received data expired or, on macOS, filled the receive
- * budget (see ${function.bluetooth_set_callback_classic_data}). The callback receives the reason and
- * the connection. Setting a new function replaces the previous one, and you can set it before
- * ${function.bluetooth_initialize}.
- *
- * The callback is called after the last chunk of data the connection received, and the connection
- * handle is no longer valid once it is called; the values already delivered can still be fetched. A
- * disconnect you ask for with ${function.bluetooth_classic_disconnect} never calls it, and neither
- * does a connect that fails, which reports through the callback of
- * ${function.bluetooth_classic_connect}.
- * @param {Function} callback The function to call when a connection ends.
- * @returns {Bool} Always `true`.
- * @event callback
- * @desc Called once when an established connection ends without
- * ${function.bluetooth_classic_disconnect}.
- * @member {Enum.BluetoothError} error_code ${constant.BluetoothError}.Disconnected when the device
- * closed the connection or its received data could not be held, otherwise the error that ended it.
- * @member {String} message A description of why the connection ended.
- * @member {Real} connection The handle of the connection that ended.
- * @event_end
- * @example
- * ```gml
- * bluetooth_set_callback_classic_disconnected(function(_error_code, _message, _connection)
- * {
- *     show_debug_message($"Connection {_connection} ended: {_message}");
- *     if (_connection == connection)
- *     {
- *         connection = 0;
- *     }
- * });
- * ```
- * The above code sets the callback for connections that end on their own. It shows why the
- * connection ended and clears the instance's `connection` variable when it held that handle.
- * @function_end
- */
-
-/**
- * @function bluetooth_remove_callback_classic_disconnected
- * @desc This function removes the function set with
- * ${function.bluetooth_set_callback_classic_disconnected}. Connections that end are then no longer
- * reported, but their handles still stop being valid.
- * @returns {Bool} Always `true`.
- * @example
- * ```gml
- * bluetooth_remove_callback_classic_disconnected();
- * ```
- * The above code removes the callback for ended Classic connections.
- * @function_end
- */
-
-/**
  * @module classic
  * @title Classic
  * @desc The functions to discover Bluetooth Classic devices, open RFCOMM connections to them, run an
  * RFCOMM server, make this device discoverable, and send and receive the bytes of a connection.
  *
- * Bluetooth Classic is available on Windows, Android and macOS. On iOS the support queries return
- * `false` and the calls that start Classic work return ${constant.BluetoothError}.NotSupported. On
- * macOS Classic goes through IOBluetooth.
+ * Bluetooth Classic is available on Windows, Android and macOS. On iOS
+ * ${function.bluetooth_feature_is_supported} returns `false` for ${constant.BluetoothFeature}.Classic
+ * and ${constant.BluetoothFeature}.ClassicServer, and the calls that start Classic work return
+ * ${constant.BluetoothError}.NotSupported. On macOS Classic goes through IOBluetooth.
+ *
+ * Each call that starts something takes the functions to call for its events and keeps them until it
+ * ends: a scan its `on_found`, `on_updated` and `on_stopped`, a connection its `on_data` and
+ * `on_disconnected`, the server its `on_connected`, `on_data`, `on_disconnected` and `on_stopped`.
+ * Nothing is called for what you end yourself with a stop or a disconnect, and starting what is
+ * already running returns ${constant.BluetoothError}.Busy.
  *
  * An RFCOMM connection is a byte stream with no message boundaries. Received bytes arrive as values
- * through the callback set with ${function.bluetooth_set_callback_classic_data} and are copied with
+ * through `on_data` and are copied with ${function.bluetooth_value_append} or
  * ${function.bluetooth_value_fetch}; the failure codes are those of ${constant.BluetoothError}.
  *
  * @section_func
  * @desc These are the functions of Bluetooth Classic.
- * @ref bluetooth_classic_is_supported
- * @ref bluetooth_classic_server_is_supported
  * @ref bluetooth_classic_scan_start
  * @ref bluetooth_classic_scan_stop
  * @ref bluetooth_classic_scan_is_running
@@ -764,12 +752,6 @@
  * @ref bluetooth_classic_discoverable_start
  * @ref bluetooth_classic_discoverable_stop
  * @ref bluetooth_classic_discoverable_is_running
- * @ref bluetooth_set_callback_classic_client_connected
- * @ref bluetooth_remove_callback_classic_client_connected
- * @ref bluetooth_set_callback_classic_data
- * @ref bluetooth_remove_callback_classic_data
- * @ref bluetooth_set_callback_classic_disconnected
- * @ref bluetooth_remove_callback_classic_disconnected
  * @section_end
  *
  * @module_end

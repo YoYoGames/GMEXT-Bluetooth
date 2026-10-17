@@ -1,27 +1,25 @@
-// Inherit the parent event
+// device and owner (obj_bt_classic_client) arrive via the creation struct.
 event_inherited();
-
-address = bluetooth_device_has_address(device)
-    ? bluetooth_device_get_address(device)
-    : "<no address>";
 
 pairing_supported = bluetooth_pairing_is_supported(device);
 paired = bluetooth_device_is_paired(device);
 
-function update_text()
-{
-    var _suffix = "";
+// Reads the name and address each time: a scan can resolve the name later.
+function update_text() {
+	var _address = bluetooth_device_get_address(device);
+	if (is_undefined(_address)) {
+		_address = "<no address>";
+	}
 
-    if (paired)
-    {
-        _suffix = " [paired]";
-    }
-    else if (pairing_supported)
-    {
-        _suffix = " (right-click to pair)";
-    }
+	var _suffix = "";
 
-    text = bluetooth_device_get_name(device) + " - " + address + _suffix;
+	if (paired) {
+		_suffix = " [paired]";
+	} else if (pairing_supported) {
+		_suffix = " (right-click to pair)";
+	}
+
+	text = $"{bluetooth_device_get_name(device)} - {_address}{_suffix}";
 }
 
 update_text();

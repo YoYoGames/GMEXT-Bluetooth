@@ -4,7 +4,6 @@ package ${YYAndroidPackageName}.enums;
 
 public enum BluetoothLeSubscribeMode
 {
-    Unsubscribe((int)0),
     Notify((int)1),
     Indicate((int)2);
 
@@ -21,8 +20,6 @@ public enum BluetoothLeSubscribeMode
     {
         switch (v)
         {
-            case 0:
-                return BluetoothLeSubscribeMode.Unsubscribe;
             case 1:
                 return BluetoothLeSubscribeMode.Notify;
             case 2:

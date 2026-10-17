@@ -104,81 +104,6 @@
         },
         {
           "$GMExtensionFunction": "",
-          "%Name": "bluetooth_le_is_supported",
-          "argCount": 0,
-          "args": [],
-          "documentation": "@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_le_is_supported",
-          "help": "",
-          "hidden": false,
-          "kind": 4,
-          "name": "bluetooth_le_is_supported",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
-          "%Name": "bluetooth_le_advertise_is_supported",
-          "argCount": 0,
-          "args": [],
-          "documentation": "@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_le_advertise_is_supported",
-          "help": "",
-          "hidden": false,
-          "kind": 4,
-          "name": "bluetooth_le_advertise_is_supported",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
-          "%Name": "bluetooth_le_server_is_supported",
-          "argCount": 0,
-          "args": [],
-          "documentation": "@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_le_server_is_supported",
-          "help": "",
-          "hidden": false,
-          "kind": 4,
-          "name": "bluetooth_le_server_is_supported",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
-          "%Name": "bluetooth_classic_is_supported",
-          "argCount": 0,
-          "args": [],
-          "documentation": "@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_classic_is_supported",
-          "help": "",
-          "hidden": false,
-          "kind": 4,
-          "name": "bluetooth_classic_is_supported",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
-          "%Name": "bluetooth_classic_server_is_supported",
-          "argCount": 0,
-          "args": [],
-          "documentation": "@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_classic_server_is_supported",
-          "help": "",
-          "hidden": false,
-          "kind": 4,
-          "name": "bluetooth_classic_server_is_supported",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
           "%Name": "__bluetooth_feature_is_supported",
           "argCount": 2,
           "args": [
@@ -309,12 +234,14 @@
         {
           "$GMExtensionFunction": "",
           "%Name": "__bluetooth_classic_scan_start",
-          "argCount": 2,
+          "argCount": 4,
           "args": [
+            1,
+            2,
             1,
             2
           ],
-          "documentation": "@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
+          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
           "externalName": "__EXT_NATIVE__bluetooth_classic_scan_start",
           "help": "",
           "hidden": true,
@@ -482,31 +409,15 @@
         },
         {
           "$GMExtensionFunction": "",
-          "%Name": "__bluetooth_device_has_address",
-          "argCount": 2,
-          "args": [
-            1,
-            2
-          ],
-          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_device_has_address",
-          "help": "",
-          "hidden": true,
-          "kind": 4,
-          "name": "__bluetooth_device_has_address",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
           "%Name": "__bluetooth_device_get_address",
-          "argCount": 2,
+          "argCount": 4,
           "args": [
+            1,
+            2,
             1,
             2
           ],
-          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@returns {String}",
+          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
           "externalName": "__EXT_NATIVE__bluetooth_device_get_address",
           "help": "",
           "hidden": true,
@@ -514,40 +425,44 @@
           "name": "__bluetooth_device_get_address",
           "resourceType": "GMExtensionFunction",
           "resourceVersion": "2.0",
-          "returnType": 1
+          "returnType": 2
         },
         {
           "$GMExtensionFunction": "",
-          "%Name": "__bluetooth_device_has_rssi",
-          "argCount": 2,
+          "%Name": "__bluetooth_device_get_rssi",
+          "argCount": 4,
           "args": [
+            1,
+            2,
             1,
             2
           ],
-          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_device_has_rssi",
+          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
+          "externalName": "__EXT_NATIVE__bluetooth_device_get_rssi",
           "help": "",
           "hidden": true,
           "kind": 4,
-          "name": "__bluetooth_device_has_rssi",
+          "name": "__bluetooth_device_get_rssi",
           "resourceType": "GMExtensionFunction",
           "resourceVersion": "2.0",
           "returnType": 2
         },
         {
           "$GMExtensionFunction": "",
-          "%Name": "__bluetooth_device_get_rssi",
-          "argCount": 2,
+          "%Name": "__bluetooth_device_get_last_seen_age",
+          "argCount": 4,
           "args": [
+            1,
+            2,
             1,
             2
           ],
-          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_device_get_rssi",
+          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
+          "externalName": "__EXT_NATIVE__bluetooth_device_get_last_seen_age",
           "help": "",
           "hidden": true,
           "kind": 4,
-          "name": "__bluetooth_device_get_rssi",
+          "name": "__bluetooth_device_get_last_seen_age",
           "resourceType": "GMExtensionFunction",
           "resourceVersion": "2.0",
           "returnType": 2
@@ -771,11 +686,11 @@
           "argCount": 4,
           "args": [
             1,
-            1,
+            2,
             1,
             2
           ],
-          "documentation": "@param {String} name\r\n@param {String} service_uuid\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
+          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
           "externalName": "__EXT_NATIVE__bluetooth_classic_server_start",
           "help": "",
           "hidden": true,
@@ -821,13 +736,14 @@
         {
           "$GMExtensionFunction": "",
           "%Name": "__bluetooth_classic_discoverable_start",
-          "argCount": 3,
+          "argCount": 4,
           "args": [
+            1,
             2,
             1,
             2
           ],
-          "documentation": "@param {Real} duration_seconds\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
+          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
           "externalName": "__EXT_NATIVE__bluetooth_classic_discoverable_start",
           "help": "",
           "hidden": true,
@@ -1178,6 +1094,26 @@
         },
         {
           "$GMExtensionFunction": "",
+          "%Name": "__bluetooth_le_service_find",
+          "argCount": 4,
+          "args": [
+            1,
+            2,
+            1,
+            2
+          ],
+          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
+          "externalName": "__EXT_NATIVE__bluetooth_le_service_find",
+          "help": "",
+          "hidden": true,
+          "kind": 4,
+          "name": "__bluetooth_le_service_find",
+          "resourceType": "GMExtensionFunction",
+          "resourceVersion": "2.0",
+          "returnType": 2
+        },
+        {
+          "$GMExtensionFunction": "",
           "%Name": "__bluetooth_le_characteristics_discover",
           "argCount": 4,
           "args": [
@@ -1251,6 +1187,26 @@
           "resourceType": "GMExtensionFunction",
           "resourceVersion": "2.0",
           "returnType": 1
+        },
+        {
+          "$GMExtensionFunction": "",
+          "%Name": "__bluetooth_le_characteristic_find",
+          "argCount": 4,
+          "args": [
+            1,
+            2,
+            1,
+            2
+          ],
+          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
+          "externalName": "__EXT_NATIVE__bluetooth_le_characteristic_find",
+          "help": "",
+          "hidden": true,
+          "kind": 4,
+          "name": "__bluetooth_le_characteristic_find",
+          "resourceType": "GMExtensionFunction",
+          "resourceVersion": "2.0",
+          "returnType": 2
         },
         {
           "$GMExtensionFunction": "",
@@ -1348,6 +1304,26 @@
         },
         {
           "$GMExtensionFunction": "",
+          "%Name": "__bluetooth_le_descriptor_find",
+          "argCount": 4,
+          "args": [
+            1,
+            2,
+            1,
+            2
+          ],
+          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
+          "externalName": "__EXT_NATIVE__bluetooth_le_descriptor_find",
+          "help": "",
+          "hidden": true,
+          "kind": 4,
+          "name": "__bluetooth_le_descriptor_find",
+          "resourceType": "GMExtensionFunction",
+          "resourceVersion": "2.0",
+          "returnType": 2
+        },
+        {
+          "$GMExtensionFunction": "",
           "%Name": "__bluetooth_le_characteristic_read",
           "argCount": 4,
           "args": [
@@ -1408,6 +1384,26 @@
         },
         {
           "$GMExtensionFunction": "",
+          "%Name": "__bluetooth_le_characteristic_unsubscribe",
+          "argCount": 4,
+          "args": [
+            1,
+            2,
+            1,
+            2
+          ],
+          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
+          "externalName": "__EXT_NATIVE__bluetooth_le_characteristic_unsubscribe",
+          "help": "",
+          "hidden": true,
+          "kind": 4,
+          "name": "__bluetooth_le_characteristic_unsubscribe",
+          "resourceType": "GMExtensionFunction",
+          "resourceVersion": "2.0",
+          "returnType": 2
+        },
+        {
+          "$GMExtensionFunction": "",
           "%Name": "__bluetooth_le_descriptor_read",
           "argCount": 4,
           "args": [
@@ -1449,12 +1445,14 @@
         {
           "$GMExtensionFunction": "",
           "%Name": "__bluetooth_value_fetch",
-          "argCount": 2,
+          "argCount": 4,
           "args": [
+            1,
+            2,
             1,
             2
           ],
-          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@returns {Real}",
+          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
           "externalName": "__EXT_NATIVE__bluetooth_value_fetch",
           "help": "",
           "hidden": true,
@@ -1540,12 +1538,14 @@
         {
           "$GMExtensionFunction": "",
           "%Name": "__bluetooth_le_server_start",
-          "argCount": 2,
+          "argCount": 4,
           "args": [
+            1,
+            2,
             1,
             2
           ],
-          "documentation": "@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
+          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
           "externalName": "__EXT_NATIVE__bluetooth_le_server_start",
           "help": "",
           "hidden": true,
@@ -1648,6 +1648,26 @@
         },
         {
           "$GMExtensionFunction": "",
+          "%Name": "__bluetooth_le_server_respond_read_error",
+          "argCount": 4,
+          "args": [
+            1,
+            2,
+            1,
+            2
+          ],
+          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@param {Pointer} _ret_buffer\r\n@param {Real} _ret_buffer_length\r\n@returns {Real}",
+          "externalName": "__EXT_NATIVE__bluetooth_le_server_respond_read_error",
+          "help": "",
+          "hidden": true,
+          "kind": 4,
+          "name": "__bluetooth_le_server_respond_read_error",
+          "resourceType": "GMExtensionFunction",
+          "resourceVersion": "2.0",
+          "returnType": 2
+        },
+        {
+          "$GMExtensionFunction": "",
           "%Name": "__bluetooth_le_server_respond_write",
           "argCount": 4,
           "args": [
@@ -1715,336 +1735,6 @@
           "hidden": false,
           "kind": 4,
           "name": "bluetooth_remove_callback_state_changed",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
-          "%Name": "__bluetooth_set_callback_device_found",
-          "argCount": 2,
-          "args": [
-            1,
-            2
-          ],
-          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_set_callback_device_found",
-          "help": "",
-          "hidden": true,
-          "kind": 4,
-          "name": "__bluetooth_set_callback_device_found",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
-          "%Name": "bluetooth_remove_callback_device_found",
-          "argCount": 0,
-          "args": [],
-          "documentation": "@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_remove_callback_device_found",
-          "help": "",
-          "hidden": false,
-          "kind": 4,
-          "name": "bluetooth_remove_callback_device_found",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
-          "%Name": "__bluetooth_set_callback_scan_stopped",
-          "argCount": 2,
-          "args": [
-            1,
-            2
-          ],
-          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_set_callback_scan_stopped",
-          "help": "",
-          "hidden": true,
-          "kind": 4,
-          "name": "__bluetooth_set_callback_scan_stopped",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
-          "%Name": "bluetooth_remove_callback_scan_stopped",
-          "argCount": 0,
-          "args": [],
-          "documentation": "@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_remove_callback_scan_stopped",
-          "help": "",
-          "hidden": false,
-          "kind": 4,
-          "name": "bluetooth_remove_callback_scan_stopped",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
-          "%Name": "__bluetooth_set_callback_classic_client_connected",
-          "argCount": 2,
-          "args": [
-            1,
-            2
-          ],
-          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_set_callback_classic_client_connected",
-          "help": "",
-          "hidden": true,
-          "kind": 4,
-          "name": "__bluetooth_set_callback_classic_client_connected",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
-          "%Name": "bluetooth_remove_callback_classic_client_connected",
-          "argCount": 0,
-          "args": [],
-          "documentation": "@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_remove_callback_classic_client_connected",
-          "help": "",
-          "hidden": false,
-          "kind": 4,
-          "name": "bluetooth_remove_callback_classic_client_connected",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
-          "%Name": "__bluetooth_set_callback_classic_data",
-          "argCount": 2,
-          "args": [
-            1,
-            2
-          ],
-          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_set_callback_classic_data",
-          "help": "",
-          "hidden": true,
-          "kind": 4,
-          "name": "__bluetooth_set_callback_classic_data",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
-          "%Name": "bluetooth_remove_callback_classic_data",
-          "argCount": 0,
-          "args": [],
-          "documentation": "@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_remove_callback_classic_data",
-          "help": "",
-          "hidden": false,
-          "kind": 4,
-          "name": "bluetooth_remove_callback_classic_data",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
-          "%Name": "__bluetooth_set_callback_classic_disconnected",
-          "argCount": 2,
-          "args": [
-            1,
-            2
-          ],
-          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_set_callback_classic_disconnected",
-          "help": "",
-          "hidden": true,
-          "kind": 4,
-          "name": "__bluetooth_set_callback_classic_disconnected",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
-          "%Name": "bluetooth_remove_callback_classic_disconnected",
-          "argCount": 0,
-          "args": [],
-          "documentation": "@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_remove_callback_classic_disconnected",
-          "help": "",
-          "hidden": false,
-          "kind": 4,
-          "name": "bluetooth_remove_callback_classic_disconnected",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
-          "%Name": "__bluetooth_set_callback_le_disconnected",
-          "argCount": 2,
-          "args": [
-            1,
-            2
-          ],
-          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_set_callback_le_disconnected",
-          "help": "",
-          "hidden": true,
-          "kind": 4,
-          "name": "__bluetooth_set_callback_le_disconnected",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
-          "%Name": "bluetooth_remove_callback_le_disconnected",
-          "argCount": 0,
-          "args": [],
-          "documentation": "@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_remove_callback_le_disconnected",
-          "help": "",
-          "hidden": false,
-          "kind": 4,
-          "name": "bluetooth_remove_callback_le_disconnected",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
-          "%Name": "__bluetooth_set_callback_le_characteristic_value_changed",
-          "argCount": 2,
-          "args": [
-            1,
-            2
-          ],
-          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_set_callback_le_characteristic_value_changed",
-          "help": "",
-          "hidden": true,
-          "kind": 4,
-          "name": "__bluetooth_set_callback_le_characteristic_value_changed",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
-          "%Name": "bluetooth_remove_callback_le_characteristic_value_changed",
-          "argCount": 0,
-          "args": [],
-          "documentation": "@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_remove_callback_le_characteristic_value_changed",
-          "help": "",
-          "hidden": false,
-          "kind": 4,
-          "name": "bluetooth_remove_callback_le_characteristic_value_changed",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
-          "%Name": "__bluetooth_set_callback_le_server_connection_state_changed",
-          "argCount": 2,
-          "args": [
-            1,
-            2
-          ],
-          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_set_callback_le_server_connection_state_changed",
-          "help": "",
-          "hidden": true,
-          "kind": 4,
-          "name": "__bluetooth_set_callback_le_server_connection_state_changed",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
-          "%Name": "bluetooth_remove_callback_le_server_connection_state_changed",
-          "argCount": 0,
-          "args": [],
-          "documentation": "@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_remove_callback_le_server_connection_state_changed",
-          "help": "",
-          "hidden": false,
-          "kind": 4,
-          "name": "bluetooth_remove_callback_le_server_connection_state_changed",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
-          "%Name": "__bluetooth_set_callback_le_server_read_request",
-          "argCount": 2,
-          "args": [
-            1,
-            2
-          ],
-          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_set_callback_le_server_read_request",
-          "help": "",
-          "hidden": true,
-          "kind": 4,
-          "name": "__bluetooth_set_callback_le_server_read_request",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
-          "%Name": "bluetooth_remove_callback_le_server_read_request",
-          "argCount": 0,
-          "args": [],
-          "documentation": "@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_remove_callback_le_server_read_request",
-          "help": "",
-          "hidden": false,
-          "kind": 4,
-          "name": "bluetooth_remove_callback_le_server_read_request",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
-          "%Name": "__bluetooth_set_callback_le_server_write_request",
-          "argCount": 2,
-          "args": [
-            1,
-            2
-          ],
-          "documentation": "@param {Pointer} _arg_buffer\r\n@param {Real} _arg_buffer_length\r\n@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_set_callback_le_server_write_request",
-          "help": "",
-          "hidden": true,
-          "kind": 4,
-          "name": "__bluetooth_set_callback_le_server_write_request",
-          "resourceType": "GMExtensionFunction",
-          "resourceVersion": "2.0",
-          "returnType": 2
-        },
-        {
-          "$GMExtensionFunction": "",
-          "%Name": "bluetooth_remove_callback_le_server_write_request",
-          "argCount": 0,
-          "args": [],
-          "documentation": "@returns {Real}",
-          "externalName": "__EXT_NATIVE__bluetooth_remove_callback_le_server_write_request",
-          "help": "",
-          "hidden": false,
-          "kind": 4,
-          "name": "bluetooth_remove_callback_le_server_write_request",
           "resourceType": "GMExtensionFunction",
           "resourceVersion": "2.0",
           "returnType": 2

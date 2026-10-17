@@ -17,7 +17,7 @@ These are runtime permissions, so the player must also grant them: call ${functi
 
 Because `BLUETOOTH_SCAN` is declared with `neverForLocation`, a scan on Android 12 and above never asks for location and cannot be used to derive the player's location. On Android 11 and below, a scan needs the location permission **and** the system Location setting switched on; with Location off, ${function.bluetooth_le_scan_start} and ${function.bluetooth_classic_scan_start} fail with ${constant.BluetoothError}.PermissionDenied and a message that says so.
 
-The extension also declares Bluetooth and Bluetooth LE as optional hardware features, so Google Play does not hide your game from devices without them. On such a device the `*_is_supported` functions return `false`.
+The extension also declares Bluetooth and Bluetooth LE as optional hardware features, so Google Play does not hide your game from devices without them. On such a device ${function.bluetooth_feature_is_supported} returns `false` for the features the device lacks.
 
 [[Note: Android allows an app to start an LE scan at most five times in 30 seconds. A sixth start succeeds but finds nothing, so you should keep a scan running rather than restarting it often.]]
 

@@ -7,10 +7,12 @@ import ${YYAndroidPackageName}.GMExtWire.GMValue;
 import ${YYAndroidPackageName}.codecs.*;
 
 import java.nio.ByteBuffer;
+import java.util.Optional;
+import java.util.List;
 
-public record BluetoothLeDescriptorDefinition(String uuid) implements GMExtWire.ITypedStruct
+public record BluetoothLeDescriptorDefinition(String uuid, java.util.Optional<java.util.List<Byte>> value) implements GMExtWire.ITypedStruct
 {
-    public static final int CODEC_ID = 0;
+    public static final int CODEC_ID = 1;
     @Override
     public void encode(GMExtWire.IByteWriter b)
     {

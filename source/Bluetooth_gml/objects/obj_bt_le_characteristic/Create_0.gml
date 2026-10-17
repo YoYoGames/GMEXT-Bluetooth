@@ -1,4 +1,4 @@
-// characteristic, service_uuid and properties arrive through the creation struct.
+// characteristic and properties arrive through the creation struct.
 
 uuid = bluetooth_le_characteristic_get_uuid(characteristic);
 

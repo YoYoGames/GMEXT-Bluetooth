@@ -1,16 +1,8 @@
 if (!bt_ready) exit;
 
-if (bluetooth_le_advertise_is_running())
-{
-    bluetooth_le_advertise_stop();
+// Stopping the server also ends advertising and retires every central. What
+// the game stops fires no event, and a callback already queued finds
+// callback_ctx.owner gone and does nothing.
+if (server_started) {
+	bluetooth_le_server_stop();
 }
-
-if (server_started)
-{
-    bluetooth_le_server_clear_services();
-    bluetooth_le_server_stop();
-}
-
-bluetooth_remove_callback_le_server_connection_state_changed();
-bluetooth_remove_callback_le_server_write_request();
-bluetooth_remove_callback_le_server_read_request();

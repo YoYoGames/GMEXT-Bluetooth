@@ -36,7 +36,7 @@ var _buffered_bytes = 0;
 
 if (instance_exists(conn_inst))
 {
-    _buffered_bytes = conn_inst.recv_buffer_size;
+    _buffered_bytes = buffer_get_used_size(conn_inst.recv_buffer);
 
     if (conn_inst.has_remote)
     {

@@ -12,7 +12,7 @@ import java.util.List;
 
 public record BluetoothLeAdvertisement(java.util.List<String> service_uuids, java.util.List<BluetoothLeAdvertiseServiceData> service_data, java.util.List<BluetoothLeAdvertiseManufacturerData> manufacturer_data, java.util.Optional<Integer> tx_power) implements GMExtWire.ITypedStruct
 {
-    public static final int CODEC_ID = 7;
+    public static final int CODEC_ID = 10;
     @Override
     public void encode(GMExtWire.IByteWriter b)
     {

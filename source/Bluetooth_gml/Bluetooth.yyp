@@ -78,6 +78,7 @@
     {"id":{"name":"ExtensionCore_api","path":"scripts/ExtensionCore_api/ExtensionCore_api.yy",},},
     {"id":{"name":"ExtensionCore_exports","path":"scripts/ExtensionCore_exports/ExtensionCore_exports.yy",},},
     {"id":{"name":"GMBluetooth_API","path":"scripts/GMBluetooth_API/GMBluetooth_API.yy",},},
+    {"id":{"name":"GMBluetooth_helpers","path":"scripts/GMBluetooth_helpers/GMBluetooth_helpers.yy",},},
     {"id":{"name":"spr_gm_background","path":"sprites/spr_gm_background/spr_gm_background.yy",},},
     {"id":{"name":"spr_gm_button","path":"sprites/spr_gm_button/spr_gm_button.yy",},},
   ],

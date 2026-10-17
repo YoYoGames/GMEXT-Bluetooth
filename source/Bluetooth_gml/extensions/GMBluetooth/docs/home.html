@@ -781,7 +781,7 @@
 <h1 id="bluetooth"><strong>Bluetooth</strong><a class="headerlink" href="#bluetooth" title="Permanent link">&para;</a></h1>
 <h2 id="extensions-features">Extension's Features<a class="headerlink" href="#extensions-features" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Scan for Bluetooth Low Energy (LE) devices, with filters, and read their advertisements</li>
+<li>Scan for Bluetooth Low Energy (LE) devices, with filters on services, names and advertised data, and read their advertisements</li>
 <li>Connect to LE devices as a client and discover, read, write and subscribe to their GATT services, characteristics and descriptors</li>
 <li>Run a GATT server of your own, advertise it, and answer the read and write requests of connected devices</li>
 <li>Scan for, connect to and host Bluetooth Classic (RFCOMM) serial connections</li>
@@ -791,9 +791,9 @@
 <h2 id="introduction">Introduction<a class="headerlink" href="#introduction" title="Permanent link">&para;</a></h2>
 <p>This extension gives you access to Bluetooth on <strong>Windows, macOS, iOS and Android</strong> through one API.
 Bluetooth Low Energy works on all four platforms. Bluetooth Classic works on Windows, Android and
-macOS; on iOS <a href="classic.html#bluetooth_classic_is_supported">bluetooth_classic_is_supported</a> returns <code>false</code> and the Classic functions
-that start something fail with <a href="core.html#bluetootherror">BluetoothError</a>.NotSupported. The extension requires
-GameMaker 2026.0 or later.</p>
+macOS; on iOS <a href="core.html#bluetooth_feature_is_supported">bluetooth_feature_is_supported</a> returns <code>false</code> for
+<a href="core.html#bluetoothfeature">BluetoothFeature</a>.Classic and the Classic functions that start something fail with
+<a href="core.html#bluetootherror">BluetoothError</a>.NotSupported. The extension requires GameMaker 2026.0 or later.</p>
 <p>Not every platform can do everything: advertising, for example, is limited to a subset of the
 advertisement on Apple platforms. You should call <a href="core.html#bluetooth_feature_is_supported">bluetooth_feature_is_supported</a> after
 <a href="core.html#bluetooth_initialize">bluetooth_initialize</a> to find out what the current platform and adapter can do, rather
@@ -808,12 +808,25 @@ starts, such as an invalid handle, a missing permission or the radio being off, 
 is not <code>Ok</code> its callback is never called. You can read the reason with
 <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>. Once the operation has started, the callback is called
 exactly once, and its first two arguments are an <code>error_code</code> and a <code>message</code> describing the
-outcome. The two connect functions are the exception to the first rule: they return a connection
-handle, or 0 when the connect did not start.</p>
+outcome. The functions that return a handle are the exception to the first rule: the two connect
+functions, <a href="devices.html#bluetooth_device_from_id">bluetooth_device_from_id</a> and the three find functions return 0 when they
+fail.</p>
+<p>Events belong to the call that starts what they are about. A scan, a connection, a subscription,
+an advertisement and each server take the functions to call for their events as arguments, such as
+<code>on_found</code> or <code>on_disconnected</code>, and keep them until they end; <code>on_stopped</code> or <code>on_disconnected</code> is
+the last event of each. The only global callback is the adapter state callback, set with
+<a href="core.html#bluetooth_set_callback_state_changed">bluetooth_set_callback_state_changed</a>. Starting something that is already running
+returns <a href="core.html#bluetootherror">BluetoothError</a>.Busy, and stopping something that is not running returns
+<a href="core.html#bluetootherror">BluetoothError</a>.Ok and does nothing.</p>
+<p>What the game ends fires no event: a stop or a disconnect you ask for takes effect when the call
+returns, and no <code>on_stopped</code> or <code>on_disconnected</code> is called for it. When the radio is turned off,
+everything running ends and reports <a href="core.html#bluetootherror">BluetoothError</a>.BluetoothDisabled through those
+callbacks, and nothing restarts when the radio comes back (see <a href="core.html#bluetoothstate">BluetoothState</a>).</p>
 <p>Devices, connections and GATT attributes are all identified by handles, which are numbers that the
 extension gives you. Byte data that arrives from a device is held by the extension and given to you
 as a value handle and a size, which you copy into a buffer of your own with
-<a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a>.</p>
+<a href="core.html#bluetooth_value_fetch">bluetooth_value_fetch</a>, or with the GML helpers <a href="core.html#bluetooth_value_to_buffer">bluetooth_value_to_buffer</a>
+and <a href="core.html#bluetooth_value_append">bluetooth_value_append</a> that ship with the extension.</p>
 <h2 id="guides">Guides<a class="headerlink" href="#guides" title="Permanent link">&para;</a></h2>
 <p>Guides for the Bluetooth extension.</p>
 <ul>

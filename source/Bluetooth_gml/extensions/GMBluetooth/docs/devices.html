@@ -645,17 +645,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#bluetooth_device_has_address" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        bluetooth_device_has_address
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#bluetooth_device_get_address" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -667,10 +656,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#bluetooth_device_has_rssi" class="md-nav__link">
+  <a href="#bluetooth_device_get_rssi" class="md-nav__link">
     <span class="md-ellipsis">
       
-        bluetooth_device_has_rssi
+        bluetooth_device_get_rssi
       
     </span>
   </a>
@@ -678,10 +667,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#bluetooth_device_get_rssi" class="md-nav__link">
+  <a href="#bluetooth_device_get_last_seen_age" class="md-nav__link">
     <span class="md-ellipsis">
       
-        bluetooth_device_get_rssi
+        bluetooth_device_get_last_seen_age
       
     </span>
   </a>
@@ -748,50 +737,6 @@
     <span class="md-ellipsis">
       
         bluetooth_device_is_paired
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#bluetooth_set_callback_device_found" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        bluetooth_set_callback_device_found
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#bluetooth_remove_callback_device_found" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        bluetooth_remove_callback_device_found
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#bluetooth_set_callback_scan_stopped" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        bluetooth_set_callback_scan_stopped
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#bluetooth_remove_callback_scan_stopped" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        bluetooth_remove_callback_scan_stopped
       
     </span>
   </a>
@@ -1059,17 +1004,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#bluetooth_device_has_address" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        bluetooth_device_has_address
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#bluetooth_device_get_address" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1081,10 +1015,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#bluetooth_device_has_rssi" class="md-nav__link">
+  <a href="#bluetooth_device_get_rssi" class="md-nav__link">
     <span class="md-ellipsis">
       
-        bluetooth_device_has_rssi
+        bluetooth_device_get_rssi
       
     </span>
   </a>
@@ -1092,10 +1026,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#bluetooth_device_get_rssi" class="md-nav__link">
+  <a href="#bluetooth_device_get_last_seen_age" class="md-nav__link">
     <span class="md-ellipsis">
       
-        bluetooth_device_get_rssi
+        bluetooth_device_get_last_seen_age
       
     </span>
   </a>
@@ -1169,50 +1103,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#bluetooth_set_callback_device_found" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        bluetooth_set_callback_device_found
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#bluetooth_remove_callback_device_found" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        bluetooth_remove_callback_device_found
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#bluetooth_set_callback_scan_stopped" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        bluetooth_set_callback_scan_stopped
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#bluetooth_remove_callback_scan_stopped" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        bluetooth_remove_callback_scan_stopped
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#bluetoothleadvertisement" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1246,17 +1136,19 @@
 <p><a id="top"></a></p>
 <h1 id="devices"><strong>Devices</strong><a class="headerlink" href="#devices" title="Permanent link">&para;</a></h1>
 <p>The device cache that LE and Classic scans fill, and the functions to read the devices in
-it, get a device back from a saved id, list and pair devices, and hear about new devices and
-stopped scans.</p>
+it, get a device back from a saved id, and list and pair devices.</p>
 <p>Scans are started with <a href="le_client.html#bluetooth_le_scan_start">bluetooth_le_scan_start</a> and
-<a href="classic.html#bluetooth_classic_scan_start">bluetooth_classic_scan_start</a>. Every device they find is added to one shared cache and
-given a device handle, a number that stays valid until <a href="devices.html#bluetooth_device_clear">bluetooth_device_clear</a> or
-<a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a> empties the cache. Handles are never reused. To remember a device
-between runs of the game, store its id from <a href="devices.html#bluetooth_device_get_id">bluetooth_device_get_id</a> and get a handle
-back with <a href="devices.html#bluetooth_device_from_id">bluetooth_device_from_id</a>.</p>
+<a href="classic.html#bluetooth_classic_scan_start">bluetooth_classic_scan_start</a>, which pass each device to their own <code>on_found</code> callback
+the first time that scan sees it, also a device already cached by an earlier scan, and its later
+advertisements or answers to <code>on_updated</code>. Every device is added to one shared cache and given a
+device handle, a number
+that stays valid until <a href="devices.html#bluetooth_device_clear">bluetooth_device_clear</a> or <a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a> empties
+the cache. Handles are never reused. A device only reaches the running scan of its own transport,
+and a device that enters the cache in any other way (from an id, a query or an incoming connection)
+calls no scan callback. To remember a device between runs of the game, store its id from
+<a href="devices.html#bluetooth_device_get_id">bluetooth_device_get_id</a> and get a handle back with <a href="devices.html#bluetooth_device_from_id">bluetooth_device_from_id</a>.</p>
 <h2 id="functions">Functions<a class="headerlink" href="#functions" title="Permanent link">&para;</a></h2>
-<p>These are the functions to manage and read the device cache, to pair devices, and to be told
-about new devices and stopped scans.</p>
+<p>These are the functions to manage and read the device cache and to pair devices.</p>
 <ul>
 <li><a href="devices.html#bluetooth_device_clear">bluetooth_device_clear</a></li>
 <li><a href="devices.html#bluetooth_device_get_count">bluetooth_device_get_count</a></li>
@@ -1266,20 +1158,15 @@ about new devices and stopped scans.</p>
 <li><a href="devices.html#bluetooth_device_get_transport">bluetooth_device_get_transport</a></li>
 <li><a href="devices.html#bluetooth_device_get_id">bluetooth_device_get_id</a></li>
 <li><a href="devices.html#bluetooth_device_get_name">bluetooth_device_get_name</a></li>
-<li><a href="devices.html#bluetooth_device_has_address">bluetooth_device_has_address</a></li>
 <li><a href="devices.html#bluetooth_device_get_address">bluetooth_device_get_address</a></li>
-<li><a href="devices.html#bluetooth_device_has_rssi">bluetooth_device_has_rssi</a></li>
 <li><a href="devices.html#bluetooth_device_get_rssi">bluetooth_device_get_rssi</a></li>
+<li><a href="devices.html#bluetooth_device_get_last_seen_age">bluetooth_device_get_last_seen_age</a></li>
 <li><a href="devices.html#bluetooth_device_is_connectable">bluetooth_device_is_connectable</a></li>
 <li><a href="devices.html#bluetooth_device_get_advertisement">bluetooth_device_get_advertisement</a></li>
 <li><a href="devices.html#bluetooth_paired_devices_query">bluetooth_paired_devices_query</a></li>
 <li><a href="devices.html#bluetooth_pairing_is_supported">bluetooth_pairing_is_supported</a></li>
 <li><a href="devices.html#bluetooth_pair">bluetooth_pair</a></li>
 <li><a href="devices.html#bluetooth_device_is_paired">bluetooth_device_is_paired</a></li>
-<li><a href="devices.html#bluetooth_set_callback_device_found">bluetooth_set_callback_device_found</a></li>
-<li><a href="devices.html#bluetooth_remove_callback_device_found">bluetooth_remove_callback_device_found</a></li>
-<li><a href="devices.html#bluetooth_set_callback_scan_stopped">bluetooth_set_callback_scan_stopped</a></li>
-<li><a href="devices.html#bluetooth_remove_callback_scan_stopped">bluetooth_remove_callback_scan_stopped</a></li>
 </ul>
 <h2 id="structs">Structs<a class="headerlink" href="#structs" title="Permanent link">&para;</a></h2>
 <p>This is the struct used by the device cache.</p>
@@ -1295,9 +1182,8 @@ about new devices and stopped scans.</p>
 invalid, and <a href="devices.html#bluetooth_device_get_count">bluetooth_device_get_count</a> returns 0 afterwards.</p>
 <p>The cache keeps every device seen since the last clear, whichever scan found it, so you should
 call this function from time to time during a long scan in a busy place. Device handles are never
-reused: a device found again after the clear enters the cache under a new handle, and the
-device_found callback set with <a href="devices.html#bluetooth_set_callback_device_found">bluetooth_set_callback_device_found</a> is called for it
-again. An old handle can therefore never name a different device.</p>
+reused: a device seen again after the clear enters the cache under a new handle, which the running
+scan reports. An old handle can therefore never name a different device.</p>
 <p>Clearing the cache does not close anything. A connection made to a device stays open, and a
 pairing still in progress still calls its callback with the old handle, but the device getters
 return their empty values for that handle from now on.</p>
@@ -1318,11 +1204,10 @@ return their empty values for that handle from now on.</p>
 <p><br></p>
 <p><strong>Example:</strong></p>
 <p><pre class="highlight"><code class="language-gml">bluetooth_device_clear();
-devices = [];
-bluetooth_le_scan_start(true, []);</code></pre>
-The above code empties the device cache and the instance's own <code>devices</code> array before it starts a
-new LE scan with <a href="le_client.html#bluetooth_le_scan_start">bluetooth_le_scan_start</a>, so every device the scan reports gets a new
-handle.</p>
+devices = [];</code></pre>
+The above code empties the device cache and the instance's own <code>devices</code> array. A scan that is
+running keeps running and reports each device it sees again under a new handle, so the <code>devices</code>
+array can fill up again with valid handles.</p>
 <p><br></p>
 <hr />
 <p align="right"><a href="#top">Back To Top</a></p>
@@ -1332,7 +1217,7 @@ handle.</p>
 device found by an LE or a Classic scan since the last call to <a href="devices.html#bluetooth_device_clear">bluetooth_device_clear</a>,
 as well as the devices added by <a href="devices.html#bluetooth_device_from_id">bluetooth_device_from_id</a>, by
 <a href="devices.html#bluetooth_paired_devices_query">bluetooth_paired_devices_query</a> and <a href="le_client.html#bluetooth_le_connected_devices_query">bluetooth_le_connected_devices_query</a>,
-and the centrals that connect to the LE server.</p>
+and the devices that connect to the LE or Classic server.</p>
 <p><br></p>
 <p><strong>Syntax:</strong></p>
 <blockquote>
@@ -1444,15 +1329,18 @@ names a cached device.</p>
 
 <h1 id="bluetooth_device_from_id">bluetooth_device_from_id<a class="headerlink" href="#bluetooth_device_from_id" title="Permanent link">&para;</a></h1>
 <p>This function returns the handle of the device that the given id names. The id is one that
-<a href="devices.html#bluetooth_device_get_id">bluetooth_device_get_id</a> returned, possibly in an earlier run of the game, so you can
-store it and use this function to reconnect to the same device later without scanning for it.</p>
+<a href="devices.html#bluetooth_device_get_id">bluetooth_device_get_id</a> returned, possibly in an earlier run of the game or on another
+platform, so you can store it and use this function to connect to the same device later without
+scanning for it.</p>
 <p>A device already in the cache keeps its handle and that handle is returned. Otherwise the device
-enters the cache under a new handle without calling the device_found callback, and its name is an
-empty string until the platform knows it.</p>
-<p>The function returns 0 when it cannot make a handle, and the reason is then in
+enters the cache under a new handle without calling any scan callback, and its name is an empty
+string until the platform knows it.</p>
+<p>Every platform reads every form of id, but not every platform can use every form. The function
+returns 0 when it cannot make a handle, and the reason is then in
 <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>:
-NotInitialized, or InvalidArgument for a malformed id or an id issued by another platform (a
-Windows id on Android, for example).</p>
+NotInitialized before <a href="core.html#bluetooth_initialize">bluetooth_initialize</a>, or InvalidArgument for a malformed id or
+one this platform cannot address, with a message that says why: an <code>le:apple:</code> id on Windows or
+Android, or an id holding an LE address on macOS or iOS.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>On Apple platforms an LE id names a peripheral that CoreBluetooth must already know: the
@@ -1462,7 +1350,8 @@ know, and PermissionDenied until <a href="core.html#bluetooth_permission_request
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>On Android the function fails with NotSupported on a device with no Bluetooth adapter,
-and with OperationFailed when the device cannot be added to the cache.</p>
+and with OperationFailed when the device cannot be added to the cache. From Android 13 a device
+whose id holds the address type (<code>le:public:</code> or <code>le:random:</code>) is connected with that type.</p>
 </div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
@@ -1504,10 +1393,17 @@ if (_device == 0)
     show_debug_message($"Unknown device: {bluetooth_last_error_message()}");
     exit;
 }
-connection = bluetooth_le_connect(_device, on_connected);</code></pre>
+
+connection = bluetooth_le_connect(_device, undefined, on_disconnected, on_connected);
+if (connection == 0)
+{
+    show_debug_message($"Connect did not start: {bluetooth_last_error_message()}");
+}</code></pre>
 The above code turns the id stored in the instance's <code>saved_id</code> variable back into a device handle
-and connects to it with <a href="le_client.html#bluetooth_le_connect">bluetooth_le_connect</a>, without a scan. If the id cannot be used,
-the reason is shown with <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>.</p>
+and connects to it with <a href="le_client.html#bluetooth_le_connect">bluetooth_le_connect</a>, without a scan, passing the instance's
+own <code>on_disconnected</code> and <code>on_connected</code> methods as the connection's callbacks. If the id cannot
+be used, or the connect cannot start, the reason is shown with
+<a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>.</p>
 <p><br></p>
 <hr />
 <p align="right"><a href="#top">Back To Top</a></p>
@@ -1552,10 +1448,10 @@ transport, each with its own handle and id.</p>
 <p><strong>Example:</strong></p>
 <p><pre class="highlight"><code class="language-gml">if (bluetooth_device_get_transport(device) == BluetoothTransport.Classic)
 {
-    bluetooth_classic_connect(device, service_uuid, on_connected);
+    connection = bluetooth_classic_connect(device, service_uuid, undefined, on_data, on_disconnected, on_connected);
 }</code></pre>
 The above code connects with <a href="classic.html#bluetooth_classic_connect">bluetooth_classic_connect</a> only when the device is a
-Classic device.</p>
+Classic device, passing the instance's own methods as the connection's callbacks.</p>
 <p><br></p>
 <hr />
 <p align="right"><a href="#top">Back To Top</a></p>
@@ -1563,20 +1459,22 @@ Classic device.</p>
 <h1 id="bluetooth_device_get_id">bluetooth_device_get_id<a class="headerlink" href="#bluetooth_device_get_id" title="Permanent link">&para;</a></h1>
 <p>This function returns the id of the given device, a string you can store and later pass to
 <a href="devices.html#bluetooth_device_from_id">bluetooth_device_from_id</a> to get the device back without a scan. It returns an empty
-string for a handle that is not valid.</p>
-<p>The id is opaque and specific to the platform: you should not parse it or assume it holds a MAC
-address. Each platform prefixes its ids with its own name and the transport, so an id from one
-platform is refused on another:</p>
+string for a handle that is not valid and for a device with no address.</p>
+<p>The id has the same form on every platform that can address the device, with the address written
+as <code>AA:BB:CC:DD:EE:FF</code> in uppercase:</p>
 <ul>
-<li>Windows: <code>win:ble:</code> or <code>win:classic:</code> followed by the device address.</li>
-<li>Android: <code>android:ble:</code> or <code>android:classic:</code> followed by the device address.</li>
-<li>macOS and iOS: <code>apple:ble:</code> followed by the identifier CoreBluetooth assigned to the peripheral,
-  or on macOS <code>apple:classic:</code> followed by the device address.</li>
+<li><code>classic:</code> followed by the address, for a Classic device.</li>
+<li><code>le:public:</code> or <code>le:random:</code> followed by the address, for an LE device whose address type the
+  platform knows.</li>
+<li><code>le:</code> followed by the address, for an LE device whose address type the platform does not know,
+  as on Android before Android 15.</li>
+<li><code>le:apple:</code> followed by the identifier CoreBluetooth assigned to the peripheral, for an LE device
+  on macOS and iOS, which never expose an LE address.</li>
 </ul>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>CoreBluetooth makes up the identifier of an LE peripheral itself, so an Apple LE id only
-names the device on the system that issued it.</p>
+<p>CoreBluetooth makes up the identifier of an LE peripheral itself, so an <code>le:apple:</code> id only
+names the device on the system that issued it, and Windows and Android cannot use it.</p>
 </div>
 <p><br></p>
 <p><strong>Syntax:</strong></p>
@@ -1604,21 +1502,23 @@ names the device on the system that issued it.</p>
 <blockquote>
 <p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></p>
 </blockquote>
-<p>The id of the device, or an empty string if the handle is not valid.</p>
+<p>The id of the device, or an empty string if the handle is not valid or the device
+has no address.</p>
 <p><br></p>
 <p><strong>Example:</strong></p>
 <p><pre class="highlight"><code class="language-gml">saved_id = bluetooth_device_get_id(device);</code></pre>
 The above code stores the id of the device in the instance's <code>saved_id</code> variable, so the game can
-save it and reconnect to the device later with <a href="devices.html#bluetooth_device_from_id">bluetooth_device_from_id</a>.</p>
+save it and connect to the device later with <a href="devices.html#bluetooth_device_from_id">bluetooth_device_from_id</a>.</p>
 <p><br></p>
 <hr />
 <p align="right"><a href="#top">Back To Top</a></p>
 
 <h1 id="bluetooth_device_get_name">bluetooth_device_get_name<a class="headerlink" href="#bluetooth_device_get_name" title="Permanent link">&para;</a></h1>
 <p>This function returns the name of the given device. The name is updated whenever a later
-advertisement or inquiry result carries one, so it can be an empty string when the device is first
-found and filled in later. It is also an empty string for a device that has never reported a name
-and for a handle that is not valid.</p>
+advertisement or inquiry result carries one, which the scan reports through its <code>on_updated</code>
+callback, so it can be an empty string when the device is first found and filled in later. It is
+also an empty string for a device that has never reported a name and for a handle that is not
+valid.</p>
 <p><br></p>
 <p><strong>Syntax:</strong></p>
 <blockquote>
@@ -1659,59 +1559,16 @@ The above code shows the name of the device in the output log, or "(unnamed)" wh
 <hr />
 <p align="right"><a href="#top">Back To Top</a></p>
 
-<h1 id="bluetooth_device_has_address">bluetooth_device_has_address<a class="headerlink" href="#bluetooth_device_has_address" title="Permanent link">&para;</a></h1>
-<p>This function checks whether the address of the given device is known. You should call this
-function before you use <a href="devices.html#bluetooth_device_get_address">bluetooth_device_get_address</a>.</p>
+<h1 id="bluetooth_device_get_address">bluetooth_device_get_address<a class="headerlink" href="#bluetooth_device_get_address" title="Permanent link">&para;</a></h1>
+<p>This function returns the Bluetooth address of the given device, in the form
+<code>AA:BB:CC:DD:EE:FF</code>, or <code>undefined</code> when the platform does not expose it.</p>
+<p>To remember a device between runs of the game, store its id from
+<a href="devices.html#bluetooth_device_get_id">bluetooth_device_get_id</a> instead: not every platform exposes an address.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>Apple platforms never expose the address of an LE device, so this function returns
-<code>false</code> for every LE device on macOS and iOS. It returns <code>true</code> for a Classic device on macOS.</p>
+<code>undefined</code> for every LE device on macOS and iOS.</p>
 </div>
-<p><br></p>
-<p><strong>Syntax:</strong></p>
-<blockquote>
-<pre class="highlight"><code class="language-gml">bluetooth_device_has_address(device)</code></pre>
-</blockquote>
-<table>
-<thead>
-<tr>
-<th>Argument</th>
-<th>Type</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>device</td>
-<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
-<td>The handle of the device.</td>
-</tr>
-</tbody>
-</table>
-<p><br></p>
-<p><strong>Returns:</strong></p>
-<blockquote>
-<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
-</blockquote>
-<p><code>true</code> if the address of the device is known, otherwise <code>false</code>.</p>
-<p><br></p>
-<p><strong>Example:</strong></p>
-<p><pre class="highlight"><code class="language-gml">if (bluetooth_device_has_address(device))
-{
-    show_debug_message($"Address: {bluetooth_device_get_address(device)}");
-}</code></pre>
-The above code shows the address of the device, read with <a href="devices.html#bluetooth_device_get_address">bluetooth_device_get_address</a>,
-only when it is known.</p>
-<p><br></p>
-<hr />
-<p align="right"><a href="#top">Back To Top</a></p>
-
-<h1 id="bluetooth_device_get_address">bluetooth_device_get_address<a class="headerlink" href="#bluetooth_device_get_address" title="Permanent link">&para;</a></h1>
-<p>This function returns the Bluetooth address of the given device, in the form
-<code>AA:BB:CC:DD:EE:FF</code>. It returns an empty string when the address is not known (see
-<a href="devices.html#bluetooth_device_has_address">bluetooth_device_has_address</a>) and for a handle that is not valid.</p>
-<p>To remember a device between runs of the game, store its id from
-<a href="devices.html#bluetooth_device_get_id">bluetooth_device_get_id</a> instead: not every platform exposes an address.</p>
 <p><br></p>
 <p><strong>Syntax:</strong></p>
 <blockquote>
@@ -1738,75 +1595,33 @@ only when it is known.</p>
 <blockquote>
 <p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></p>
 </blockquote>
-<p>The address of the device, or an empty string if it is not known.</p>
+<p>The address of the device, or <code>undefined</code> if the platform does not expose it.</p>
 <p><br></p>
 <p><strong>Example:</strong></p>
 <p><pre class="highlight"><code class="language-gml">var _address = bluetooth_device_get_address(device);
-if (_address != "")
+if (_address != undefined)
 {
     show_debug_message($"Address: {_address}");
 }</code></pre>
-The above code shows the address of the device in the output log when it is known.</p>
-<p><br></p>
-<hr />
-<p align="right"><a href="#top">Back To Top</a></p>
-
-<h1 id="bluetooth_device_has_rssi">bluetooth_device_has_rssi<a class="headerlink" href="#bluetooth_device_has_rssi" title="Permanent link">&para;</a></h1>
-<p>This function checks whether a signal strength (RSSI) has been reported for the given
-device. You should call this function before you use <a href="devices.html#bluetooth_device_get_rssi">bluetooth_device_get_rssi</a>.</p>
-<p>Scans report the signal strength. A device that entered the cache without a scan (through
-<a href="devices.html#bluetooth_device_from_id">bluetooth_device_from_id</a> or a device query, for example) has none until a scan sees
+The above code shows the address of the device in the output log only when the platform exposes
 it.</p>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>Classic scans on Windows and macOS report no signal strength, so this function returns
-<code>false</code> for those devices.</p>
-</div>
-<p><br></p>
-<p><strong>Syntax:</strong></p>
-<blockquote>
-<pre class="highlight"><code class="language-gml">bluetooth_device_has_rssi(device)</code></pre>
-</blockquote>
-<table>
-<thead>
-<tr>
-<th>Argument</th>
-<th>Type</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>device</td>
-<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
-<td>The handle of the device.</td>
-</tr>
-</tbody>
-</table>
-<p><br></p>
-<p><strong>Returns:</strong></p>
-<blockquote>
-<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
-</blockquote>
-<p><code>true</code> if a signal strength has been reported for the device, otherwise <code>false</code>.</p>
-<p><br></p>
-<p><strong>Example:</strong></p>
-<p><pre class="highlight"><code class="language-gml">if (bluetooth_device_has_rssi(device))
-{
-    show_debug_message($"RSSI: {bluetooth_device_get_rssi(device)} dBm");
-}</code></pre>
-The above code shows the signal strength of the device, read with
-<a href="devices.html#bluetooth_device_get_rssi">bluetooth_device_get_rssi</a>, only when one has been reported.</p>
 <p><br></p>
 <hr />
 <p align="right"><a href="#top">Back To Top</a></p>
 
 <h1 id="bluetooth_device_get_rssi">bluetooth_device_get_rssi<a class="headerlink" href="#bluetooth_device_get_rssi" title="Permanent link">&para;</a></h1>
 <p>This function returns the most recent signal strength (RSSI) reported for the given device,
-in dBm. Values are negative, and a value closer to 0 means a stronger signal. The value is updated
-by every later advertisement or inquiry result the device sends while a scan runs.</p>
-<p>The function returns 0 when no signal strength has been reported (see
-<a href="devices.html#bluetooth_device_has_rssi">bluetooth_device_has_rssi</a>) and for a handle that is not valid.</p>
+in dBm, or <code>undefined</code> when none has been reported. Values are negative, and a value closer to 0
+means a stronger signal. The value is updated by every later advertisement or inquiry result the
+device sends while a scan runs.</p>
+<p>Scans report the signal strength. A device that entered the cache without a scan (through
+<a href="devices.html#bluetooth_device_from_id">bluetooth_device_from_id</a> or a device query, for example) has none until a scan sees
+it.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Classic scans on Windows and macOS report no signal strength, so this function returns
+<code>undefined</code> for those devices.</p>
+</div>
 <p><br></p>
 <p><strong>Syntax:</strong></p>
 <blockquote>
@@ -1833,7 +1648,8 @@ by every later advertisement or inquiry result the device sends while a scan run
 <blockquote>
 <p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></p>
 </blockquote>
-<p>The signal strength of the device (in dBm), or 0 if none has been reported.</p>
+<p>The signal strength of the device (in dBm), or <code>undefined</code> if none has been
+reported.</p>
 <p><br></p>
 <p><strong>Example:</strong></p>
 <p><pre class="highlight"><code class="language-gml">var _closest = 0;
@@ -1842,14 +1658,67 @@ var _count = bluetooth_device_get_count();
 for (var i = 0; i &lt; _count; i++)
 {
     var _device = bluetooth_device_get_at(i);
-    if (bluetooth_device_has_rssi(_device) &amp;&amp; bluetooth_device_get_rssi(_device) &gt; _best)
+    var _rssi = bluetooth_device_get_rssi(_device);
+    if (_rssi != undefined &amp;&amp; _rssi &gt; _best)
     {
-        _best = bluetooth_device_get_rssi(_device);
+        _best = _rssi;
         _closest = _device;
     }
 }</code></pre>
 The above code goes through every device in the cache and keeps the handle of the one with the
-strongest signal in the local variable <code>_closest</code>.</p>
+strongest signal in the local variable <code>_closest</code>, skipping the devices that have no signal
+strength.</p>
+<p><br></p>
+<hr />
+<p align="right"><a href="#top">Back To Top</a></p>
+
+<h1 id="bluetooth_device_get_last_seen_age">bluetooth_device_get_last_seen_age<a class="headerlink" href="#bluetooth_device_get_last_seen_age" title="Permanent link">&para;</a></h1>
+<p>This function returns how long ago a scan last saw the given device, in milliseconds, or
+<code>undefined</code> when no scan has seen it: a device added with <a href="devices.html#bluetooth_device_from_id">bluetooth_device_from_id</a>, by
+a device query, or by connecting to the LE or Classic server.</p>
+<p>The age grows while the device stays silent, so you can use it to drop devices that have gone out
+of range from your own list, instead of waiting for an event: no callback reports a device that has
+stopped advertising.</p>
+<p><br></p>
+<p><strong>Syntax:</strong></p>
+<blockquote>
+<pre class="highlight"><code class="language-gml">bluetooth_device_get_last_seen_age(device)</code></pre>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>device</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
+<td>The handle of the device.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<p><strong>Returns:</strong></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></p>
+</blockquote>
+<p>The time since a scan last saw the device (in milliseconds), or <code>undefined</code> if no
+scan has seen it.</p>
+<p><br></p>
+<p><strong>Example:</strong></p>
+<p><pre class="highlight"><code class="language-gml">for (var i = array_length(devices) - 1; i &gt;= 0; i--)
+{
+    var _age = bluetooth_device_get_last_seen_age(devices[i]);
+    if (_age != undefined &amp;&amp; _age &gt; 10000)
+    {
+        array_delete(devices, i, 1);
+    }
+}</code></pre>
+The above code, run in a Step Event, removes from the instance's <code>devices</code> array every device that
+no scan has seen for more than 10 seconds. A device that no scan has ever seen is kept.</p>
 <p><br></p>
 <hr />
 <p align="right"><a href="#top">Back To Top</a></p>
@@ -1895,10 +1764,10 @@ until a scan sees it send a connectable advertisement.</p>
 <p><strong>Example:</strong></p>
 <p><pre class="highlight"><code class="language-gml">if (bluetooth_device_is_connectable(device))
 {
-    connection = bluetooth_le_connect(device, on_connected);
+    connection = bluetooth_le_connect(device, undefined, on_disconnected, on_connected);
 }</code></pre>
 The above code connects to the device with <a href="le_client.html#bluetooth_le_connect">bluetooth_le_connect</a> only when it
-accepts connections.</p>
+accepts connections, using the default connect options.</p>
 <p><br></p>
 <hr />
 <p align="right"><a href="#top">Back To Top</a></p>
@@ -1954,7 +1823,7 @@ length of each manufacturer data entry in the output log.</p>
 <h1 id="bluetooth_paired_devices_query">bluetooth_paired_devices_query<a class="headerlink" href="#bluetooth_paired_devices_query" title="Permanent link">&para;</a></h1>
 <p>This function lists the devices that are paired (bonded) with this system, without a scan.
 The callback is called once with the handles of the paired devices. A paired device that is not
-yet in the cache enters it without calling the device_found callback.</p>
+yet in the cache enters it without calling any scan callback.</p>
 <p>The function returns a <a href="core.html#bluetootherror">BluetoothError</a>, and the callback is never called when it is
 not Ok: NotInitialized, NotSupported where the platform cannot list paired devices or there is no
 Bluetooth hardware, PermissionDenied, or BluetoothDisabled. The reason is also in
@@ -2275,219 +2144,6 @@ Bluetooth connect permission. Windows and macOS report it for Classic devices on
     show_debug_message("Already paired");
 }</code></pre>
 The above code shows a message in the output log when the device is already paired.</p>
-<p><br></p>
-<hr />
-<p align="right"><a href="#top">Back To Top</a></p>
-
-<h1 id="bluetooth_set_callback_device_found">bluetooth_set_callback_device_found<a class="headerlink" href="#bluetooth_set_callback_device_found" title="Permanent link">&para;</a></h1>
-<p>This function sets the function to call when a scan adds a new device to the device cache.
-Both LE scans (<a href="le_client.html#bluetooth_le_scan_start">bluetooth_le_scan_start</a>) and Classic scans
-(<a href="classic.html#bluetooth_classic_scan_start">bluetooth_classic_scan_start</a>) call it, so use
-<a href="devices.html#bluetooth_device_get_transport">bluetooth_device_get_transport</a> to tell them apart. Setting a new function replaces the
-previous one.</p>
-<p>The callback is called once per device, not once per advertisement: later advertisements and
-inquiry results from the same device update its name, signal strength and advertisement in the
-cache, which the device getters return, without calling the callback again. After
-<a href="devices.html#bluetooth_device_clear">bluetooth_device_clear</a> a device found again is a new device and the callback is called
-for it again. When an LE scan has filters, a device is added, and the callback called, once its
-merged advertisement first matches one of them.</p>
-<p>A device that entered the cache without a scan is never reported here, even when a scan sees it
-later: one added with <a href="devices.html#bluetooth_device_from_id">bluetooth_device_from_id</a>, <a href="devices.html#bluetooth_paired_devices_query">bluetooth_paired_devices_query</a>
-or <a href="le_client.html#bluetooth_le_connected_devices_query">bluetooth_le_connected_devices_query</a>, or a central that connects to the LE server.</p>
-<p>The callback stays set across <a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a> and <a href="core.html#bluetooth_initialize">bluetooth_initialize</a>,
-until you call <a href="devices.html#bluetooth_remove_callback_device_found">bluetooth_remove_callback_device_found</a>.</p>
-<p>This function operates asynchronously, which means that it does not immediately return the requested result. Instead, upon completion of the task, it will trigger the <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a>.</p>
-<p><br></p>
-<p><strong>Syntax:</strong></p>
-<blockquote>
-<pre class="highlight"><code class="language-gml">bluetooth_set_callback_device_found(callback)</code></pre>
-</blockquote>
-<table>
-<thead>
-<tr>
-<th>Argument</th>
-<th>Type</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>callback</td>
-<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Script_Functions.htm">Function</a></td>
-<td>The function to call for each new device.</td>
-</tr>
-</tbody>
-</table>
-<p><br></p>
-<p><strong>Returns:</strong></p>
-<blockquote>
-<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
-</blockquote>
-<p>Always <code>true</code>.</p>
-<p><br></p>
-<p><strong>Triggers:</strong></p>
-<blockquote>
-<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a></p>
-</blockquote>
-<p>Called once for each device a scan adds to the cache.</p>
-<table>
-<thead>
-<tr>
-<th>Key</th>
-<th>Type</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>device</td>
-<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></td>
-<td>The handle of the new device.</td>
-</tr>
-</tbody>
-</table>
-<p><br></p>
-<p><strong>Example:</strong></p>
-<p><pre class="highlight"><code class="language-gml">bluetooth_set_callback_device_found(function(_device)
-{
-    var _kind = (bluetooth_device_get_transport(_device) == BluetoothTransport.LowEnergy) ? "LE" : "Classic";
-    show_debug_message($"Found {_kind} device {bluetooth_device_get_name(_device)}");
-    array_push(devices, _device);
-});</code></pre>
-The above code sets a function that shows the transport and name of every new device in the
-output log and adds its handle to the instance's <code>devices</code> array.</p>
-<p><br></p>
-<hr />
-<p align="right"><a href="#top">Back To Top</a></p>
-
-<h1 id="bluetooth_remove_callback_device_found">bluetooth_remove_callback_device_found<a class="headerlink" href="#bluetooth_remove_callback_device_found" title="Permanent link">&para;</a></h1>
-<p>This function removes the function set with <a href="devices.html#bluetooth_set_callback_device_found">bluetooth_set_callback_device_found</a>.
-Scans keep adding devices to the cache, but nothing is called for them.</p>
-<p><br></p>
-<p><strong>Syntax:</strong></p>
-<blockquote>
-<pre class="highlight"><code class="language-gml">bluetooth_remove_callback_device_found()</code></pre>
-</blockquote>
-<p><br></p>
-<p><strong>Returns:</strong></p>
-<blockquote>
-<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
-</blockquote>
-<p>Always <code>true</code>.</p>
-<p><br></p>
-<p><strong>Example:</strong></p>
-<p><pre class="highlight"><code class="language-gml">bluetooth_remove_callback_device_found();</code></pre>
-The above code stops the game from being told about new devices.</p>
-<p><br></p>
-<hr />
-<p align="right"><a href="#top">Back To Top</a></p>
-
-<h1 id="bluetooth_set_callback_scan_stopped">bluetooth_set_callback_scan_stopped<a class="headerlink" href="#bluetooth_set_callback_scan_stopped" title="Permanent link">&para;</a></h1>
-<p>This function sets the function to call when an LE or a Classic scan stops. Setting a new
-function replaces the previous one.</p>
-<p>The callback is called once per scan, whether the game stopped the scan with
-<a href="le_client.html#bluetooth_le_scan_stop">bluetooth_le_scan_stop</a> or <a href="classic.html#bluetooth_classic_scan_stop">bluetooth_classic_scan_stop</a>, the scan ended on
-its own (a Classic inquiry lasts a limited time), or the system ended it, for example because the
-radio was turned off. A stop while no scan is running calls nothing.</p>
-<p>The callback stays set across <a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a> and <a href="core.html#bluetooth_initialize">bluetooth_initialize</a>,
-until you call <a href="devices.html#bluetooth_remove_callback_scan_stopped">bluetooth_remove_callback_scan_stopped</a>.</p>
-<p>This function operates asynchronously, which means that it does not immediately return the requested result. Instead, upon completion of the task, it will trigger the <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a>.</p>
-<p><br></p>
-<p><strong>Syntax:</strong></p>
-<blockquote>
-<pre class="highlight"><code class="language-gml">bluetooth_set_callback_scan_stopped(callback)</code></pre>
-</blockquote>
-<table>
-<thead>
-<tr>
-<th>Argument</th>
-<th>Type</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>callback</td>
-<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Script_Functions.htm">Function</a></td>
-<td>The function to call when a scan stops.</td>
-</tr>
-</tbody>
-</table>
-<p><br></p>
-<p><strong>Returns:</strong></p>
-<blockquote>
-<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
-</blockquote>
-<p>Always <code>true</code>.</p>
-<p><br></p>
-<p><strong>Triggers:</strong></p>
-<blockquote>
-<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a></p>
-</blockquote>
-<p>Called once each time an LE or a Classic scan stops.</p>
-<table>
-<thead>
-<tr>
-<th>Key</th>
-<th>Type</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>error_code</td>
-<td><a href="core.html#bluetootherror">BluetoothError</a></td>
-<td><a href="core.html#bluetootherror">BluetoothError</a>.Ok if the scan ended without<br>an error, otherwise the reason it ended, such as BluetoothDisabled when the radio was turned off.</td>
-</tr>
-<tr>
-<td>message</td>
-<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></td>
-<td>A description of the failure, or an empty string on success.</td>
-</tr>
-<tr>
-<td>transport</td>
-<td><a href="core.html#bluetoothtransport">BluetoothTransport</a></td>
-<td>The transport of the scan that stopped.</td>
-</tr>
-</tbody>
-</table>
-<p><br></p>
-<p><strong>Example:</strong></p>
-<p><pre class="highlight"><code class="language-gml">bluetooth_set_callback_scan_stopped(function(_error_code, _message, _transport)
-{
-    var _kind = (_transport == BluetoothTransport.Classic) ? "Classic" : "LE";
-    if (_error_code != BluetoothError.Ok)
-    {
-        show_debug_message($"{_kind} scan ended: {_message}");
-        exit;
-    }
-    show_debug_message($"{_kind} scan stopped, {bluetooth_device_get_count()} devices cached");
-});</code></pre>
-The above code sets a function that shows why a scan ended when it ended with an error, or
-otherwise shows how many devices are in the cache, read with
-<a href="devices.html#bluetooth_device_get_count">bluetooth_device_get_count</a>.</p>
-<p><br></p>
-<hr />
-<p align="right"><a href="#top">Back To Top</a></p>
-
-<h1 id="bluetooth_remove_callback_scan_stopped">bluetooth_remove_callback_scan_stopped<a class="headerlink" href="#bluetooth_remove_callback_scan_stopped" title="Permanent link">&para;</a></h1>
-<p>This function removes the function set with <a href="devices.html#bluetooth_set_callback_scan_stopped">bluetooth_set_callback_scan_stopped</a>.
-Scans still stop as before, but nothing is called when they do.</p>
-<p><br></p>
-<p><strong>Syntax:</strong></p>
-<blockquote>
-<pre class="highlight"><code class="language-gml">bluetooth_remove_callback_scan_stopped()</code></pre>
-</blockquote>
-<p><br></p>
-<p><strong>Returns:</strong></p>
-<blockquote>
-<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Boolean</a></p>
-</blockquote>
-<p>Always <code>true</code>.</p>
-<p><br></p>
-<p><strong>Example:</strong></p>
-<p><pre class="highlight"><code class="language-gml">bluetooth_remove_callback_scan_stopped();</code></pre>
-The above code stops the game from being told when a scan stops.</p>
 <p><br></p>
 <hr />
 <p align="right"><a href="#top">Back To Top</a></p>

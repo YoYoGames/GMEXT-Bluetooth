@@ -1,4 +1,3 @@
-
 show_debug_message("========== BLUETOOTH LE CLIENT (DEMO) ==========");
 
 bt_ready = bluetooth_is_initialized();
@@ -6,14 +5,11 @@ bt_ready = bluetooth_is_initialized();
 // Why this room cannot run on this platform, or "" when it can.
 unavailable_reason = "";
 
-if (!bt_ready)
-{
-    unavailable_reason = "Bluetooth is not initialized";
-}
-else if (!bluetooth_le_is_supported())
-{
-    bt_ready = false;
-    unavailable_reason = "Bluetooth LE is not supported on this platform";
+if (!bt_ready) {
+	unavailable_reason = "Bluetooth is not initialized";
+} else if (!bluetooth_feature_is_supported(BluetoothFeature.LeCentral)) {
+	bt_ready = false;
+	unavailable_reason = "Bluetooth LE is not supported on this platform";
 }
 
 auto_scan_after_permission = true;
@@ -27,268 +23,211 @@ pending_conn = 0;
 conn = 0;
 conn_inst = noone;
 
-// devices[] is a fresh list rebuilt for each scan.
+// The device handles listed by the current scan, one button each.
 devices = [];
-device_instances = [];
-
-// device_found fires once per device, so one first seen without a name waits
-// here until a later advertisement or scan response names it (see Step).
-unnamed_devices = [];
 
 list_x = max(650, room_width * 0.55);
 list_y = 100;
 
+// Callbacks reach GML after the call that queued them, even after this room
+// is left, so each one is bound to this struct and checks the owner first.
+callback_ctx = { owner: id };
+
 // The methods are defined before the room gives up on an unsupported
 // platform, so Step and the buttons can always call them.
-bluetooth_request_permissions = function()
-{
-    if (!bt_ready) return;
-    if (bluetooth_permission_get_status() == BluetoothPermissionStatus.Granted) return;
+bluetooth_request_permissions = function() {
+	if (!bt_ready) return;
+	if (bluetooth_permission_get_status() == BluetoothPermissionStatus.Granted) return;
 
-    var _error = bluetooth_permission_request(function(_error_code, _message, _status)
-    {
-        obj_bt_init.bt_permission_status = _status;
+	var _error = bluetooth_permission_request(method(callback_ctx, function(_error_code, _message, _status) {
+		if (instance_exists(owner)) {
+			owner.on_permission_result(_error_code, _message, _status);
+		}
+	}));
+	show_debug_message($"[GML] bluetooth_permission_request() = {_error}");
 
-        show_debug_message(
-            $"[GML] permission request: {_error_code} {_message}, status: {_status}"
-        );
-
-        if (auto_scan_after_permission && _status == BluetoothPermissionStatus.Granted)
-        {
-            auto_scan_after_permission = false;
-            bluetooth_start_le_scan();
-        }
-    });
-    show_debug_message($"[GML] bluetooth_permission_request() = {_error}");
-
-    if (_error != BluetoothError.Ok)
-    {
-        show_debug_message($"[GML] permission request failed: {bluetooth_last_error_message()}");
-    }
+	if (_error != BluetoothError.Ok) {
+		show_debug_message($"[GML] permission request failed: {bluetooth_last_error_message()}");
+	}
 };
 
-bluetooth_start_le_scan = function()
-{
-    if (!bt_ready) return;
+on_permission_result = function(_error_code, _message, _status) {
+	obj_bt_init.bt_permission_status = _status;
+	show_debug_message($"[GML] permission request: {_error_code} {_message}, status: {_status}");
 
-    if (bluetooth_permission_get_status() != BluetoothPermissionStatus.Granted)
-    {
-        bluetooth_request_permissions();
-        return;
-    }
-
-    if (bluetooth_le_scan_is_running()) return;
-
-    bluetooth_device_clear();
-    devices = [];
-    unnamed_devices = [];
-
-    // Remove buttons from a previous scan before rebuilding the list.
-    with (obj_bt_le_device)
-    {
-        instance_destroy();
-    }
-
-    device_instances = [];
-    list_y = 100;
-
-    var _error = bluetooth_le_scan_start(true, []);
-    show_debug_message($"[GML] bluetooth_le_scan_start() = {_error}");
-
-    if (_error != BluetoothError.Ok)
-    {
-        show_debug_message($"[GML] le scan failed to start: {bluetooth_last_error_message()}");
-    }
+	if (auto_scan_after_permission && _status == BluetoothPermissionStatus.Granted) {
+		auto_scan_after_permission = false;
+		bluetooth_start_le_scan();
+	}
 };
 
-add_device_button = function(_device)
-{
-    var _name = bluetooth_device_get_name(_device);
-    var _device_id = bluetooth_device_get_id(_device);
+bluetooth_start_le_scan = function() {
+	if (!bt_ready) return;
 
-    // Avoid duplicate buttons when the same peripheral advertises repeatedly.
-    for (var i = 0; i < array_length(devices); i++)
-    {
-        if (devices[i].id == _device_id) return;
-    }
+	if (bluetooth_permission_get_status() != BluetoothPermissionStatus.Granted) {
+		bluetooth_request_permissions();
+		return;
+	}
 
-    var _address = bluetooth_device_has_address(_device)
-        ? bluetooth_device_get_address(_device)
-        : "<no address>";
+	if (bluetooth_le_scan_is_running()) return;
 
-    var _inst = instance_create_depth(
-        list_x,
-        list_y,
-        0,
-        obj_bt_le_device,
-        {device: _device, owner: id}
-    );
+	// on_found fires the first time each scan sees a device, also one an
+	// earlier scan cached, so the list is rebuilt without clearing the cache
+	// (which would also invalidate a connected device's handle).
+	devices = [];
 
-    array_push(device_instances, _inst);
-    array_push(devices, {
-        device: _device,
-        id: _device_id,
-        name: _name,
-        address: _address
-    });
+	// Remove buttons from a previous scan before rebuilding the list.
+	with (obj_bt_le_device) {
+		instance_destroy();
+	}
 
-    list_y += 60;
+	list_y = 100;
+
+	// No settings or filters: an active, low-latency scan that reports every device.
+	var _error = bluetooth_le_scan_start(
+		undefined,
+		undefined,
+		method(callback_ctx, function(_device) {
+			if (instance_exists(owner)) {
+				owner.on_device_seen(_device);
+			}
+		}),
+		method(callback_ctx, function(_device) {
+			if (instance_exists(owner)) {
+				owner.on_device_seen(_device);
+			}
+		}),
+		method(callback_ctx, function(_error_code, _message) {
+			if (instance_exists(owner)) {
+				owner.on_scan_stopped(_error_code, _message);
+			}
+		})
+	);
+	show_debug_message($"[GML] bluetooth_le_scan_start() = {_error}");
+
+	if (_error != BluetoothError.Ok) {
+		show_debug_message($"[GML] le scan failed to start: {bluetooth_last_error_message()}");
+	}
+};
+
+// on_found and on_updated both land here. The demo only lists devices with a
+// name, so one first found unnamed gets its button once an update names it.
+on_device_seen = function(_device) {
+	if (bluetooth_device_get_name(_device) == "") return;
+	if (array_contains(devices, _device)) return;
+
+	add_device_button(_device);
+};
+
+on_scan_stopped = function(_error_code, _message) {
+	show_debug_message($"[GML] le scan stopped: {_error_code} {_message}, devices found: {array_length(devices)}");
+};
+
+add_device_button = function(_device) {
+	instance_create_depth(list_x, list_y, 0, obj_bt_le_device, { device: _device, owner: id });
+	array_push(devices, _device);
+	list_y += 60;
 };
 
 // One connection at a time; the device buttons lock while one is pending
 // or open (see obj_bt_le_device Step).
-connect_device = function(_device)
-{
-    if (!bt_ready || pending_conn != 0 || conn != 0) return;
+connect_device = function(_device) {
+	if (!bt_ready || pending_conn != 0 || conn != 0) return;
 
-    // Bound to a struct, not to this instance: the callback can arrive after
-    // the room is left, and must then close the link instead of spawning.
-    var _ctx = {
-        client: id
-    };
+	pending_conn = bluetooth_le_connect(
+		_device,
+		undefined,
+		method(callback_ctx, function(_error_code, _message, _connection) {
+			if (instance_exists(owner)) {
+				owner.on_disconnected(_error_code, _message, _connection);
+			}
+		}),
+		method(callback_ctx, function(_error_code, _message, _connection, _device) {
+			if (instance_exists(owner)) {
+				owner.on_connect_result(_error_code, _message, _connection);
+			} else if (_error_code == BluetoothError.Ok) {
+				// The room was left: close the link instead of spawning a connection object.
+				bluetooth_le_disconnect(_connection);
+			}
+		})
+	);
 
-    pending_conn = bluetooth_le_connect(
-        _device,
-        method(_ctx, function(_error_code, _message, _connection, _device)
-        {
-            show_debug_message("[GML] le connect " + string(_error_code) + " " + _message);
+	if (pending_conn == 0) {
+		show_debug_message($"[GML] le connect failed to start: {bluetooth_last_error_code()} {bluetooth_last_error_message()}");
+	}
+};
 
-            if (!instance_exists(client))
-            {
-                if (_error_code == BluetoothError.Ok) bluetooth_le_disconnect(_connection);
-                return;
-            }
+on_connect_result = function(_error_code, _message, _connection) {
+	show_debug_message($"[GML] le connect {_error_code} {_message}");
 
-            client.pending_conn = 0;
+	pending_conn = 0;
 
-            if (_error_code != BluetoothError.Ok) return;
+	if (_error_code != BluetoothError.Ok) return;
 
-            client.conn = _connection;
-            client.conn_inst = instance_create_depth(
-                0,
-                0,
-                0,
-                obj_bt_le_client_connection,
-                {connection: _connection, owner: client}
-            );
-        })
-    );
+	// Destroyed before conn is assigned: its Clean Up clears conn while it is still current.
+	if (instance_exists(conn_inst)) {
+		instance_destroy(conn_inst);
+	}
 
-    if (pending_conn == 0)
-    {
-        show_debug_message(
-            "[GML] le connect failed to start: "
-            + string(bluetooth_last_error_code())
-            + " "
-            + bluetooth_last_error_message()
-        );
-    }
+	conn = _connection;
+	conn_inst = instance_create_depth(0, 0, 0, obj_bt_le_client_connection, { connection: _connection, owner: id });
+};
+
+on_disconnected = function(_error_code, _message, _connection) {
+	show_debug_message($"[GML] le disconnected: {_error_code} {_message}");
+
+	if (_connection != conn) return;
+
+	if (instance_exists(conn_inst)) {
+		instance_destroy(conn_inst);
+	}
+
+	conn = 0;
+	conn_inst = noone;
 };
 
 // Draw only draws: Step calls this every frame to take what Draw shows.
-refresh_status = function()
-{
-    status_scanning = bt_ready && bluetooth_le_scan_is_running();
-    status_connected = false;
-    status_device_name = "-";
-    status_device_address = "-";
-    status_device_id = "-";
-    status_rssi = "-";
+refresh_status = function() {
+	status_scanning = bt_ready && bluetooth_le_scan_is_running();
+	status_connected = false;
+	status_device_name = "-";
+	status_device_address = "-";
+	status_device_id = "-";
+	status_rssi = "-";
 
-    var _conn = conn;
+	if (conn == 0 || !bluetooth_le_connection_is_valid(conn)) return;
 
-    if (_conn == 0 || !bluetooth_le_connection_is_valid(_conn)) return;
+	status_connected = bluetooth_le_connection_is_connected(conn);
 
-    status_connected = bluetooth_le_connection_is_connected(_conn);
+	var _device = bluetooth_le_connection_get_device(conn);
 
-    var _device = bluetooth_le_connection_get_device(_conn);
+	if (!bluetooth_device_is_valid(_device)) return;
 
-    if (!bluetooth_device_is_valid(_device)) return;
+	status_device_name = bluetooth_device_get_name(_device);
+	status_device_id = bluetooth_device_get_id(_device);
 
-    status_device_name = bluetooth_device_get_name(_device);
-    status_device_id = bluetooth_device_get_id(_device);
+	// Both are undefined when the platform has none (an LE address on Apple).
+	var _address = bluetooth_device_get_address(_device);
+	if (!is_undefined(_address)) {
+		status_device_address = _address;
+	}
 
-    if (bluetooth_device_has_address(_device))
-    {
-        status_device_address = bluetooth_device_get_address(_device);
-    }
-
-    if (bluetooth_device_has_rssi(_device))
-    {
-        status_rssi = string(bluetooth_device_get_rssi(_device)) + " dBm";
-    }
+	var _rssi = bluetooth_device_get_rssi(_device);
+	if (!is_undefined(_rssi)) {
+		status_rssi = $"{_rssi} dBm";
+	}
 };
 
 refresh_status();
 
-if (!bt_ready)
-{
-    show_debug_message("[GML] " + unavailable_reason);
-    exit;
+if (!bt_ready) {
+	show_debug_message($"[GML] {unavailable_reason}");
+	exit;
 }
 
-bluetooth_set_callback_device_found(function(_device)
-{
-    // The public discovery callback is shared by BLE and Classic.
-    if (bluetooth_device_get_transport(_device) != BluetoothTransport.LowEnergy) return;
-
-    // Keep the demo scan focused: only show BLE devices with a visible name.
-    // An unnamed one is kept aside; Step adds it once its scan response names it.
-    if (bluetooth_device_get_name(_device) == "")
-    {
-        array_push(unnamed_devices, _device);
-        return;
-    }
-
-    add_device_button(_device);
-});
-
-bluetooth_set_callback_scan_stopped(function(_error, _message, _transport)
-{
-    if (_transport != BluetoothTransport.LowEnergy) return;
-
-    show_debug_message(
-        $"[GML] le scan stopped: {_error} {_message}, devices found: {array_length(devices)}"
-    );
-});
-
-bluetooth_set_callback_le_characteristic_value_changed(
-    function(_characteristic, _connection, _value, _size)
-    {
-        if (instance_exists(conn_inst))
-        {
-            conn_inst.on_value_changed(_characteristic, _connection, _value, _size);
-        }
-        else
-        {
-            bluetooth_value_release(_value);
-        }
-    }
-);
-
-bluetooth_set_callback_le_disconnected(
-    function(_error_code, _message, _connection)
-    {
-        show_debug_message("[GML] le disconnected: " + _message);
-
-        if (instance_exists(conn_inst))
-        {
-            instance_destroy(conn_inst);
-        }
-
-        conn = 0;
-        conn_inst = noone;
-    }
-);
-
-bluetooth_device_clear();
-
-if (bluetooth_permission_get_status() == BluetoothPermissionStatus.Granted)
-{
-    auto_scan_after_permission = false;
-    bluetooth_start_le_scan();
-}
-else
-{
-    bluetooth_request_permissions();
+if (bluetooth_permission_get_status() == BluetoothPermissionStatus.Granted) {
+	auto_scan_after_permission = false;
+	bluetooth_start_le_scan();
+} else {
+	bluetooth_request_permissions();
 }

@@ -29,7 +29,8 @@ public enum BluetoothFeature
     LeReadRssi((int)22),
     LeConnectionPriority((int)23),
     RequestEnable((int)24),
-    PairedDevicesQuery((int)25);
+    PairedDevicesQuery((int)25),
+    LeScanMode((int)26);
 
     private final int value;
     private BluetoothFeature(int v)
@@ -96,6 +97,8 @@ public enum BluetoothFeature
                 return BluetoothFeature.RequestEnable;
             case 25:
                 return BluetoothFeature.PairedDevicesQuery;
+            case 26:
+                return BluetoothFeature.LeScanMode;
             default:
                 return null;
         }

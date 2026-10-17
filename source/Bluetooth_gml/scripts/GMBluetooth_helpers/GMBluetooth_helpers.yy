@@ -1,0 +1,13 @@
+{
+  "$GMScript":"v1",
+  "%Name":"GMBluetooth_helpers",
+  "isCompatibility":false,
+  "isDnD":false,
+  "name":"GMBluetooth_helpers",
+  "parent":{
+    "name":"Bluetooth",
+    "path":"folders/Bluetooth.yy",
+  },
+  "resourceType":"GMScript",
+  "resourceVersion":"2.0",
+}

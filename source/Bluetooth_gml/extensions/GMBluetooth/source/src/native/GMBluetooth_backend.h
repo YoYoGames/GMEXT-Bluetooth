@@ -153,14 +153,41 @@ namespace gmbluetooth
     };
 
     // A BluetoothLeScanFilter as the core hands it on: checked, at least one
-    // field set, service_uuid canonical. The core matches every result against
-    // the filters itself; a backend uses them only to narrow its native scan.
+    // field set, UUIDs canonical, each mask as long as its data. The core
+    // matches every result against the filters itself; a backend uses what it
+    // can of them only to narrow its native scan.
     struct LeScanFilter
     {
         std::optional<std::string> service_uuid;
         std::optional<std::string> name;
+        std::optional<std::string> name_prefix;
         std::optional<std::uint16_t> company_id;
+        std::optional<std::vector<std::uint8_t>> manufacturer_data;
+        std::optional<std::vector<std::uint8_t>> manufacturer_data_mask;
+        std::optional<std::string> service_data_uuid;
+        std::optional<std::vector<std::uint8_t>> service_data;
+        std::optional<std::vector<std::uint8_t>> service_data_mask;
     };
+
+    // BluetoothLeScanMode: Android's ScanSettings modes.
+    enum class LeScanMode : std::int32_t
+    {
+        LowPower   = 0,
+        Balanced   = 1,
+        LowLatency = 2,
+    };
+
+    // A BluetoothLeScanSettings with its defaults filled in. A backend that
+    // cannot do passive scans or scan modes ignores those fields.
+    struct LeScanSettings
+    {
+        bool active = true;
+        LeScanMode mode = LeScanMode::LowLatency;
+    };
+
+    // The window an le_connect or classic_connect has from the call to an open
+    // link, a pairing prompt included; a connect still not open fails Timeout.
+    constexpr auto k_default_connect_timeout = std::chrono::milliseconds(15000);
 
     // A service, characteristic or descriptor an LE discovery found.
     // instance is the backend's own name for it: non-zero, and unique among
@@ -216,11 +243,14 @@ namespace gmbluetooth
     // Each attribute carries the id the core minted for it, which the backend
     // keys the attribute by and reports on its requests; uuid is as GML gave
     // it, already checked. A 0x2902 descriptor is never listed: the platform
-    // owns the CCCD.
+    // owns the CCCD. A descriptor with a value serves it itself, at most 512
+    // bytes, and its reads never reach the core; a User Description (0x2901)
+    // value is UTF-8 text.
     struct LeServerDescriptor
     {
         std::uint64_t id = 0;
         std::string uuid;
+        std::optional<std::vector<std::uint8_t>> value;
     };
 
     struct LeServerCharacteristic
@@ -263,6 +293,9 @@ namespace gmbluetooth
 
     enum class BackendEventType : std::uint8_t
     {
+        // A scan of transport ended without le_scan_stop or classic_scan_stop:
+        // error and message say why, Ok for an inquiry that ran its course. A
+        // stop the core asked for is never reported.
         ScanStopped,
         ClassicConnected,
         ClassicClientConnected,
@@ -283,8 +316,12 @@ namespace gmbluetooth
         // characteristic by its service and characteristic instances, bytes
         // holds the value.
         LeValueChanged,
-        // A GATT server central arrived (connected) or left; central names it.
+        // A GATT server central arrived (connected) or left; central names it,
+        // and a departure may carry error and message.
         LeServerCentral,
+        // Advertising that started Ok ended without le_advertise_stop: error
+        // (never Ok) and message say why.
+        LeAdvertiseStopped,
         // A read or write request on a local attribute from central:
         // attribute.characteristic is the characteristic's id and
         // attribute.descriptor the descriptor's, 0 for a characteristic
@@ -293,7 +330,7 @@ namespace gmbluetooth
         LeServerReadRequest,
         LeServerWriteRequest,
         // The platform dropped every service the server had (Apple, on a
-        // power-off).
+        // power-off). The core ends the server as the radio-off rule does.
         LeServerServicesReset,
         // The completion of an LE call that took an op id: op_id names the
         // call, error is Ok or its failure, message says why, and result holds
@@ -349,9 +386,13 @@ namespace gmbluetooth
         bool response_needed = true;
     };
 
+    // upsert_device is for what a scan saw: the running scan of the device's
+    // transport may report it. add_device caches a device silently: an
+    // inbound link's peer, a name looked up outside a scan.
     struct CoreHooks
     {
         std::function<std::uint64_t(const DiscoveredDevice&)> upsert_device;
+        std::function<std::uint64_t(const DiscoveredDevice&)> add_device;
         std::function<std::uint64_t(std::uint64_t)> create_classic_connection;
         std::function<std::uint64_t(std::uint64_t)> create_le_connection;
         std::function<void(BackendEvent)> push_event;
@@ -448,7 +489,7 @@ namespace gmbluetooth
 
         // filters is empty for an unfiltered scan. The core applies them to
         // every result; a backend may also hand them to its native scan.
-        virtual Error le_scan_start(bool active, const std::vector<LeScanFilter>& filters, std::string& message) = 0;
+        virtual Error le_scan_start(const LeScanSettings& settings, const std::vector<LeScanFilter>& filters, std::string& message) = 0;
         virtual Error le_scan_stop(std::string& message) = 0;
         virtual bool le_scan_is_running() const = 0;
 
@@ -469,15 +510,19 @@ namespace gmbluetooth
             return false;
         }
 
+        // service_uuid is canonical. timeout is the whole window to an open
+        // link (k_default_connect_timeout unless GML asked otherwise).
         virtual Error classic_connect(
             std::uint64_t connection,
             const DiscoveredDevice& device,
             const std::string& service_uuid,
+            std::chrono::milliseconds timeout,
             std::string& message)
         {
             (void)connection;
             (void)device;
             (void)service_uuid;
+            (void)timeout;
 
             message = "Bluetooth Classic is not supported by this backend";
             return Error::NotSupported;
@@ -577,13 +622,16 @@ namespace gmbluetooth
             return false;
         }
 
+        // timeout as for classic_connect.
         virtual Error le_connect(
             std::uint64_t connection,
             const DiscoveredDevice& device,
+            std::chrono::milliseconds timeout,
             std::string& message)
         {
             (void)connection;
             (void)device;
+            (void)timeout;
 
             message = "BLE GATT connections are not supported by this backend";
             return Error::NotSupported;
@@ -734,10 +782,7 @@ namespace gmbluetooth
             return Error::NotSupported;
         }
 
-        // mode:
-        // 0 = unsubscribe
-        // 1 = notify
-        // 2 = indicate
+        // mode: 0 unsubscribes, 1 notify, 2 indicate (BluetoothLeSubscribeMode).
         virtual Error le_characteristic_subscribe(
             std::uint64_t op_id,
             std::uint64_t connection,
@@ -868,6 +913,14 @@ namespace gmbluetooth
 
             message = "BLE peripheral/server mode is not supported by this backend";
             return Error::NotSupported;
+        }
+
+        // The ATT MTU of the central a server event named by key; 23 until a
+        // larger one is negotiated, or when the platform cannot say.
+        virtual std::int32_t le_server_connection_mtu(const std::string& central) const
+        {
+            (void)central;
+            return 23;
         }
 
         // central: empty broadcasts to every subscriber; otherwise the key a
