@@ -305,9 +305,14 @@ namespace gmbluetooth::win
             if (le.advertise_service_uuids.find(service->uuid) == le.advertise_service_uuids.end())
                 return;
 
+            // Always discoverable, whatever include_name says: Windows puts the
+            // service UUID in the advertisement only for a discoverable service,
+            // which also carries the name. A provider that is not discoverable
+            // stays Created and never reports a status, so a start waiting on
+            // it would wait forever.
             WDBG::GattServiceProviderAdvertisingParameters parameters;
             parameters.IsConnectable(le.advertise_connectable);
-            parameters.IsDiscoverable(le.advertise_discoverable);
+            parameters.IsDiscoverable(true);
 
             const auto data_it = le.advertise_service_data.find(service->uuid);
             if (data_it != le.advertise_service_data.end() && !data_it->second.empty())
@@ -1244,7 +1249,6 @@ namespace gmbluetooth::win
         try
         {
             le_->advertise_connectable = settings.connectable;
-            le_->advertise_discoverable = data.include_name;
             le_->advertise_service_uuids = std::move(service_uuids);
             le_->advertise_service_data.clear();
             for (const auto& entry : data.service_data)

@@ -349,7 +349,9 @@ class `[[BluetoothLeAdvertiseManufacturerData]]` prototype Object {
 
 /// What the advertisement carries. A field left undefined is off or empty.
 /// include_name sends the system's device name; on iOS 16 and later that is the model
-/// name ("iPhone", "iPad"), not the name the user gave the device.
+/// name ("iPhone", "iPad"), not the name the user gave the device. Windows sends the
+/// name with every service UUID it advertises, so include_name false does not leave it
+/// out there.
 [global]
 class `[[BluetoothLeAdvertiseData]]` prototype Object {
     [field, type_hint=`bool?`]

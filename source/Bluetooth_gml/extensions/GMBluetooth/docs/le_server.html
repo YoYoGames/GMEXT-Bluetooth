@@ -1381,7 +1381,7 @@
 </div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>On Windows a service UUID, its service data and the name are advertised only through a GATT service that the server already holds, so every UUID in <code>service_uuids</code> must be a service added with <a href="le_server.html#bluetooth_le_server_add_service">bluetooth_le_server_add_service</a>, and <code>include_name</code> needs at least one such UUID; otherwise the call returns NotSupported. Manufacturer data, <code>include_tx_power</code> and <code>tx_power</code> go out in a separate advertisement. An advertisement with neither a service UUID nor one of these returns NotSupported.</p>
+<p>On Windows a service UUID, its service data and the name are advertised only through a GATT service that the server already holds, so every UUID in <code>service_uuids</code> must be a service added with <a href="le_server.html#bluetooth_le_server_add_service">bluetooth_le_server_add_service</a>, and <code>include_name</code> needs at least one such UUID; otherwise the call returns NotSupported. Windows sends the device's name with every service UUID it advertises, also when <code>include_name</code> is <code>false</code>. Manufacturer data, <code>include_tx_power</code> and <code>tx_power</code> go out in a separate advertisement. An advertisement with neither a service UUID nor one of these returns NotSupported.</p>
 </div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>

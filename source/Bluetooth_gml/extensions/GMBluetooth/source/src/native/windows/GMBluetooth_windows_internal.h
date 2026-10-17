@@ -909,7 +909,6 @@ namespace gmbluetooth
             // dropped.
             std::uint64_t server_generation = 0;
             bool advertise_connectable = true;
-            bool advertise_discoverable = true;
             // The registered services le_advertise_start listed: only these advertise.
             std::unordered_set<std::string> advertise_service_uuids;
             std::unordered_map<std::string, std::vector<std::uint8_t>> advertise_service_data;
