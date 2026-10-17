@@ -8,8 +8,9 @@
  *
  * The cache keeps every device seen since the last clear, whichever scan found it, so you should
  * call this function from time to time during a long scan in a busy place. Device handles are never
- * reused: a device seen again after the clear enters the cache under a new handle, which the running
- * scan reports. An old handle can therefore never name a different device.
+ * reused: a device that a running scan sees again after the clear enters the cache under a new
+ * handle, which the scan reports through its `on_found` callback. An old handle can therefore never
+ * name a different device.
  *
  * Clearing the cache does not close anything. A connection made to a device stays open, and a
  * pairing still in progress still calls its callback with the old handle, but the device getters
@@ -22,7 +23,8 @@
  * devices = [];
  * ```
  * The above code empties the device cache and the instance's own `devices` array. A scan that is
- * running keeps running and reports each device it sees again under a new handle, so the `devices`
+ * running keeps running and reports each device it sees again under a new handle through its
+ * `on_found` callback, so the `devices`
  * array can fill up again with valid handles.
  * @function_end
  */
@@ -216,7 +218,8 @@
 /**
  * @function bluetooth_device_get_address
  * @desc This function returns the Bluetooth address of the given device, in the form
- * `AA:BB:CC:DD:EE:FF`, or `undefined` when the platform does not expose it.
+ * `AA:BB:CC:DD:EE:FF`, or `undefined` when the platform does not expose it. It also returns
+ * `undefined` for a handle that is not valid.
  *
  * To remember a device between runs of the game, store its id from
  * ${function.bluetooth_device_get_id} instead: not every platform exposes an address.
@@ -241,7 +244,8 @@
 /**
  * @function bluetooth_device_get_rssi
  * @desc This function returns the most recent signal strength (RSSI) reported for the given device,
- * in dBm, or `undefined` when none has been reported. Values are negative, and a value closer to 0
+ * in dBm, or `undefined` when none has been reported and for a handle that is not valid. Values are
+ * negative, and a value closer to 0
  * means a stronger signal. The value is updated by every later advertisement or inquiry result the
  * device sends while a scan runs.
  *
@@ -280,7 +284,8 @@
  * @function bluetooth_device_get_last_seen_age
  * @desc This function returns how long ago a scan last saw the given device, in milliseconds, or
  * `undefined` when no scan has seen it: a device added with ${function.bluetooth_device_from_id}, by
- * a device query, or by connecting to the LE or Classic server.
+ * a device query, or by connecting to the LE or Classic server. It also returns `undefined` for a
+ * handle that is not valid.
  *
  * The age grows while the device stays silent, so you can use it to drop devices that have gone out
  * of range from your own list, instead of waiting for an event: no callback reports a device that has

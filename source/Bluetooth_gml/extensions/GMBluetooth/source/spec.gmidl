@@ -38,10 +38,11 @@ module GMBluetooth;
 //
 // When the radio turns off (any state but PoweredOn or Unknown), everything running
 // ends: each scan and the advertisement report on_stopped(BluetoothDisabled), each LE
-// connection and server central on_disconnected(BluetoothDisabled), a connect in
-// progress fails with BluetoothDisabled, and each server reports on_stopped after its
-// centrals, its services and attribute handles gone. Nothing restarts when the radio
-// comes back.
+// and Classic connection and each server central on_disconnected(BluetoothDisabled), a
+// connect in progress fails with BluetoothDisabled, and each server reports on_stopped
+// after its centrals, the LE server's services and attribute handles gone.
+// Discoverability ends too, except on Android, which has no call to end it. Nothing
+// restarts when the radio comes back.
 
 // =============================================================================
 // Constants
@@ -547,14 +548,16 @@ function bluetooth_request_enable(callback: func): gmval;
 
 /// Starts an LE scan. settings is a BluetoothLeScanSettings, filters an array of
 /// BluetoothLeScanFilter; either may be undefined. With no filters every device is
-/// reported, otherwise a device enters the cache once its advertisement matches any
-/// one of them. A bad setting or filter (no field set, a malformed UUID, a company_id
-/// outside 0-65535, data without its key, a mask of another length) is
-/// InvalidArgument. Busy while a scan runs: stop it first to change it.
-/// on_found(device) fires once for each device that enters the cache while this scan
-/// runs. on_updated(device) fires for a later advertisement of a device already in
-/// the cache, at most once per update_interval_ms per device; the getters return what
-/// it advertised. on_stopped(error_code, message) fires when the scan ends without
+/// reported, otherwise a device is reported once its advertisement, merged over every
+/// packet the device sent, matches any one of them. A bad setting or filter (no field
+/// set, a malformed UUID, a company_id outside 0-65535, data without its key, a mask
+/// of another length, a mode that is not a BluetoothLeScanMode) is InvalidArgument;
+/// Android reads such a mode as undefined. Busy while a scan runs: stop it first to
+/// change it.
+/// on_found(device) fires the first time this scan sees a device, also one an earlier
+/// scan put in the cache. on_updated(device) fires for the device's later
+/// advertisements in this scan, at most once per update_interval_ms per device; the
+/// getters return what it advertised. on_stopped(error_code, message) fires when the scan ends without
 /// bluetooth_le_scan_stop. Fails before it starts with BluetoothDisabled,
 /// PermissionDenied or NotSupported; while the state is still Unknown the scan starts
 /// once the radio is ready. Android filters in the Bluetooth stack, allows 5 scan
@@ -581,11 +584,10 @@ function bluetooth_le_scan_is_running(): bool;
 // Bluetooth Classic discovery
 // =============================================================================
 
-/// Starts a Classic inquiry. Busy while one runs. on_found(device) fires once for each
-/// device that enters the cache while it runs, on_updated(device) when a device in the
-/// cache answers again or its name is resolved, and on_stopped(error_code, message)
-/// when the inquiry ends without bluetooth_classic_scan_stop, also when it ran its
-/// course. Windows inquires for about 5 seconds and reports every device at the end;
+/// Starts a Classic inquiry. Busy while one runs. on_found(device) fires the first time
+/// this inquiry sees a device, on_updated(device) when the device answers again or its
+/// name is resolved, and on_stopped(error_code, message) when the inquiry ends without
+/// bluetooth_classic_scan_stop: Ok with an empty message when it ran its course. Windows inquires for about 5 seconds and reports every device at the end;
 /// Android and macOS report devices as they answer.
 [global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_classic_scan_start(
@@ -606,7 +608,8 @@ function bluetooth_classic_scan_is_running(): bool;
 
 /// Empties the device cache; every device handle becomes invalid. The cache keeps
 /// every device seen since the last clear (handles are never reused), so call this
-/// during long scans in busy places.
+/// during long scans in busy places. A device a running scan sees again comes back
+/// under a new handle, through on_found.
 [global, bind = typed_gml]
 function bluetooth_device_clear(): unit;
 
@@ -616,6 +619,8 @@ function bluetooth_device_get_count(): int32;
 [global, bind = typed_gml, type_hint=`uint64`]
 function bluetooth_device_get_at(index: int32): gmval;
 
+/// The device getters answer a handle that is not valid with an empty string, 0,
+/// false, undefined or an empty advertisement.
 [global, bind = typed_gml]
 function bluetooth_device_is_valid([type_hint=`uint64`] device: gmval): bool;
 
@@ -766,7 +771,7 @@ function bluetooth_classic_send(
 /// on_disconnected serve every inbound link as they do for bluetooth_classic_connect.
 /// on_stopped(error_code, message) fires when the server ends without
 /// bluetooth_classic_server_stop. Stopping the server leaves the links it accepted
-/// open.
+/// open, with their callbacks.
 [global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_classic_server_start(
     name: string,
@@ -789,8 +794,9 @@ function bluetooth_classic_server_is_running(): bool;
 
 /// Makes the local radio discoverable to other devices' Classic inquiry scans, so
 /// bluetooth_classic_server_start's service can be found by an unpaired peer
-/// (ClassicDiscoverable). duration_seconds is clamped to 1-3600, and 0 or less is
-/// 120. callback(error_code, message, duration_seconds) fires once: Ok with the
+/// (ClassicDiscoverable). Busy while discoverable. duration_seconds is clamped to
+/// 1-3600, and 0 or less is 120. callback(error_code, message, duration_seconds) fires
+/// once: Ok with the
 /// duration granted, PermissionDenied when the user declined, NotInitialized when
 /// bluetooth_shutdown comes first. Windows grants it at once and ends it on a timer;
 /// Android asks the user. macOS and iOS have no API: NotSupported.
@@ -970,9 +976,10 @@ function bluetooth_le_service_get_uuid(
     [type_hint=`uint64`] service: gmval
 ): string;
 
-/// The first discovered service of connection with this UUID, or 0. Any spelling of
-/// the UUID matches (a 16-bit "180D", upper or lower case). 0 with InvalidArgument for
-/// a malformed UUID and InvalidHandle for a connection that is not live.
+/// The first discovered service of connection with this UUID. Any spelling of the
+/// UUID matches (a 16-bit "180D", upper or lower case). 0 when it fails, with
+/// NotFound when nothing matches, InvalidArgument for a malformed UUID and
+/// InvalidHandle for a connection that is not live.
 [global, bind = typed_gml, type_hint=`uint64`]
 function bluetooth_le_service_find(
     [type_hint=`uint64`] connection: gmval,
@@ -1003,7 +1010,7 @@ function bluetooth_le_characteristic_get_uuid(
     [type_hint=`uint64`] characteristic: gmval
 ): string;
 
-/// The first characteristic of service with this UUID, or 0, as for
+/// The first characteristic of service with this UUID, or 0 with the reason, as for
 /// bluetooth_le_service_find. A server service works too.
 [global, bind = typed_gml, type_hint=`uint64`]
 function bluetooth_le_characteristic_find(
@@ -1041,7 +1048,7 @@ function bluetooth_le_descriptor_get_uuid(
     [type_hint=`uint64`] descriptor: gmval
 ): string;
 
-/// The first descriptor of characteristic with this UUID, or 0, as for
+/// The first descriptor of characteristic with this UUID, or 0 with the reason, as for
 /// bluetooth_le_service_find. A server characteristic works too.
 [global, bind = typed_gml, type_hint=`uint64`]
 function bluetooth_le_descriptor_find(
@@ -1194,8 +1201,8 @@ function bluetooth_le_advertise_is_running(): bool;
 /// its first request or subscription (LeServerConnectionEvents).
 /// on_disconnected(error_code, message, connection) fires when it leaves, and retires
 /// the handle. Windows reports its session closing; Apple its last subscription
-/// ending, so a central that never subscribes is reported gone only when the server
-/// stops or the radio turns off.
+/// ending, so a central that never subscribes is not reported gone while the server
+/// runs; the radio turning off reports it.
 /// on_read(request_id, connection, characteristic, descriptor, offset): characteristic
 /// is the server characteristic read, or the one descriptor belongs to; descriptor is
 /// 0 for a characteristic read. offset is where in the value the central reads from (a
@@ -1222,7 +1229,9 @@ function bluetooth_le_server_start(
 ): gmval;
 
 /// Stops the server, removes its services, retires every server connection and ends
-/// advertising. Fires no on_disconnected and no on_stopped.
+/// advertising. Requests still waiting are answered UnlikelyError and add_service
+/// calls still waiting fail with OperationFailed. Fires no on_disconnected and no
+/// on_stopped.
 [global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_le_server_stop(): gmval;
 
@@ -1246,6 +1255,9 @@ function bluetooth_le_server_add_service(
     callback: func
 ): gmval;
 
+/// Removes every service and its handles; Ok while the server is not running.
+/// Requests still waiting are answered UnlikelyError and add_service calls still
+/// waiting fail with OperationFailed.
 [global, bind = typed_gml, type_hint=`BluetoothError`]
 function bluetooth_le_server_clear_services(): gmval;
 

@@ -1087,7 +1087,8 @@ and <a href="core.html#bluetoothfeature">BluetoothFeature</a>.ClassicServer, and
 <a href="core.html#bluetootherror">BluetoothError</a>.NotSupported. On macOS Classic goes through IOBluetooth.</p>
 <p>Each call that starts something takes the functions to call for its events and keeps them until it
 ends: a scan its <code>on_found</code>, <code>on_updated</code> and <code>on_stopped</code>, a connection its <code>on_data</code> and
-<code>on_disconnected</code>, the server its <code>on_connected</code>, <code>on_data</code>, <code>on_disconnected</code> and <code>on_stopped</code>.
+<code>on_disconnected</code>, the server its <code>on_connected</code> and <code>on_stopped</code>, and its <code>on_data</code> and
+<code>on_disconnected</code> for as long as a connection it accepted stays open, also after the server stops.
 Nothing is called for what you end yourself with a stop or a disconnect, and starting what is
 already running returns <a href="core.html#bluetootherror">BluetoothError</a>.Busy.</p>
 <p>An RFCOMM connection is a byte stream with no message boundaries. Received bytes arrive as values
@@ -1912,15 +1913,19 @@ itself has no message boundaries.</p>
 <h1 id="bluetooth_classic_server_start">bluetooth_classic_server_start<a class="headerlink" href="#bluetooth_classic_server_start" title="Permanent link">&para;</a></h1>
 <p>This function starts an RFCOMM server that offers a service with the given name and UUID to
 other devices. The service is published in the SDP records of this device, so a remote device can
-connect to it by its UUID. Only one server can run at a time, and it keeps the given callbacks
-until it stops.</p>
+connect to it by its UUID. Only one server can run at a time. It keeps <code>on_connected</code> and
+<code>on_stopped</code> until it stops, and <code>on_data</code> and <code>on_disconnected</code> for as long as a connection it
+accepted stays open, also after <a href="classic.html#bluetooth_classic_server_stop">bluetooth_classic_server_stop</a>.</p>
 <p><code>on_connected</code> is called for every incoming connection, with its new connection handle and the
 device that connected; the device enters the device cache without calling any scan callback. The
 server's <code>on_data</code> and <code>on_disconnected</code> serve every connection it accepts, as they do for
 <a href="classic.html#bluetooth_classic_connect">bluetooth_classic_connect</a>: you send on such a connection with
 <a href="classic.html#bluetooth_classic_send">bluetooth_classic_send</a> and end it with <a href="classic.html#bluetooth_classic_disconnect">bluetooth_classic_disconnect</a>.
 <code>on_stopped</code> is called once if the server ends without <a href="classic.html#bluetooth_classic_server_stop">bluetooth_classic_server_stop</a>,
-for example with <a href="core.html#bluetootherror">BluetoothError</a>.BluetoothDisabled when the radio is turned off.</p>
+for example with <a href="core.html#bluetootherror">BluetoothError</a>.BluetoothDisabled when the radio is turned off, after
+each connection it accepted has called <code>on_disconnected</code> with
+<a href="core.html#bluetootherror">BluetoothError</a>.BluetoothDisabled. Stopping the server yourself leaves the connections it
+accepted open, with their callbacks.</p>
 <p>An unpaired device can only find this device with a Classic scan while it is discoverable: see
 <a href="classic.html#bluetooth_classic_discoverable_start">bluetooth_classic_discoverable_start</a>.</p>
 <p>The function returns a <a href="core.html#bluetootherror">BluetoothError</a>. When it is not
@@ -2223,13 +2228,13 @@ with <a href="core.html#bluetoothfeature">BluetoothFeature</a>.ClassicDiscoverab
 indefinite duration. The callback is called once: with <a href="core.html#bluetootherror">BluetoothError</a>.Ok and the
 duration granted, with <a href="core.html#bluetootherror">BluetoothError</a>.PermissionDenied when the user declined, or with
 <a href="core.html#bluetootherror">BluetoothError</a>.NotInitialized when <a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a> is called first.
-Turning the radio off ends discoverability.</p>
+Turning the radio off ends discoverability, except on Android, which has no call to end it.</p>
 <p>The function returns a <a href="core.html#bluetootherror">BluetoothError</a>. When it is not
 <a href="core.html#bluetootherror">BluetoothError</a>.Ok the callback is never called, and the reason is in
 <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>:
-NotInitialized, PermissionDenied when the Bluetooth permission is missing or was refused,
-BluetoothDisabled when the radio is off, NotSupported where discoverability cannot be controlled,
-or OperationFailed when the system refused.</p>
+NotInitialized, Busy while the device is already discoverable, PermissionDenied when the Bluetooth
+permission is missing or was refused, BluetoothDisabled when the radio is off, NotSupported where
+discoverability cannot be controlled, or OperationFailed when the system refused.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>On Windows the device becomes discoverable at once, the callback is called straight away

@@ -12,7 +12,7 @@
  *
  * `on_disconnected` is called when the central leaves, and retires its connection handle; a central that comes back gets a new one.
  *
- * [[Note: Only Android reports a central's connect and disconnect as they happen (${constant.BluetoothFeature}.LeServerConnectionEvents). Windows reports a central on its first request or subscription, and its disconnect when its session closes. macOS and iOS have no peripheral-side connection event: they report a central on its first request or subscription, and its disconnect when its last subscription ends, so a central that never subscribes is not reported gone while the server runs.]]
+ * [[Note: Only Android reports a central's connect and disconnect as they happen (${constant.BluetoothFeature}.LeServerConnectionEvents). Windows reports a central on its first request or subscription, and its disconnect when its session closes. macOS and iOS have no peripheral-side connection event: they report a central on its first request or subscription, and its disconnect when its last subscription ends, so a central that never subscribes is not reported gone while the server runs: only the radio turning off reports it, with ${constant.BluetoothError}.BluetoothDisabled.]]
  *
  * ### Requests
  *

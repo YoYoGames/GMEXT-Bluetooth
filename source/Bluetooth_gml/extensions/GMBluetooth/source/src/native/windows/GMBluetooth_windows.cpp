@@ -285,37 +285,62 @@ namespace gmbluetooth::win
         return Error::Ok;
     }
 
-    // Ids are built from the address alone and connects resolve the
-    // address, so an id makes a usable entry with no WinRT call (R1-144).
+    // Ids are built from the address and its type, and connects resolve
+    // the address, so an id makes a usable entry with no WinRT call
+    // (R1-144). The id is rebuilt in the form Windows issues, so one with a
+    // lowercase address names the cached device too.
     Error WindowsBackend::device_from_id(const std::string& id, DiscoveredDevice& device, std::string& message)
     {
-        static constexpr std::string_view ble_prefix = "win:ble:";
-        static constexpr std::string_view classic_prefix = "win:classic:";
+        static constexpr std::string_view classic_prefix = "classic:";
+        static constexpr std::string_view apple_prefix = "le:apple:";
+        static constexpr std::string_view public_prefix = "le:public:";
+        static constexpr std::string_view random_prefix = "le:random:";
+        static constexpr std::string_view le_prefix = "le:";
 
-        Transport transport = Transport::Unknown;
-        std::string address;
-        if (id.compare(0, ble_prefix.size(), ble_prefix) == 0)
+        const auto starts_with = [&id](std::string_view prefix) { return id.compare(0, prefix.size(), prefix) == 0; };
+
+        if (starts_with(apple_prefix))
         {
-            transport = Transport::LowEnergy;
-            address = normalized_address(id.substr(ble_prefix.size()));
+            message = "An le:apple: id names a peripheral by an identifier only Apple can use";
+            return Error::InvalidArgument;
         }
-        else if (id.compare(0, classic_prefix.size(), classic_prefix) == 0)
+
+        Transport transport = Transport::LowEnergy;
+        std::optional<WDB::BluetoothAddressType> type;
+        std::string_view prefix;
+        if (starts_with(classic_prefix))
         {
             transport = Transport::Classic;
-            address = normalized_address(id.substr(classic_prefix.size()));
+            prefix = classic_prefix;
+        }
+        else if (starts_with(public_prefix))
+        {
+            type = WDB::BluetoothAddressType::Public;
+            prefix = public_prefix;
+        }
+        else if (starts_with(random_prefix))
+        {
+            type = WDB::BluetoothAddressType::Random;
+            prefix = random_prefix;
+        }
+        else if (starts_with(le_prefix))
+        {
+            prefix = le_prefix;
         }
 
+        const std::string address = prefix.empty() ? std::string() : normalized_address(id.substr(prefix.size()));
         BTH_ADDR parsed = 0;
         if (address.empty() || !parse_bluetooth_address(address, parsed))
         {
-            message = "Expected a Windows device id: win:ble: or win:classic: and an address like AA:BB:CC:DD:EE:FF";
+            message = "Expected a device id like classic:AA:BB:CC:DD:EE:FF, le:public:AA:BB:CC:DD:EE:FF, "
+                "le:random:AA:BB:CC:DD:EE:FF or le:AA:BB:CC:DD:EE:FF";
             return Error::InvalidArgument;
         }
 
         device = {};
         device.transport = transport;
         device.address = address;
-        device.id = std::string(transport == Transport::LowEnergy ? ble_prefix : classic_prefix) + address;
+        device.id = transport == Transport::Classic ? classic_device_id(address) : le_device_id(address, type);
         device.address_available = true;
         message.clear();
         return Error::Ok;

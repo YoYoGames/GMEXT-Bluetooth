@@ -8,9 +8,9 @@
  *
  * Only one LE scan runs at a time: a start while a scan is running returns ${constant.BluetoothError}.Busy, so stop the scan first to change its settings, filters or callbacks. While the Bluetooth state is still ${constant.BluetoothState}.Unknown the scan starts once the radio is ready.
  *
- * If the scan cannot start, the function returns a ${constant.BluetoothError} other than `Ok`: NotInitialized, InvalidArgument for a bad setting or filter (a filter that sets no field, a malformed UUID, a `company_id` outside 0-65535, data without its key, a mask of another length than its data, an `update_interval_ms` outside 0-60000), Busy while a scan runs, PermissionDenied when the Bluetooth permission is missing or was refused, BluetoothDisabled when the radio is off or resetting, NotSupported when there is no Bluetooth LE hardware, or OperationFailed when the platform refused to start. The reason is in ${function.bluetooth_last_error_code} and ${function.bluetooth_last_error_message}, and no scan callback is called.
+ * If the scan cannot start, the function returns a ${constant.BluetoothError} other than `Ok`: NotInitialized, InvalidArgument for a bad setting or filter (a filter that sets no field, a malformed UUID, a `company_id` outside 0-65535, data without its key, a mask of another length than its data, an `update_interval_ms` outside 0-60000, a `mode` that is not a ${constant.BluetoothLeScanMode}), Busy while a scan runs, PermissionDenied when the Bluetooth permission is missing or was refused, BluetoothDisabled when the radio is off or resetting, NotSupported when there is no Bluetooth LE hardware, or OperationFailed when the platform refused to start. The reason is in ${function.bluetooth_last_error_code} and ${function.bluetooth_last_error_message}, and no scan callback is called.
  *
- * [[Note: Android filters in the Bluetooth stack and allows 5 scan starts per 30 seconds: a sixth starts but finds nothing. It also pauses unfiltered scans while the screen is off, and on Android 6 to 11 a scan returns PermissionDenied while the system Location setting is off. With the manifest's `neverForLocation` flag it also leaves out some beacon advertisements. Only Android uses the `mode` of the settings (${constant.BluetoothFeature}.LeScanMode).]]
+ * [[Note: Android filters in the Bluetooth stack and allows 5 scan starts per 30 seconds: a sixth starts but finds nothing. It also pauses unfiltered scans while the screen is off, and on Android 6 to 11 a scan returns PermissionDenied while the system Location setting is off. With the manifest's `neverForLocation` flag it also leaves out some beacon advertisements. Only Android uses the `mode` of the settings (${constant.BluetoothFeature}.LeScanMode), and it reads a `mode` that is not a ${constant.BluetoothLeScanMode} as `undefined`, that is LowLatency.]]
  *
  * [[Note: Apple and Android always scan actively; only Windows can scan passively (${constant.BluetoothFeature}.LePassiveScan). iOS needs every filter to set `service_uuid` to scan in the background, and never reports iBeacon advertisements.]]
  * @param {Struct.BluetoothLeScanSettings} [settings] How the scan runs, or `undefined` for the defaults.
@@ -498,7 +498,7 @@
  * The function returns 0 when no discovered service has that UUID, and also when it fails, and the reason is then in ${function.bluetooth_last_error_code} and ${function.bluetooth_last_error_message}: NotFound when nothing matches, InvalidArgument for a malformed UUID, and InvalidHandle for a connection that is not live.
  * @param {Real} connection The client connection handle.
  * @param {String} uuid The UUID of the service to find.
- * @returns {Real} The service handle, or 0 if there is none with that UUID.
+ * @returns {Real} The service handle, or 0 if none has that UUID or the call fails.
  * @example
  * ```gml
  * heart_rate_service = bluetooth_le_service_find(connection, "180d");
@@ -606,7 +606,7 @@
  * The function returns 0 when no characteristic of the service has that UUID, and also when it fails, and the reason is then in ${function.bluetooth_last_error_code} and ${function.bluetooth_last_error_message}: NotFound when nothing matches, InvalidArgument for a malformed UUID, and InvalidHandle for a service that is not valid.
  * @param {Real} service The service handle.
  * @param {String} uuid The UUID of the characteristic to find.
- * @returns {Real} The characteristic handle, or 0 if there is none with that UUID.
+ * @returns {Real} The characteristic handle, or 0 if none has that UUID or the call fails.
  * @example
  * ```gml
  * measurement = bluetooth_le_characteristic_find(heart_rate_service, "2a37");
@@ -728,7 +728,7 @@
  * The function returns 0 when no descriptor of the characteristic has that UUID, and also when it fails, and the reason is then in ${function.bluetooth_last_error_code} and ${function.bluetooth_last_error_message}: NotFound when nothing matches, InvalidArgument for a malformed UUID, and InvalidHandle for a characteristic that is not valid.
  * @param {Real} characteristic The characteristic handle.
  * @param {String} uuid The UUID of the descriptor to find.
- * @returns {Real} The descriptor handle, or 0 if there is none with that UUID.
+ * @returns {Real} The descriptor handle, or 0 if none has that UUID or the call fails.
  * @example
  * ```gml
  * user_description = bluetooth_le_descriptor_find(measurement, "2901");

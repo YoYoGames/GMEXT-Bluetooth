@@ -54,8 +54,6 @@ namespace gmbluetooth::win
 
         constexpr std::size_t k_classic_send_chunk = 64 * 1024;
 
-        constexpr auto k_classic_connect_timeout = std::chrono::seconds(15);
-
         constexpr auto k_classic_connect_slice = std::chrono::milliseconds(100);
 
         // The receive loop thread is the sole owner of closesocket() for a
@@ -401,14 +399,16 @@ namespace gmbluetooth::win
         // The connect worker. The state is registered (connecting) before
         // this runs, so classic_disconnect can cancel it. The connect is
         // non-blocking and polled in k_classic_connect_slice steps: a cancel
-        // or a shutdown ends it within one, and a peer that never answers
-        // fails after k_classic_connect_timeout. Once open, the connection's
-        // receive loop runs on this same thread.
+        // or a shutdown ends it within one, and a link not open by deadline,
+        // the end of the window the connect call was given, fails Timeout
+        // (R2-135); a pairing prompt counts toward it. Once open, the
+        // connection's receive loop runs on this same thread.
         void run_classic_connect(
             const std::shared_ptr<SharedClassicState>& shared,
             const std::shared_ptr<ClassicConnectionState>& state,
             BTH_ADDR address,
-            GUID service_guid)
+            GUID service_guid,
+            std::chrono::steady_clock::time_point deadline)
         {
             const auto abandon = [&shared, &state]()
             {
@@ -474,7 +474,6 @@ namespace gmbluetooth::win
                     return;
                 }
 
-                const auto deadline = std::chrono::steady_clock::now() + k_classic_connect_timeout;
                 for (;;)
                 {
                     if (state->closing.load() || !shared->alive->load())
@@ -657,12 +656,13 @@ namespace gmbluetooth::win
                 DiscoveredDevice device;
                 device.transport = Transport::Classic;
                 device.address = format_bluetooth_address(remote.btAddr);
-                device.id = "win:classic:" + device.address;
+                device.id = classic_device_id(device.address);
                 device.address_available = true;
                 device.connectable = true;
 
-                const std::uint64_t device_handle = shared->hooks.upsert_device
-                    ? shared->hooks.upsert_device(device)
+                // A peer that connects in was not seen by a scan (R2-73).
+                const std::uint64_t device_handle = shared->hooks.add_device
+                    ? shared->hooks.add_device(device)
                     : 0;
                 const std::uint64_t connection = shared->hooks.create_classic_connection
                     ? shared->hooks.create_classic_connection(device_handle)
@@ -683,7 +683,7 @@ namespace gmbluetooth::win
             DiscoveredDevice device;
             device.transport = Transport::Classic;
             device.address = format_bluetooth_address(info.Address.ullLong);
-            device.id = "win:classic:" + device.address;
+            device.id = classic_device_id(device.address);
             device.address_available = true;
             device.name = wide_to_utf8(info.szName);
             device.connectable = true;
@@ -946,25 +946,14 @@ namespace gmbluetooth::win
     }
 
     // Never waits for the inquiry, which Windows cannot cut short: the
-    // scan is marked stopped and reported here, and the inquiry thread,
-    // its generation now stale, ends unobserved.
+    // scan is marked stopped, and the inquiry thread, its generation now
+    // stale, ends unobserved. Nothing is reported: the core asked.
     Error WindowsBackend::classic_scan_stop(std::string& message)
     {
-        bool was_running = false;
         {
             std::scoped_lock lock(classic_scan_->mutex);
-            was_running = classic_scan_->running.load();
             classic_scan_->running.store(false);
             ++classic_scan_->generation;
-        }
-
-        if (was_running && classic_->alive->load() && hooks_.push_event)
-        {
-            BackendEvent event;
-            event.type = BackendEventType::ScanStopped;
-            event.transport = Transport::Classic;
-            event.error = Error::Ok;
-            hooks_.push_event(std::move(event));
         }
 
         message.clear();
@@ -980,8 +969,11 @@ namespace gmbluetooth::win
         std::uint64_t connection,
         const DiscoveredDevice& device,
         const std::string& service_uuid,
+        std::chrono::milliseconds timeout,
         std::string& message)
     {
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+
         if (!device.address_available)
         {
             message = "Bluetooth Classic device has no usable address";
@@ -1001,9 +993,10 @@ namespace gmbluetooth::win
             return Error::InvalidArgument;
         }
 
+        // The core has the device cached under this id already.
         const auto shared = classic_;
-        const std::uint64_t device_handle = hooks_.upsert_device
-            ? hooks_.upsert_device(device)
+        const std::uint64_t device_handle = hooks_.add_device
+            ? hooks_.add_device(device)
             : 0;
 
         // Registered while still connecting, before the worker starts, so
@@ -1019,9 +1012,9 @@ namespace gmbluetooth::win
 
         const bool started = spawn_detached_worker(
             workers_,
-            [shared, state, address, service_guid]()
+            [shared, state, address, service_guid, deadline]()
             {
-                run_classic_connect(shared, state, address, service_guid);
+                run_classic_connect(shared, state, address, service_guid, deadline);
             });
 
         if (!started)

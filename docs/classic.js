@@ -444,8 +444,9 @@
  * @function bluetooth_classic_server_start
  * @desc This function starts an RFCOMM server that offers a service with the given name and UUID to
  * other devices. The service is published in the SDP records of this device, so a remote device can
- * connect to it by its UUID. Only one server can run at a time, and it keeps the given callbacks
- * until it stops.
+ * connect to it by its UUID. Only one server can run at a time. It keeps `on_connected` and
+ * `on_stopped` until it stops, and `on_data` and `on_disconnected` for as long as a connection it
+ * accepted stays open, also after ${function.bluetooth_classic_server_stop}.
  *
  * `on_connected` is called for every incoming connection, with its new connection handle and the
  * device that connected; the device enters the device cache without calling any scan callback. The
@@ -453,7 +454,10 @@
  * ${function.bluetooth_classic_connect}: you send on such a connection with
  * ${function.bluetooth_classic_send} and end it with ${function.bluetooth_classic_disconnect}.
  * `on_stopped` is called once if the server ends without ${function.bluetooth_classic_server_stop},
- * for example with ${constant.BluetoothError}.BluetoothDisabled when the radio is turned off.
+ * for example with ${constant.BluetoothError}.BluetoothDisabled when the radio is turned off, after
+ * each connection it accepted has called `on_disconnected` with
+ * ${constant.BluetoothError}.BluetoothDisabled. Stopping the server yourself leaves the connections it
+ * accepted open, with their callbacks.
  *
  * An unpaired device can only find this device with a Classic scan while it is discoverable: see
  * ${function.bluetooth_classic_discoverable_start}.
@@ -609,14 +613,14 @@
  * indefinite duration. The callback is called once: with ${constant.BluetoothError}.Ok and the
  * duration granted, with ${constant.BluetoothError}.PermissionDenied when the user declined, or with
  * ${constant.BluetoothError}.NotInitialized when ${function.bluetooth_shutdown} is called first.
- * Turning the radio off ends discoverability.
+ * Turning the radio off ends discoverability, except on Android, which has no call to end it.
  *
  * The function returns a ${constant.BluetoothError}. When it is not
  * ${constant.BluetoothError}.Ok the callback is never called, and the reason is in
  * ${function.bluetooth_last_error_code} and ${function.bluetooth_last_error_message}:
- * NotInitialized, PermissionDenied when the Bluetooth permission is missing or was refused,
- * BluetoothDisabled when the radio is off, NotSupported where discoverability cannot be controlled,
- * or OperationFailed when the system refused.
+ * NotInitialized, Busy while the device is already discoverable, PermissionDenied when the Bluetooth
+ * permission is missing or was refused, BluetoothDisabled when the radio is off, NotSupported where
+ * discoverability cannot be controlled, or OperationFailed when the system refused.
  *
  * [[Note: On Windows the device becomes discoverable at once, the callback is called straight away
  * with the duration, and discoverability ends when it runs out or on
@@ -727,7 +731,8 @@
  *
  * Each call that starts something takes the functions to call for its events and keeps them until it
  * ends: a scan its `on_found`, `on_updated` and `on_stopped`, a connection its `on_data` and
- * `on_disconnected`, the server its `on_connected`, `on_data`, `on_disconnected` and `on_stopped`.
+ * `on_disconnected`, the server its `on_connected` and `on_stopped`, and its `on_data` and
+ * `on_disconnected` for as long as a connection it accepted stays open, also after the server stops.
  * Nothing is called for what you end yourself with a stop or a disconnect, and starting what is
  * already running returns ${constant.BluetoothError}.Busy.
  *

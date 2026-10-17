@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <deque>
@@ -79,7 +80,11 @@
 
 @interface GMBTQueuedTimedPeripheral : GMBTQueuedPeripheral
 @property (nonatomic, strong) CBCentralManager *manager;
+// Started by the call, so the connect's whole window counts, its wait in the
+// queue included.
 @property (nonatomic, strong) NSTimer *timer;
+// connectPeripheral: was sent for it.
+@property (nonatomic) BOOL issued;
 
 - (instancetype)initWithOpId:(NSNumber *)opId peripheral:(CBPeripheral *)peripheral timer:(NSTimer *)timer;
 @end
@@ -200,7 +205,8 @@
 @property(nonatomic) CBManagerState peripheralState;
 
 // Connects in request order. Only the head is issued, once the central is
-// PoweredOn; its timer bounds the attempt and names it in its userInfo.
+// PoweredOn; each entry's timer bounds it from the call and names it in its
+// userInfo.
 @property(nonatomic, strong) NSMutableArray<GMBTQueuedTimedPeripheral *> *openPeripheralQueue;
 
 // Keyed by peripheralKey:. An entry goes when its peripheral's link ends;
@@ -257,6 +263,10 @@
 @property(nonatomic, strong) NSMutableDictionary <NSString *, NSMutableSet<NSNumber *> *> *centralSubscriptions;
 @property(nonatomic, strong) NSMutableDictionary <NSString *, CBCentral *> *subscribedCentrals;
 
+// Every central a server event has named since the server last reset, by
+// the same key, for the MTU of its server connection.
+@property(nonatomic, strong) NSMutableDictionary <NSString *, CBCentral *> *serverCentrals;
+
 // The calls AppleBackend makes. Each returns Ok or why it failed, with
 // message set; the asynchronous ones complete through opSink or eventSink.
 - (void) bt_init;
@@ -278,10 +288,11 @@
 - (gmbluetooth::Error) bt_le_server_respond_write:(double)requestId status:(double)status message:(std::string &)message;
 - (gmbluetooth::Error) bt_le_server_notify_value:(std::uint64_t)characteristicId central:(NSString *)centralKey value:(NSData *)value message:(std::string &)message;
 
-- (gmbluetooth::Error) bt_le_peripheral_open:(NSString *)peripheralUuid message:(std::string &)message;
+- (gmbluetooth::Error) bt_le_peripheral_open:(NSString *)peripheralUuid timeout:(NSTimeInterval)timeout message:(std::string &)message;
 - (gmbluetooth::Error) bt_le_peripheral_close:(NSString *)peripheralUuid message:(std::string &)message;
 - (BOOL) bt_le_peripheral_is_connected:(NSString *)peripheralUuid;
 - (NSInteger) bt_le_peripheral_mtu:(NSString *)peripheralUuid;
+- (NSInteger) bt_le_server_central_mtu:(NSString *)centralKey;
 - (gmbluetooth::Error) bt_le_peripheral_read_rssi:(NSString *)peripheralUuid opId:(NSNumber *)opId message:(std::string &)message;
 
 - (CBPeripheral *) bt_le_retrieve_peripheral:(NSUUID *)identifier error:(gmbluetooth::Error &)error message:(std::string &)message;
@@ -470,7 +481,7 @@ static std::string gmbt_string(NSString *text) {
 }
 
 // The key a peripheral is known by in every table and event, and the
-// identifier in its "apple:ble:" device id: its identifier, uppercase; ""
+// identifier in its "le:apple:" device id: its identifier, uppercase; ""
 // when it has none.
 static NSString *gmbt_peripheral_key(CBPeripheral *peripheral) {
     NSString *key = peripheral.identifier.UUIDString;
@@ -502,8 +513,21 @@ static const NSUInteger kGMBTMaxQueuedSends = 64;
 // first.
 static const NSUInteger kGMBTMaxDiscoveredPeripherals = 256;
 
-// How long a connect may take before it fails with Timeout.
-static const NSTimeInterval kGMBTConnectTimeoutSeconds = 15;
+// The device id prefixes this backend issues (R2-127): "le:apple:" and a
+// peripheral's identifier, "classic:" and an address.
+static const char *const kGMBTLeApplePrefix = "le:apple:";
+static const char *const kGMBTClassicPrefix = "classic:";
+
+// "AA:BB:CC:DD:EE:FF"; dashes and lowercase hex are taken too.
+static bool gmbt_address_is_well_formed(const std::string &address) {
+    if (address.size() != 17) return false;
+    for (std::size_t i = 0; i < address.size(); ++i) {
+        const char c = address[i];
+        if (i % 3 == 2) { if (c != ':' && c != '-') return false; }
+        else if (!std::isxdigit(static_cast<unsigned char>(c))) return false;
+    }
+    return true;
+}
 
 static NSString *gmbt_manager_state_name(CBManagerState state) {
     switch (state) {
@@ -544,6 +568,24 @@ static gmbluetooth::Error gmbt_unavailable_error(CBManagerState state, std::stri
 
 static BOOL gmbt_state_is_transient(CBManagerState state) {
     return state == CBManagerStateUnknown || state == CBManagerStateResetting;
+}
+
+// Whether the core's radio-off rule ends everything when a manager reaches
+// this state: any state but PoweredOn and Unknown (R2-40). It reports each
+// running scan, link and central itself, with BluetoothDisabled, from the
+// StateChanged this backend pushes; this backend then only drops its own
+// state for them.
+static BOOL gmbt_core_ends_everything(CBManagerState state) {
+    return state != CBManagerStatePoweredOn && state != CBManagerStateUnknown;
+}
+
+// Why a request a manager that left PoweredOn still held fails: where the
+// core ends everything, the same BluetoothDisabled it reports for the rest;
+// otherwise gmbt_unavailable_error.
+static gmbluetooth::Error gmbt_radio_off_error(CBManagerState state, std::string &message) {
+    if (!gmbt_core_ends_everything(state)) return gmbt_unavailable_error(state, message);
+    return gmbt_fail(message, gmbluetooth::Error::BluetoothDisabled,
+                     "Bluetooth was turned off or became unavailable (" + gmbt_string(gmbt_manager_state_name(state)) + ")");
 }
 
 // The BluetoothError and message a CoreBluetooth NSError reports to GML. An
@@ -595,8 +637,8 @@ static gmbluetooth::Error gmbt_error_from_nserror(NSError *error, std::string &m
     if (self.eventSink) self.eventSink(std::move(event), key);
 }
 
-// The end of a scan the game started: Ok when it asked for the stop,
-// otherwise why the central could not keep it running.
+// The end of a scan the game did not stop: why the central could not keep it
+// running. A stop the core asked for is never reported.
 - (void) notifyScanStopped:(gmbluetooth::Error)error message:(const std::string &)message {
     gmbluetooth::BackendEvent event;
     event.type = gmbluetooth::BackendEventType::ScanStopped;
@@ -628,7 +670,7 @@ static gmbluetooth::Error gmbt_error_from_nserror(NSError *error, std::string &m
 }
 
 // The key a peripheral is known by in every table here, and the identifier
-// in its "apple:ble:" device id (gmbt_peripheral_key, the one derivation).
+// in its "le:apple:" device id (gmbt_peripheral_key, the one derivation).
 - (NSString *) peripheralKey:(CBPeripheral *)peripheral {
     return gmbt_peripheral_key(peripheral);
 }
@@ -808,6 +850,7 @@ static gmbluetooth::Error gmbt_error_from_nserror(NSError *error, std::string &m
         _writeRequestsLookup = [NSMutableDictionary new];
         _centralSubscriptions = [NSMutableDictionary new];
         _subscribedCentrals = [NSMutableDictionary new];
+        _serverCentrals = [NSMutableDictionary new];
 
         _openPeripheralQueue = [NSMutableArray new];
 
@@ -863,6 +906,7 @@ static bool _scanPendingPowerOn = false;
     [_writeRequestsLookup removeAllObjects];
     [_centralSubscriptions removeAllObjects];
     [_subscribedCentrals removeAllObjects];
+    [_serverCentrals removeAllObjects];
     [_openedPeripherals removeAllObjects];
     [_connectedPeripherals removeAllObjects];
     [_owedDisconnects removeAllObjects];
@@ -881,7 +925,8 @@ static bool _scanPendingPowerOn = false;
 // ####################################################################################
 
 // Ok while a scan is already running or waiting for PoweredOn: there is one
-// scan, and asking for it again changes nothing, its services included.
+// scan, and asking for it again changes nothing, its services included (the
+// core refuses a second start as Busy before it gets here).
 // serviceUuidStrings is nil for every device; the core validated them, so
 // UUIDWithString cannot throw.
 - (gmbluetooth::Error) bt_le_scan_start:(NSArray<NSString *> *)serviceUuidStrings message:(std::string &)message {
@@ -932,8 +977,8 @@ static bool _scanPendingPowerOn = false;
     return _isScanning || _scanPendingPowerOn;
 }
 
-// Ok with no event when nothing is running; otherwise the scan ends here and
-// scan_stopped reports it.
+// Ok, and silent: the core ended the scan's session before asking, so no
+// ScanStopped goes out for it.
 - (gmbluetooth::Error) bt_le_scan_stop:(std::string &)message {
 
     if (!_isScanning && !_scanPendingPowerOn) return gmbt_ok(message);
@@ -946,8 +991,6 @@ static bool _scanPendingPowerOn = false;
     _scanServices = nil;
 
     if (wasScanning) [_centralManager stopScan];
-
-    [self notifyScanStopped:gmbluetooth::Error::Ok message:std::string()];
     return gmbt_ok(message);
 }
 
@@ -1006,7 +1049,7 @@ static bool _scanPendingPowerOn = false;
 
     gmbluetooth::DiscoveredDevice device;
     device.transport = gmbluetooth::Transport::LowEnergy;
-    device.id = "apple:ble:" + gmbt_string(uuidString);
+    device.id = kGMBTLeApplePrefix + gmbt_string(uuidString);
     device.name = gmbt_string(name);
     // Apple exposes a stable CoreBluetooth identifier, not a public MAC.
     device.address_available = false;
@@ -1226,6 +1269,8 @@ static bool _scanPendingPowerOn = false;
     // The characteristics they named are gone; no unsubscribe will come.
     [_centralSubscriptions removeAllObjects];
     [_subscribedCentrals removeAllObjects];
+    // The core retires every server connection with the services.
+    [_serverCentrals removeAllObjects];
 }
 
 // Ok when already open: there is one server.
@@ -1253,6 +1298,7 @@ static bool _scanPendingPowerOn = false;
 
     CBUUID *cccdUUID = [CBUUID UUIDWithString:CBUUIDClientCharacteristicConfigurationString];
     CBUUID *userDescriptionUUID = [CBUUID UUIDWithString:CBUUIDCharacteristicUserDescriptionString];
+    CBUUID *presentationFormatUUID = [CBUUID UUIDWithString:CBUUIDCharacteristicFormatString];
 
     NSMutableArray<CBMutableCharacteristic *> *characteristicsArray = [NSMutableArray array];
     // Moved into _initialValues only once the whole definition parsed, so a
@@ -1337,15 +1383,39 @@ static bool _scanPendingPowerOn = false;
 
             // CBMutableDescriptor takes only the User Description, whose
             // value must be a string, and the Presentation Format, whose
-            // value must be its 7 bytes; the definition carries no value,
-            // and anything else throws. Refused before anything is added.
-            if (![descUUID isEqual:userDescriptionUUID]) {
+            // value must be its 7 bytes, and serves either itself; anything
+            // else throws. CoreBluetooth never hands the app a descriptor
+            // request, so one with no static value could not be answered.
+            // Refused before anything is added.
+            const BOOL isUserDescription = [descUUID isEqual:userDescriptionUUID];
+            if (!isUserDescription && ![descUUID isEqual:presentationFormatUUID]) {
                 return gmbt_fail(message, gmbluetooth::Error::NotSupported,
-                                 "Apple can host only the Characteristic User Description descriptor (0x2901), not " +
-                                 gmbt_string(descUuidString));
+                                 "Apple can host only the User Description (0x2901) and Presentation Format (0x2904) "
+                                 "descriptors, not " + gmbt_string(descUuidString));
+            }
+            if (!descDefinition.value) {
+                return gmbt_fail(message, gmbluetooth::Error::NotSupported,
+                                 "Apple hosts descriptor " + gmbt_string(descUuidString) + " only with a static value");
             }
 
-            CBMutableDescriptor *descriptor = [[CBMutableDescriptor alloc] initWithType:descUUID value:@""];
+            const std::vector<std::uint8_t> &bytes = *descDefinition.value;
+            id descriptorValue = nil;
+            if (isUserDescription) {
+                NSString *text = [[NSString alloc] initWithBytes:bytes.data() length:bytes.size() encoding:NSUTF8StringEncoding];
+                if (!text) {
+                    return gmbt_fail(message, gmbluetooth::Error::InvalidArgument,
+                                     "The User Description (0x2901) value is not UTF-8 text");
+                }
+                descriptorValue = text;
+            } else {
+                if (bytes.size() != 7) {
+                    return gmbt_fail(message, gmbluetooth::Error::InvalidArgument,
+                                     "The Presentation Format (0x2904) value is 7 bytes, not " + std::to_string(bytes.size()));
+                }
+                descriptorValue = [NSData dataWithBytes:bytes.data() length:bytes.size()];
+            }
+
+            CBMutableDescriptor *descriptor = [[CBMutableDescriptor alloc] initWithType:descUUID value:descriptorValue];
             [descriptorsArray addObject:descriptor];
         }
 
@@ -1375,7 +1445,8 @@ static bool _scanPendingPowerOn = false;
     return gmbt_ok(message);
 }
 
-// Ok when already closed. Advertising stops with the server.
+// Ok when already closed. Advertising stops with the server (R2-20),
+// silently: the core reports neither.
 - (gmbluetooth::Error) bt_le_server_close:(std::string &)message {
     if (!_isServerOpen) return gmbt_ok(message);
 
@@ -1555,20 +1626,27 @@ static bool _scanPendingPowerOn = false;
         return;
 
     std::string message;
-    const gmbluetooth::Error error = gmbt_unavailable_error(peripheral.state, message);
+    const gmbluetooth::Error error = gmbt_radio_off_error(peripheral.state, message);
 
+    // Advertising ended with the radio. Where the core ends everything it
+    // reports that itself from the central's StateChanged; otherwise it hears
+    // it here.
+    const BOOL wasAdvertising = _isAdvertising;
     _isAdvertising = false;
     [self failAdvertiseStarts:error message:message keepIssuedHead:NO];
+    if (wasAdvertising && !gmbt_core_ends_everything(peripheral.state)) {
+        gmbluetooth::BackendEvent stopped;
+        stopped.type = gmbluetooth::BackendEventType::LeAdvertiseStopped;
+        stopped.transport = gmbluetooth::Transport::LowEnergy;
+        stopped.error = error;
+        stopped.message = message;
+        [self sendEvent:std::move(stopped) key:nil];
+    }
 
-    // The radio is gone and every central with it; no unsubscribe follows.
-    NSArray<CBCentral *> *centrals = _subscribedCentrals.allValues;
-    [_centralSubscriptions removeAllObjects];
-    [_subscribedCentrals removeAllObjects];
-    for (CBCentral *central in centrals)
-        [self notifyServerCentral:central connected:NO];
-
-    // CoreBluetooth dropped the services too; the server stays open for the
-    // game to add them again.
+    // The radio is gone and every central with it, and CoreBluetooth dropped
+    // the services too. No departure is reported here: the core ends the
+    // server on LeServerServicesReset, each central first, as the radio-off
+    // rule does (R2-85), and then stops it through bt_le_server_close.
     [self resetServerState:error message:message failInFlight:YES];
 
     gmbluetooth::BackendEvent event;
@@ -1613,13 +1691,29 @@ static bool _scanPendingPowerOn = false;
     return key != nil ? key : @"";
 }
 
-// The central a server event comes from. CoreBluetooth gives a central no
-// address, only an identifier, so it is named by its device id alone.
+// The central a server event comes from, kept for its MTU. CoreBluetooth
+// gives a central no address, only an identifier, so it is named by its
+// device id alone.
 - (gmbluetooth::LeServerCentral) serverCentral:(CBCentral *)central {
+    NSString *key = [self centralKey:central];
+    if (central && key.length > 0) _serverCentrals[key] = central;
+
     gmbluetooth::LeServerCentral out;
-    out.key = gmbt_string([self centralKey:central]);
-    out.device_id = "apple:ble:" + out.key;
+    out.key = gmbt_string(key);
+    out.device_id = kGMBTLeApplePrefix + gmbt_string([key uppercaseString]);
     return out;
+}
+
+// The ATT MTU of a central's server connection: the longest notification
+// it takes plus the 3-byte ATT header. 23, the minimum, for one no event
+// has named.
+- (NSInteger) bt_le_server_central_mtu:(NSString *)centralKey {
+    CBCentral *central = centralKey.length > 0 ? _serverCentrals[centralKey] : nil;
+    if (!central) return 23;
+    if (@available(iOS 9.0, macOS 10.12, *)) {
+        return MAX((NSInteger)23, (NSInteger)central.maximumUpdateValueLength + 3);
+    }
+    return 23;
 }
 
 // The characteristic's id, nil for one no live service holds.
@@ -1668,6 +1762,8 @@ static bool _scanPendingPowerOn = false;
     [_centralSubscriptions removeObjectForKey:key];
     [_subscribedCentrals removeObjectForKey:key];
     [self notifyServerCentral:central connected:NO];
+    // After the event, whose serverCentral: would otherwise keep it.
+    [_serverCentrals removeObjectForKey:key];
 }
 
 - (void) peripheralManager:(CBPeripheralManager *)peripheral didReceiveReadRequest:(CBATTRequest *)request {
@@ -1823,20 +1919,15 @@ static BOOL gmbt_contains_identical(NSArray *array, id object) {
     return array != nil && object != nil && [array indexOfObjectIdenticalTo:object] != NSNotFound;
 }
 
-// Issues the head of the connect queue once the central can take it. A head
-// with a timer was already issued.
+// Issues the head of the connect queue once the central can take it.
 - (void) handleOpenPeripheralQueue {
     if (!_centralManager || _centralManager.state != CBManagerStatePoweredOn) return;
 
     GMBTQueuedTimedPeripheral *queued = [self queuePeek:_openPeripheralQueue];
-    if (!queued || queued.timer) return;
+    if (!queued || queued.issued) return;
 
+    queued.issued = YES;
     [_centralManager connectPeripheral:queued.peripheral options:nil];
-    queued.timer = [NSTimer scheduledTimerWithTimeInterval:kGMBTConnectTimeoutSeconds
-                                                    target:self
-                                                  selector:@selector(connectionDidTimeout:)
-                                                  userInfo:queued
-                                                   repeats:NO];
 }
 
 - (GMBTQueuedTimedPeripheral *) queuedOpenFor:(CBPeripheral *)peripheral {
@@ -1849,7 +1940,7 @@ static BOOL gmbt_contains_identical(NSArray *array, id object) {
 // Takes a connect out of the queue and stops its timer; cancel also stops
 // the attempt CoreBluetooth is making for it. The caller issues the next.
 - (void) removeQueuedOpen:(GMBTQueuedTimedPeripheral *)queued cancel:(BOOL)cancel {
-    const BOOL issued = queued.timer != nil;
+    const BOOL issued = queued.issued;
     [queued.timer invalidate];
     [_openPeripheralQueue removeObjectIdenticalTo:queued];
     if (cancel && issued && _centralManager.state == CBManagerStatePoweredOn)
@@ -1941,8 +2032,9 @@ static BOOL gmbt_contains_identical(NSArray *array, id object) {
 
 // Busy while the peripheral is open or connecting. A peripheral no scan has
 // reported since the central last powered on may still be known to
-// CoreBluetooth by its identifier; NotFound when it is not.
-- (gmbluetooth::Error) bt_le_peripheral_open:(NSString*) peripheralUuid message:(std::string &)message {
+// CoreBluetooth by its identifier; NotFound when it is not. timeout is the
+// whole window from this call, a wait in the queue included (R2-135).
+- (gmbluetooth::Error) bt_le_peripheral_open:(NSString*) peripheralUuid timeout:(NSTimeInterval)timeout message:(std::string &)message {
     const gmbluetooth::Error stateError = gmbt_require_powered_on(_centralManager.state, message);
     if (stateError != gmbluetooth::Error::Ok) return stateError;
 
@@ -1963,6 +2055,11 @@ static BOOL gmbt_contains_identical(NSArray *array, id object) {
 
     // No op id: the core matches the open by the peripheral's connection.
     GMBTQueuedTimedPeripheral *queuePeripheral = [[GMBTQueuedTimedPeripheral alloc] initWithOpId:nil peripheral:peripheral];
+    queuePeripheral.timer = [NSTimer scheduledTimerWithTimeInterval:timeout
+                                                             target:self
+                                                           selector:@selector(connectionDidTimeout:)
+                                                           userInfo:queuePeripheral
+                                                            repeats:NO];
     [_openPeripheralQueue addObject:queuePeripheral];
     [self handleOpenPeripheralQueue];
 
@@ -2503,16 +2600,22 @@ static BOOL gmbt_contains_identical(NSArray *array, id object) {
     // Unknown or Resetting before the central was ever PoweredOn: a deferred
     // scan or connect keeps waiting. Otherwise the central has left PoweredOn
     // or reached a final state, and nothing asked of it can go on.
+    // Where the core ends everything (gmbt_core_ends_everything), the scan and
+    // the links end here silently and the StateChanged below reports each of
+    // them with BluetoothDisabled; reporting them here first would reach GML
+    // with another error. A connect still queued fails here with that same
+    // error, which lets the queue go.
     else if (!gmbt_state_is_transient(central.state) || previous == CBManagerStatePoweredOn) {
+        const BOOL coreEnds = gmbt_core_ends_everything(central.state);
         std::string message;
-        const gmbluetooth::Error error = gmbt_unavailable_error(central.state, message);
+        const gmbluetooth::Error error = gmbt_radio_off_error(central.state, message);
 
         if (_isScanning || _scanPendingPowerOn) {
             _isScanning = false;
             _scanPendingPowerOn = false;
             _scanServices = nil;
             NSLog(@"[GMBluetooth] central reached %@ - the scan has ended", stateString);
-            [self notifyScanStopped:error message:message];
+            if (!coreEnds) [self notifyScanStopped:error message:message];
         }
 
         [self failQueuedOpens:error message:message];
@@ -2525,15 +2628,16 @@ static BOOL gmbt_contains_identical(NSArray *array, id object) {
 
         if (_openedPeripherals.count > 0) {
             // Every link is gone, and CoreBluetooth does not promise a
-            // didDisconnectPeripheral for each. Report each open peripheral once
-            // here; the later didDisconnectPeripheral, if any, finds it closed.
+            // didDisconnectPeripheral for each. Each open peripheral ends here
+            // once; the later didDisconnectPeripheral, if any, finds it closed.
             NSArray<CBPeripheral *> *lost = [_openedPeripherals allValues];
             [_openedPeripherals removeAllObjects];
             [_connectedPeripherals removeAllObjects];
             [_peripheralQueues removeAllObjects];
-            const std::string lostMessage = "Bluetooth became unavailable (" + gmbt_string(stateString) + ")";
-            for (CBPeripheral *peripheral in lost)
-                [self notifyDisconnect:[self peripheralKey:peripheral] message:lostMessage];
+            if (!coreEnds) {
+                for (CBPeripheral *peripheral in lost)
+                    [self notifyDisconnect:[self peripheralKey:peripheral] message:message];
+            }
         }
     }
 
@@ -2784,6 +2888,12 @@ namespace
         return [NSData dataWithBytes:bytes.data() length:bytes.size()];
     }
 
+    // A connect window as the seconds the Foundation and dispatch timers take.
+    static NSTimeInterval timer_seconds(std::chrono::milliseconds duration)
+    {
+        return std::chrono::duration<double>(duration).count();
+    }
+
     // True while the user has not answered the Bluetooth prompt; creating a
     // CoreBluetooth manager now would show it. [CBManager authorization] is
     // iOS 13.1 and macOS 10.15; before them there is no prompt to wait for.
@@ -2976,12 +3086,14 @@ namespace
             return Error::Ok;
         }
 
-        // Ids this backend issues: "apple:ble:" + the peripheral's identifier,
-        // and on macOS "apple:classic:" + the "XX:XX:XX:XX:XX:XX" address.
+        // Every id form parses (R2-127): "le:apple:" + a peripheral's
+        // identifier, and on macOS "classic:" + the "XX:XX:XX:XX:XX:XX"
+        // address. An LE id with an address names nothing here: CoreBluetooth
+        // never exposes one, so such an id cannot come from this platform.
         Error device_from_id(const std::string& id, DiscoveredDevice& device, std::string& message) override
         {
-            constexpr const char* ble_prefix = "apple:ble:";
-            constexpr const char* classic_prefix = "apple:classic:";
+            const char* ble_prefix = kGMBTLeApplePrefix;
+            const char* classic_prefix = kGMBTClassicPrefix;
 
             if (id.rfind(ble_prefix, 0) == 0)
             {
@@ -3001,7 +3113,7 @@ namespace
             {
 #if TARGET_OS_OSX
                 std::string address = id.substr(std::char_traits<char>::length(classic_prefix));
-                if (!classic_address_is_well_formed(address)) { message = "The id does not hold a valid Bluetooth address"; return Error::InvalidArgument; }
+                if (!gmbt_address_is_well_formed(address)) { message = "The id does not hold a valid Bluetooth address"; return Error::InvalidArgument; }
                 if (const Error e = require_managers(message); e != Error::Ok) return e;
 
                 // IOBluetooth spells addresses with dashes.
@@ -3012,12 +3124,35 @@ namespace
                 message.clear();
                 return Error::Ok;
 #else
-                message = "Bluetooth Classic ids are not issued on this platform";
+                message = "A Bluetooth Classic id cannot be used on this platform, which has no Bluetooth Classic";
                 return Error::InvalidArgument;
 #endif
             }
 
-            message = "The id is not one this platform issues";
+            // "le:public:<ADDR>", "le:random:<ADDR>" or "le:<ADDR>".
+            constexpr const char* le_prefix = "le:";
+            if (id.rfind(le_prefix, 0) == 0)
+            {
+                std::string address = id.substr(std::char_traits<char>::length(le_prefix));
+                for (const char* type : { "public:", "random:" })
+                {
+                    if (address.rfind(type, 0) == 0)
+                    {
+                        address = address.substr(std::char_traits<char>::length(type));
+                        break;
+                    }
+                }
+                if (!gmbt_address_is_well_formed(address))
+                {
+                    message = "The id is not a Bluetooth device id: an LE address must be AA:BB:CC:DD:EE:FF";
+                    return Error::InvalidArgument;
+                }
+                message = "Apple never exposes an LE device's address, so an id that holds one cannot be used here; "
+                          "scan for the device and use its \"le:apple:\" id";
+                return Error::InvalidArgument;
+            }
+
+            message = "The id is not a Bluetooth device id";
             return Error::InvalidArgument;
         }
 
@@ -3051,10 +3186,12 @@ namespace
             return Error::Ok;
         }
 
-        // active is a hint CoreBluetooth has no switch for: every scan is
-        // active (LePassiveScan). When every filter names a service, the
-        // scan is narrowed to those services natively too.
-        Error le_scan_start(bool, const std::vector<LeScanFilter>& filters, std::string& message) override
+        // CoreBluetooth has no switch for either setting: every scan is active
+        // (LePassiveScan) and runs at the system's pace (LeScanMode). When
+        // every filter names a service, the scan is narrowed to those
+        // services natively too; the core matches every result against the
+        // filters itself.
+        Error le_scan_start(const LeScanSettings&, const std::vector<LeScanFilter>& filters, std::string& message) override
         {
             if (const Error e = require_managers(message); e != Error::Ok) return e;
             NSMutableArray<NSString*>* services = nil;
@@ -3074,7 +3211,7 @@ namespace
         }
         bool le_scan_is_running() const override { return transport_ && [transport_ bt_le_scan_is_active]; }
 
-        Error le_connect(std::uint64_t connection, const DiscoveredDevice& device, std::string& message) override
+        Error le_connect(std::uint64_t connection, const DiscoveredDevice& device, std::chrono::milliseconds timeout, std::string& message) override
         {
             if (const Error e = require_managers(message); e != Error::Ok) return e;
             const std::string identifier = identifier_from_device(device);
@@ -3087,7 +3224,7 @@ namespace
                 le_connection_to_id_[connection]=identifier;
                 le_id_to_connection_[identifier]=connection;
             }
-            const Error e=[transport_ bt_le_peripheral_open:gmbt_ns(identifier) message:message];
+            const Error e=[transport_ bt_le_peripheral_open:gmbt_ns(identifier) timeout:timer_seconds(timeout) message:message];
             if (e != Error::Ok) remove_connection(connection);
             return e;
         }
@@ -3107,6 +3244,13 @@ namespace
             const std::string id=id_for_connection(connection);
             if (id.empty() || !transport_) return 23;
             return static_cast<std::int32_t>([transport_ bt_le_peripheral_mtu:gmbt_ns(id)]);
+        }
+        // CoreBluetooth reports what a central takes per notification, not
+        // the MTU it negotiated: maximumUpdateValueLength + 3.
+        std::int32_t le_server_connection_mtu(const std::string& central) const override
+        {
+            if (!transport_) return 23;
+            return static_cast<std::int32_t>([transport_ bt_le_server_central_mtu:gmbt_ns(central)]);
         }
         Error le_read_rssi(std::uint64_t op, std::uint64_t c, std::string& m) override
         {
@@ -3166,6 +3310,7 @@ namespace
             if (const Error e = require_managers(m); e != Error::Ok) return e;
             return [transport_ bt_le_server_open:m];
         }
+        // Ends advertising too (R2-20).
         Error le_server_stop(std::string&m) override
         {
             if (!managers_created()) { m.clear(); return Error::Ok; }
@@ -3245,16 +3390,22 @@ namespace
             return Error::Ok;
         }
 
+        // Silent: the inquiry is detached before it stops, so its completion
+        // reports no ScanStopped for a stop the core asked for.
         Error classic_scan_stop(std::string& message) override
         {
-            if (classic_inquiry_) [classic_inquiry_ stop];
+            classic_end_inquiry();
             message.clear();
             return Error::Ok;
         }
 
         bool classic_scan_is_running() const override { return classic_inquiry_ != nil; }
 
-        Error classic_connect(std::uint64_t connection, const DiscoveredDevice& device, const std::string& service_uuid, std::string& message) override
+        // One deadline bounds the whole connect from this call, through the
+        // authenticated open (a pairing prompt included), the SDP query and
+        // the RFCOMM open (R2-131).
+        Error classic_connect(std::uint64_t connection, const DiscoveredDevice& device, const std::string& service_uuid,
+            std::chrono::milliseconds timeout, std::string& message) override
         {
             if (const Error e = require_managers(message); e != Error::Ok) return e;
             if (!device.address_available || device.address.empty())
@@ -3279,14 +3430,22 @@ namespace
                 classic_connections_[connection] = state;
             }
 
+            // Armed before anything starts. A connect that completes or fails
+            // first leaves it nothing to do: handles are never reused.
+            AppleBackend* self = this;
+            std::weak_ptr<int> alive = lifetime_;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timer_seconds(timeout) * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                if (alive.expired()) return;
+                self->handle_classic_connect_timeout(connection);
+            });
+
             // The baseband link opens authenticated first, as Android's secure
             // RFCOMM does (R1-254); a link already open is used as it is.
             if ([btDevice isConnected])
                 return classic_connect_after_open(connection, btDevice, service_uuid, message);
 
             GMBTBasebandOpenHandler* openHandler = [GMBTBasebandOpenHandler new];
-            AppleBackend* self = this;
-            std::weak_ptr<int> alive = lifetime_;
             const std::string uuidCopy = service_uuid;
             openHandler.onComplete = ^(IOBluetoothDevice* d, IOReturn status) {
                 if (alive.expired()) return;
@@ -3303,11 +3462,6 @@ namespace
             GMBT_LOG("Classic connect: authenticated baseband open -> IOReturn=0x%08x", status);
             if (status == kIOReturnSuccess)
             {
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kClassicSdpTimeoutSeconds * NSEC_PER_SEC)),
-                               dispatch_get_main_queue(), ^{
-                    if (alive.expired()) return;
-                    self->handle_classic_open_timeout(connection);
-                });
                 message.clear();
                 return Error::Ok;
             }
@@ -3359,19 +3513,11 @@ namespace
 
             // Unfiltered: the UUID-filtered overload is less reliable against
             // some stacks, and the record is matched by UUID afterwards anyway.
+            // The connect's deadline also ends a query IOBluetooth never
+            // answers.
             const IOReturn status = [btDevice performSDPQuery:sdpHandler];
             GMBT_LOG("Classic connect: SDP query start (cached records=%d) -> IOReturn=0x%08x",
                 (int)[[btDevice services] count], status);
-            if (status == kIOReturnSuccess)
-            {
-                // Fail the connect instead of leaving the GML callback waiting
-                // forever if IOBluetooth never delivers sdpQueryComplete:.
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kClassicSdpTimeoutSeconds * NSEC_PER_SEC)),
-                               dispatch_get_main_queue(), ^{
-                    if (alive.expired()) return;
-                    self->handle_classic_sdp_timeout(connection);
-                });
-            }
             if (status != kIOReturnSuccess)
             {
                 std::scoped_lock lock(classic_mutex_);
@@ -3676,7 +3822,7 @@ namespace
         Error classic_scan_start(std::string&m) override {m="Bluetooth Classic is not supported on this platform";return Error::NotSupported;}
         Error classic_scan_stop(std::string&m) override {m.clear();return Error::Ok;}
         bool classic_scan_is_running() const override {return false;}
-        Error classic_connect(std::uint64_t,const DiscoveredDevice&,const std::string&,std::string&m) override {m="Bluetooth Classic is not supported on this platform";return Error::NotSupported;}
+        Error classic_connect(std::uint64_t,const DiscoveredDevice&,const std::string&,std::chrono::milliseconds,std::string&m) override {m="Bluetooth Classic is not supported on this platform";return Error::NotSupported;}
         Error classic_disconnect(std::uint64_t,std::string&m) override {m="Bluetooth Classic is not supported on this platform";return Error::NotSupported;}
         bool classic_connection_is_connected(std::uint64_t) const override {return false;}
         Error classic_send_bytes(std::uint64_t,const std::uint8_t*,std::size_t,std::string&m) override {m="Bluetooth Classic is not supported on this platform";return Error::NotSupported;}
@@ -3783,11 +3929,12 @@ namespace
         std::uint64_t connection_for_id(const std::string&id) const
         { std::scoped_lock lock(mutex_); auto it=le_id_to_connection_.find(id); return it==le_id_to_connection_.end()?0:it->second; }
 
+        // The peripheral identifier in a device's "le:apple:" id; empty for
+        // any other id.
         static std::string identifier_from_device(const DiscoveredDevice& d)
         {
-            constexpr const char* prefix="apple:ble:";
+            const char* prefix=kGMBTLeApplePrefix;
             if(d.id.rfind(prefix,0)==0) return d.id.substr(std::char_traits<char>::length(prefix));
-            if(d.address_available&&!d.address.empty()) return d.address;
             return {};
         }
 
@@ -3797,7 +3944,7 @@ namespace
         {
             DiscoveredDevice d;
             d.transport = Transport::LowEnergy;
-            d.id = "apple:ble:" + gmbt_string(gmbt_peripheral_key(peripheral));
+            d.id = kGMBTLeApplePrefix + gmbt_string(gmbt_peripheral_key(peripheral));
             d.name = gmbt_string(peripheral.name);
             d.address_available = false;
             d.connectable = true;
@@ -3899,19 +4046,6 @@ namespace
             return [IOBluetoothSDPUUID uuidWithBytes:cb.data.bytes length:(int)cb.data.length];
         }
 
-        // "XX:XX:XX:XX:XX:XX", as classic_format_address writes it; dashes
-        // and lowercase hex are taken too.
-        static bool classic_address_is_well_formed(const std::string& address)
-        {
-            if (address.size() != 17) return false;
-            for (std::size_t i = 0; i < address.size(); ++i)
-            {
-                const char c = address[i];
-                if (i % 3 == 2) { if (c != ':' && c != '-') return false; }
-                else if (!std::isxdigit(static_cast<unsigned char>(c))) return false;
-            }
-            return true;
-        }
 
         // The cache entry for a Classic device, which is also kept for
         // classic_device_for_address. Used for inquiry results, ids and bonds.
@@ -3924,7 +4058,7 @@ namespace
             }
             DiscoveredDevice d;
             d.transport = Transport::Classic;
-            d.id = "apple:classic:" + address;
+            d.id = kGMBTClassicPrefix + address;
             d.name = gmbt_string([device name]);
             d.address = address;
             d.address_available = true;
@@ -3932,6 +4066,7 @@ namespace
             return d;
         }
 
+        // An inquiry result, for the running Classic scan.
         void handle_classic_device_found(IOBluetoothDevice* device)
         {
             if (!device) return;
@@ -3957,8 +4092,6 @@ namespace
             hooks_.push_event(std::move(ev));
         }
 
-        static constexpr double kClassicSdpTimeoutSeconds = 15.0;
-
         // Finds the RFCOMM channel for service_uuid in the device's current SDP
         // records. Another service's channel is never used in its place.
         static bool classic_find_rfcomm_channel(IOBluetoothDevice* device, const std::string& service_uuid,
@@ -3970,20 +4103,55 @@ namespace
             return record && [record getRFCOMMChannelID:&channelID] == kIOReturnSuccess;
         }
 
-        void handle_classic_open_timeout(std::uint64_t connection)
+        // The connect's deadline passed: whatever step it is on is abandoned -
+        // the authenticated open, the SDP query or the RFCOMM open - and it
+        // fails with Timeout. Nothing to do for one that opened, failed or
+        // was disconnected first.
+        void handle_classic_connect_timeout(std::uint64_t connection)
         {
+            std::shared_ptr<ClassicConnectionState> state;
+            GMBTSDPQueryHandler* sdp = nil;
+            GMBTBasebandOpenHandler* open = nil;
+            IOBluetoothRFCOMMChannel* channel = nil;
+            GMBTClassicChannelDelegate* delegate = nil;
             {
                 std::scoped_lock lock(classic_mutex_);
-                auto open = classic_pending_open_.find(connection);
-                if (open == classic_pending_open_.end()) return; // already completed
-                // IOBluetooth may still deliver connectionComplete: to it.
-                open->second.onComplete = nil;
-                gmbt_park(open->second);
-                classic_pending_open_.erase(open);
+                auto it = classic_connections_.find(connection);
+                if (it == classic_connections_.end() || it->second->connected) return;
+                state = it->second;
+                channel = state->channel;
+                delegate = state->delegate;
+                state->channel = nil;
+                state->delegate = nil;
+                classic_connections_.erase(it);
+                if (auto pending = classic_pending_sdp_.find(connection); pending != classic_pending_sdp_.end())
+                {
+                    sdp = pending->second;
+                    classic_pending_sdp_.erase(pending);
+                }
+                if (auto pending = classic_pending_open_.find(connection); pending != classic_pending_open_.end())
+                {
+                    open = pending->second;
+                    classic_pending_open_.erase(pending);
+                }
             }
-            GMBT_LOG("Classic baseband open timed out after %.0fs (connection %llu)",
-                kClassicSdpTimeoutSeconds, static_cast<unsigned long long>(connection));
-            complete_classic_connect(connection, Error::Timeout, "The authenticated Classic link did not open in time");
+
+            // IOBluetooth may still call these; they are kept until it does.
+            if (sdp)
+            {
+                sdp.onComplete = nil;
+                gmbt_park(sdp);
+            }
+            if (open)
+            {
+                open.onComplete = nil;
+                gmbt_park(open);
+            }
+            classic_drop_writes(*state);
+            classic_detach_channel(channel, delegate);
+
+            GMBT_LOG("Classic connect timed out (connection %llu)", static_cast<unsigned long long>(connection));
+            complete_classic_connect(connection, Error::Timeout, "The Classic connection did not open in time");
         }
 
         void handle_classic_open_complete(std::uint64_t connection, IOBluetoothDevice* device, IOReturn status, const std::string& service_uuid)
@@ -4014,22 +4182,6 @@ namespace
             const Error error = classic_connect_after_open(connection, device, service_uuid, message);
             if (error != Error::Ok)
                 complete_classic_connect(connection, error, message);
-        }
-
-        void handle_classic_sdp_timeout(std::uint64_t connection)
-        {
-            {
-                std::scoped_lock lock(classic_mutex_);
-                auto sdp = classic_pending_sdp_.find(connection);
-                if (sdp == classic_pending_sdp_.end()) return; // already completed
-                // IOBluetooth may still deliver sdpQueryComplete: to it.
-                sdp->second.onComplete = nil;
-                gmbt_park(sdp->second);
-                classic_pending_sdp_.erase(sdp);
-            }
-            GMBT_LOG("Classic SDP query timed out after %.0fs (connection %llu)",
-                kClassicSdpTimeoutSeconds, static_cast<unsigned long long>(connection));
-            complete_classic_connect(connection, Error::Timeout, "Classic service discovery timed out");
         }
 
         void handle_classic_sdp_complete(std::uint64_t connection, IOBluetoothDevice* device, IOReturn status, std::string service_uuid)
@@ -4400,17 +4552,11 @@ namespace
         void handle_classic_server_channel_opened(IOBluetoothRFCOMMChannel* channel)
         {
             IOBluetoothDevice* device = [channel getDevice];
-            const std::string address = classic_format_address([device addressString]);
+            const DiscoveredDevice d = classic_device_entry(device);
             GMBT_LOG("Classic server: incoming RFCOMM channel %d from %s (%s)",
-                (int)[channel getChannelID], address.c_str(), gmbt_string([device name]).c_str());
-            DiscoveredDevice d;
-            d.transport = Transport::Classic;
-            d.id = "apple:classic:" + address;
-            d.name = gmbt_string([device name]);
-            d.address = address;
-            d.address_available = true;
-            d.connectable = true;
-            const std::uint64_t device_handle = hooks_.upsert_device(d);
+                (int)[channel getChannelID], d.address.c_str(), d.name.c_str());
+            // Cached without any scan callback: no scan saw it (R2-73).
+            const std::uint64_t device_handle = hooks_.add_device(d);
             const std::uint64_t connection = hooks_.create_classic_connection(device_handle);
 
             auto state = std::make_shared<ClassicConnectionState>();
@@ -4453,7 +4599,8 @@ namespace
         // go: its blocks are nilled, its delegate cleared, and anything that
         // may still be called is kept alive until then. The blocks also check
         // lifetime_, which expires with this backend.
-        void classic_shutdown()
+        // Stops the inquiry with nothing of ours left for IOBluetooth to call.
+        void classic_end_inquiry()
         {
             if (classic_inquiry_delegate_)
             {
@@ -4469,6 +4616,11 @@ namespace
             gmbt_release_after_callback(classic_inquiry_delegate_);
             classic_inquiry_ = nil;
             classic_inquiry_delegate_ = nil;
+        }
+
+        void classic_shutdown()
+        {
+            classic_end_inquiry();
 
             std::unordered_map<std::uint64_t, std::shared_ptr<ClassicConnectionState>> connections;
             std::unordered_map<std::uint64_t, GMBTSDPQueryHandler*> pending_sdp;

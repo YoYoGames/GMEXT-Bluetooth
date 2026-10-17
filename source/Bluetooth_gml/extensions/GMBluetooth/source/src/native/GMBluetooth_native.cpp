@@ -2283,7 +2283,7 @@ namespace
     // A remote central using our GATT server, under the key its backend names
     // it by (Windows: the session's device id; Apple: the central's identifier).
     // connection is minted from the LE connection handle space, so it never
-    // equals a client connection, and is retired on the central's disconnect
+    // equals a client connection, and is retired when the central leaves
     // (R1-49): a later visit gets a new one.
     struct ServerCentral
     {
@@ -2294,19 +2294,19 @@ namespace
     std::mutex g_server_centrals_mutex;
     std::unordered_map<std::string, ServerCentral> g_server_centrals;
 
-    void fire_le_server_connection_state(std::uint64_t connection, bool connected, std::uint64_t device)
+    // One of the running LE server's callbacks; empty while none runs.
+    GMFunction le_server_callback(GMFunction LeServerSession::*member)
     {
-        // callback(connection, connected, device)
-        invoke_callback("le_server_connection_state_changed", event_callback(g_callback_le_server_connection_state_changed),
-            static_cast<double>(connection), connected, static_cast<double>(device));
+        std::scoped_lock lock(g_session_mutex);
+        return g_le_server.running ? g_le_server.*member : GMFunction();
     }
 
     // The server connection for a central key, minted on its first event, which
-    // is also when GML hears it connected. 0 for an empty key, from a backend
-    // that names no central.
+    // is also when the server's on_connected hears it. 0 for an empty key, from
+    // a backend that names no central, and while no server runs.
     std::uint64_t note_server_central(const std::string& key, std::uint64_t device)
     {
-        if (key.empty())
+        if (key.empty() || !session_running(g_le_server))
             return 0;
 
         ServerCentral central;
@@ -2321,28 +2321,38 @@ namespace
             g_server_centrals.emplace(key, central);
         }
 
-        fire_le_server_connection_state(central.connection, true, central.device);
+        // on_connected(connection, device)
+        invoke_callback("le_server on_connected", counted(le_server_callback(&LeServerSession::on_connected)),
+            static_cast<double>(central.connection), static_cast<double>(central.device));
         return central.connection;
     }
 
-    void retire_server_central(const std::string& key)
+    void fire_server_central_gone(const GMFunction& on_disconnected, std::uint64_t connection, Error error,
+        const std::string& message)
     {
-        ServerCentral central;
+        // on_disconnected(error_code, message, connection)
+        invoke_callback("le_server on_disconnected", on_disconnected, static_cast<double>(error), message,
+            static_cast<double>(connection));
+    }
+
+    void retire_server_central(const std::string& key, Error error, const std::string& message)
+    {
+        std::uint64_t connection = 0;
         {
             std::scoped_lock lock(g_server_centrals_mutex);
             const auto it = g_server_centrals.find(key);
             if (it == g_server_centrals.end())
                 return;
-            central = it->second;
+            connection = it->second.connection;
             g_server_centrals.erase(it);
         }
 
-        fire_le_server_connection_state(central.connection, false, central.device);
+        fire_server_central_gone(counted(le_server_callback(&LeServerSession::on_disconnected)), connection, error, message);
     }
 
-    // Every central leaves with the server: each one GML heard connect hears
-    // the disconnect.
-    void retire_server_centrals()
+    // Every central leaves with the server. on_disconnected is the ended
+    // session's, or empty for a stop the game asked for (rule 3).
+    void retire_server_centrals(const GMFunction& on_disconnected, Error error, const std::string& message)
     {
         std::unordered_map<std::string, ServerCentral> centrals;
         {
@@ -2353,26 +2363,38 @@ namespace
         for (const auto& [key, central] : centrals)
         {
             (void)key;
-            fire_le_server_connection_state(central.connection, false, central.device);
+            fire_server_central_gone(on_disconnected, central.connection, error, message);
         }
     }
 
-    // The key a server connection handle names; empty when it names none.
-    std::string server_central_key(std::uint64_t connection)
+    // The central a server connection handle names, and its key; empty when it
+    // names none.
+    std::optional<ServerCentral> find_server_central(std::uint64_t connection, std::string* key = nullptr)
     {
         std::scoped_lock lock(g_server_centrals_mutex);
-        for (const auto& [key, central] : g_server_centrals)
+        for (const auto& [k, central] : g_server_centrals)
         {
             if (central.connection == connection)
-                return key;
+            {
+                if (key)
+                    *key = k;
+                return central;
+            }
         }
-        return std::string();
+        return std::nullopt;
+    }
+
+    std::string server_central_key(std::uint64_t connection)
+    {
+        std::string key;
+        find_server_central(connection, &key);
+        return key;
     }
 
     // The device a server event's central is: device_id in the backend's own
     // id scheme, so the central and a scan result for the same peer are one
     // device, and the address only where the platform has one. Added without
-    // device_found (R1-155); 0 when the event names no central.
+    // any scan callback (R1-155); 0 when the event names no central.
     std::uint64_t le_server_event_device(const LeServerCentral& central)
     {
         const std::string& device_id = central.device_id.empty() ? central.address : central.device_id;
@@ -2384,10 +2406,36 @@ namespace
         d.id = device_id;
         d.address = central.address;
         d.address_available = !central.address.empty();
-        return g_device_manager.upsert_device(d);
+        return g_device_manager.upsert_device(d, false);
+    }
+
+    // The child of a server service or characteristic with this canonical
+    // UUID, first in definition order; 0 when it has none.
+    std::uint64_t find_le_server_child(const LeServerAttribute& parent, const std::string& uuid)
+    {
+        std::scoped_lock lock(g_le_server_services_mutex);
+        for (const std::uint64_t child : parent.children)
+        {
+            const auto it = g_le_server_attributes.find(child);
+            if (it != g_le_server_attributes.end() && it->second.uuid == uuid)
+                return child;
+        }
+        return 0;
+    }
+
+    // The *_find answer (R2-34): the handle, or 0 with why in last-error, so
+    // every 0 carries a reason.
+    std::uint64_t found(std::uint64_t handle, const char* what, const std::string& uuid)
+    {
+        if (handle == 0)
+            fail(Error::NotFound, std::string("No ") + what + " with UUID " + uuid);
+        return handle;
     }
 
     constexpr std::string_view k_cccd_uuid = "00002902-0000-1000-8000-00805f9b34fb";
+
+    // The ATT limit on an attribute value.
+    constexpr std::size_t k_max_attribute_value = 512;
 
     // Mints the service's handles in definition order and gives each to its
     // backend as the id it keys the attribute by. The CCCD belongs to the
@@ -2397,9 +2445,11 @@ namespace
         LeServerService out;
         out.id = mint_le_server_attribute_locked(HandleKind::LeServerService, 0, canonical_uuid(service.uuid));
         out.uuid = service.uuid;
-        out.characteristics.reserve(service.characteristics.size());
+        if (!service.characteristics)
+            return out;
 
-        for (const auto& characteristic : service.characteristics)
+        out.characteristics.reserve(service.characteristics->size());
+        for (const auto& characteristic : *service.characteristics)
         {
             LeServerCharacteristic entry;
             entry.id = mint_le_server_attribute_locked(HandleKind::LeServerCharacteristic,
@@ -2407,18 +2457,23 @@ namespace
             entry.uuid = characteristic.uuid;
             entry.properties = characteristic.properties;
             entry.permissions = characteristic.permissions;
-            entry.value = characteristic.value;
+            if (characteristic.value)
+                entry.value = *characteristic.value;
 
-            for (const auto& descriptor : characteristic.descriptors)
+            if (characteristic.descriptors)
             {
-                const std::string descriptor_uuid = canonical_uuid(descriptor.uuid);
-                if (descriptor_uuid == k_cccd_uuid)
-                    continue;
+                for (const auto& descriptor : *characteristic.descriptors)
+                {
+                    const std::string descriptor_uuid = canonical_uuid(descriptor.uuid);
+                    if (descriptor_uuid == k_cccd_uuid)
+                        continue;
 
-                LeServerDescriptor d;
-                d.id = mint_le_server_attribute_locked(HandleKind::LeServerDescriptor, entry.id, descriptor_uuid);
-                d.uuid = descriptor.uuid;
-                entry.descriptors.push_back(std::move(d));
+                    LeServerDescriptor d;
+                    d.id = mint_le_server_attribute_locked(HandleKind::LeServerDescriptor, entry.id, descriptor_uuid);
+                    d.uuid = descriptor.uuid;
+                    d.value = descriptor.value;
+                    entry.descriptors.push_back(std::move(d));
+                }
             }
 
             out.characteristics.push_back(std::move(entry));
@@ -2426,6 +2481,315 @@ namespace
 
         return out;
     }
+
+    // The window a connect call asked for: k_default_connect_timeout when
+    // options or its timeout_ms is undefined. False, with InvalidArgument as
+    // the last error, outside 1-300 s.
+    bool connect_timeout(const std::optional<BluetoothConnectOptions>& options, std::chrono::milliseconds& timeout)
+    {
+        timeout = k_default_connect_timeout;
+        if (!options || !options->timeout_ms)
+            return true;
+
+        const std::int32_t ms = *options->timeout_ms;
+        if (ms < 1000 || ms > 300000)
+        {
+            fail(Error::InvalidArgument, "timeout_ms must be 1000-300000, got " + std::to_string(ms));
+            return false;
+        }
+        timeout = std::chrono::milliseconds(ms);
+        return true;
+    }
+
+    // A BluetoothLeScanFilter checked and in the form the matcher and the
+    // backends take: UUIDs canonical, every data entry with its key and every
+    // mask as long as its data (R2-134).
+    bool check_scan_filter(const BluetoothLeScanFilter& filter, LeScanFilter& out)
+    {
+        if (!filter.service_uuid && !filter.name && !filter.name_prefix && !filter.company_id && !filter.service_data_uuid)
+        {
+            fail(Error::InvalidArgument,
+                "A scan filter must set service_uuid, name, name_prefix, company_id or service_data_uuid");
+            return false;
+        }
+
+        if (filter.service_uuid)
+        {
+            if (!check_uuid(*filter.service_uuid))
+                return false;
+            out.service_uuid = canonical_uuid(*filter.service_uuid);
+        }
+        out.name = filter.name;
+        out.name_prefix = filter.name_prefix;
+
+        if (filter.company_id)
+        {
+            if (*filter.company_id < 0 || *filter.company_id > 0xFFFF)
+            {
+                fail(Error::InvalidArgument, "A scan filter's company_id must be 0-65535");
+                return false;
+            }
+            out.company_id = static_cast<std::uint16_t>(*filter.company_id);
+        }
+        if (filter.manufacturer_data && !filter.company_id)
+        {
+            fail(Error::InvalidArgument, "A scan filter's manufacturer_data needs its company_id");
+            return false;
+        }
+        if (filter.manufacturer_data_mask &&
+            (!filter.manufacturer_data || filter.manufacturer_data_mask->size() != filter.manufacturer_data->size()))
+        {
+            fail(Error::InvalidArgument, "A scan filter's manufacturer_data_mask needs manufacturer_data of the same length");
+            return false;
+        }
+        out.manufacturer_data = filter.manufacturer_data;
+        out.manufacturer_data_mask = filter.manufacturer_data_mask;
+
+        if (filter.service_data_uuid)
+        {
+            if (!check_uuid(*filter.service_data_uuid))
+                return false;
+            out.service_data_uuid = canonical_uuid(*filter.service_data_uuid);
+        }
+        if (filter.service_data && !filter.service_data_uuid)
+        {
+            fail(Error::InvalidArgument, "A scan filter's service_data needs its service_data_uuid");
+            return false;
+        }
+        if (filter.service_data_mask &&
+            (!filter.service_data || filter.service_data_mask->size() != filter.service_data->size()))
+        {
+            fail(Error::InvalidArgument, "A scan filter's service_data_mask needs service_data of the same length");
+            return false;
+        }
+        out.service_data = filter.service_data;
+        out.service_data_mask = filter.service_data_mask;
+        return true;
+    }
+
+    // Ends a scan session and, for LE, its filters. running is false in what
+    // comes back when no scan of that transport ran.
+    ScanSession end_scan(Transport transport)
+    {
+        ScanSession ended = end_session(scan_session(transport));
+        if (transport == Transport::LowEnergy)
+            g_scan_filters.start({});
+        return ended;
+    }
+
+    // A device a scan saw: cached and announced to the running scan of its
+    // transport (R2-73). An LE device must match that scan's filters on its
+    // merged record, and one not cached yet is held until it does. Nothing is
+    // taken while no scan of its transport runs. 0 when nothing took it.
+    std::uint64_t scan_saw_device(const DiscoveredDevice& device)
+    {
+        const Transport transport = device.transport;
+        if ((transport != Transport::LowEnergy && transport != Transport::Classic) ||
+            !session_running(scan_session(transport)))
+        {
+            g_dropped_events++;
+            return 0;
+        }
+
+        bool created = false;
+        std::uint64_t handle = 0;
+        if (transport == Transport::Classic)
+        {
+            handle = g_device_manager.upsert_device(device, true, &created);
+        }
+        else if (g_device_manager.find_id(device.id) == 0)
+        {
+            const auto admitted = g_scan_filters.admit(device);
+            if (!admitted)
+                return 0;
+            handle = g_device_manager.upsert_device(*admitted, true, &created);
+        }
+        else
+        {
+            handle = g_device_manager.upsert_device(device, true, &created);
+            const auto merged = g_device_manager.get_device(handle);
+            if (!merged || !g_scan_filters.admits(*merged))
+                return handle;
+        }
+
+        if (created)
+        {
+            GMBT_LOG("device added: handle=%llu transport=%d id='%s' name='%s' rssi=%d (available=%d) connectable=%d",
+                static_cast<unsigned long long>(handle),
+                static_cast<int>(device.transport),
+                device.id.c_str(),
+                device.name.c_str(),
+                device.rssi,
+                device.rssi_available ? 1 : 0,
+                device.connectable ? 1 : 0);
+        }
+
+        announce_device(transport, handle);
+        return handle;
+    }
+
+    // Fails or ends one LE client connection the core retires itself: a
+    // connect still in progress fails with error, an open link reports
+    // on_disconnected. The backend is told after the handle is retired, so
+    // anything it reports for the link later finds nothing.
+    void end_le_client_connection(std::uint64_t connection, Error error, const std::string& message)
+    {
+        const GMFunction connect_callback = g_le_connection_manager.take_connect_callback(connection);
+        const std::uint64_t device = g_le_connection_manager.get_device(connection);
+        const auto record = retire_le_connection(connection, error, message);
+        if (!record && !connect_callback)
+            return;
+
+        if (g_backend)
+        {
+            std::string ignored;
+            g_backend->le_disconnect(connection, ignored);
+        }
+
+        if (connect_callback)
+        {
+            // callback(error_code, message, connection, device)
+            invoke_callback("le_connect", connect_callback, static_cast<double>(error), message,
+                static_cast<double>(connection), static_cast<double>(device));
+        }
+        else
+        {
+            // on_disconnected(error_code, message, connection)
+            invoke_callback("le on_disconnected", counted(record->on_disconnected), static_cast<double>(error), message,
+                static_cast<double>(connection));
+        }
+    }
+
+    // As end_le_client_connection, for a Classic connection.
+    void end_classic_connection(std::uint64_t connection, Error error, const std::string& message)
+    {
+        const GMFunction connect_callback = g_classic_connection_manager.take_connect_callback(connection);
+        const std::uint64_t device = g_classic_connection_manager.get_device(connection);
+        const auto record = g_classic_connection_manager.take_connection(connection);
+        if (!record && !connect_callback)
+            return;
+
+        if (g_backend)
+        {
+            std::string ignored;
+            g_backend->classic_disconnect(connection, ignored);
+        }
+
+        if (connect_callback)
+        {
+            // callback(error_code, message, connection, device)
+            invoke_callback("classic_connect", connect_callback, static_cast<double>(error), message,
+                static_cast<double>(connection), static_cast<double>(device));
+        }
+        else
+        {
+            // on_disconnected(error_code, message, connection)
+            invoke_callback("classic on_disconnected", counted(record->on_disconnected), static_cast<double>(error),
+                message, static_cast<double>(connection));
+        }
+    }
+
+    // Ends advertising the core ends itself. With notify, a running
+    // advertisement reports on_stopped and a start still waiting fails with
+    // error; without, the start fails OperationFailed and nothing else fires
+    // (a server stop, rule 3).
+    void end_advertising(bool notify, Error error, const std::string& message)
+    {
+        const AdvertiseSession ended = end_session(g_advertise);
+        if (!ended.running)
+            return;
+
+        auto starts = g_le_ops.take_kind(LeOpKind::AdvertiseStart);
+        if (g_backend)
+        {
+            std::string ignored;
+            g_backend->le_advertise_stop(ignored);
+        }
+
+        if (!starts.empty())
+            fail_le_ops(std::move(starts), notify ? error : Error::OperationFailed,
+                notify ? message : std::string("Advertising was stopped before it started"));
+        else if (notify)
+            fire_stopped("advertise on_stopped", ended.on_stopped, error, message);
+    }
+
+    // Ends the LE server: its waiting requests are answered, queued service
+    // adds fail, advertising ends, every central leaves and the services go.
+    // With notify (the radio-off rule), each central reports on_disconnected,
+    // then the server on_stopped, all with error; without, nothing fires but
+    // the failed adds. Returns the backend's answer to the stop.
+    Error end_le_server(bool notify, Error error, const std::string& message, std::string& stop_message)
+    {
+        const LeServerSession ended = end_session(g_le_server);
+        if (!ended.running)
+            return Error::Ok;
+
+        answer_pending_le_server_requests();
+        fail_le_ops(g_le_ops.take_kind(LeOpKind::ServerAddService), notify ? error : Error::OperationFailed,
+            notify ? message : std::string("The LE server stopped before the service was added"));
+        end_advertising(notify, error, message);
+
+        Error stopped = Error::Ok;
+        if (g_backend)
+            stopped = g_backend->le_server_stop(stop_message);
+
+        retire_server_centrals(notify ? ended.on_disconnected : GMFunction(), error, message);
+        forget_le_server_services();
+
+        if (notify)
+            fire_stopped("le_server on_stopped", ended.on_stopped, error, message);
+        return stopped;
+    }
+
+    // Rule 5: when the radio is no longer on, everything running ends with
+    // BluetoothDisabled, each subject's last event fired from here, and
+    // nothing restarts when it comes back. Runs before state_changed fires,
+    // so GML hears the subjects end before the state that ended them.
+    void end_everything_for_radio_off()
+    {
+        const Error error = Error::BluetoothDisabled;
+        const std::string message = "Bluetooth was turned off or became unavailable";
+        std::string ignored;
+
+        for (const Transport transport : { Transport::LowEnergy, Transport::Classic })
+        {
+            const ScanSession ended = end_scan(transport);
+            if (!ended.running)
+                continue;
+            if (g_backend)
+            {
+                if (transport == Transport::LowEnergy)
+                    g_backend->le_scan_stop(ignored);
+                else
+                    g_backend->classic_scan_stop(ignored);
+            }
+            fire_stopped("scan on_stopped", ended.on_stopped, error, message);
+        }
+
+        end_advertising(true, error, message);
+
+        for (const std::uint64_t connection : g_le_connection_manager.handles())
+            end_le_client_connection(connection, error, message);
+        for (const std::uint64_t connection : g_classic_connection_manager.handles())
+            end_classic_connection(connection, error, message);
+
+        end_le_server(true, error, message, ignored);
+
+        const ClassicServerSession classic_server = end_session(g_classic_server);
+        if (classic_server.running)
+        {
+            if (g_backend)
+                g_backend->classic_server_stop(ignored);
+            fire_stopped("classic_server on_stopped", classic_server.on_stopped, error, message);
+        }
+
+        if (g_backend && g_backend->classic_discoverable_is_running())
+            g_backend->classic_discoverable_stop(ignored);
+    }
+
+    // BluetoothState raw values from spec.gmidl.
+    constexpr std::int32_t k_state_unknown = 0;
+    constexpr std::int32_t k_state_powered_on = 5;
 
     // Sends the current known state to the state callback, if one is set.
     // GMFunction::call queues safely into GameMaker's dispatcher.
@@ -2437,14 +2801,18 @@ namespace
         const GMFunction callback = registered_callback(g_callback_state_changed);
         const std::int32_t state = g_backend
             ? g_backend->current_bluetooth_state()
-            : 0; // BluetoothState.Unknown
+            : k_state_unknown;
         invoke_callback("current state_changed", callback, static_cast<double>(state));
     }
 
     void dispatch_state_changed(const BackendEvent& event)
     {
+        if (event.value != k_state_unknown && event.value != k_state_powered_on)
+            end_everything_for_radio_off();
+
         std::scoped_lock dispatch_lock(g_state_dispatch_mutex);
-        invoke_callback("state_changed", event_callback(g_callback_state_changed), static_cast<double>(event.value));
+        invoke_callback("state_changed", counted(registered_callback(g_callback_state_changed)),
+            static_cast<double>(event.value));
     }
 
     void dispatch_le_connect_result(const BackendEvent& event)
@@ -2471,22 +2839,29 @@ namespace
 
     void dispatch_le_disconnected(const BackendEvent& event)
     {
-        // 0 only if the peripheral was never connected through
-        // bluetooth_le_connect. A connection already retired - by
-        // bluetooth_le_disconnect, or by the other of the two reports Apple
-        // can make for one drop - has had its disconnect.
+        // A connection already retired - by bluetooth_le_disconnect, the
+        // radio-off rule, or the other of the two reports Apple can make for
+        // one drop - has had its end (R1-77).
         const std::uint64_t connection = event.connection;
-        if (!g_le_connection_manager.is_valid(connection))
+        const auto record = retire_le_connection(connection);
+        if (!record)
         {
             g_dropped_events++;
             return;
         }
-        retire_le_connection(connection);
 
         const Error error = event.error != Error::Ok ? event.error : Error::Disconnected;
-        // callback(error_code, message, connection)
-        invoke_callback("le_disconnected", event_callback(g_callback_le_disconnected),
-            static_cast<double>(error), event.message, static_cast<double>(connection));
+        if (const GMFunction connect_callback = g_le_connection_manager.take_connect_callback(connection))
+        {
+            // A link that drops before its open was reported never opened.
+            // callback(error_code, message, connection, device)
+            invoke_callback("le_connect", connect_callback, static_cast<double>(Error::ConnectionFailed), event.message,
+                static_cast<double>(connection), static_cast<double>(record->device));
+            return;
+        }
+        // on_disconnected(error_code, message, connection)
+        invoke_callback("le on_disconnected", counted(record->on_disconnected), static_cast<double>(error), event.message,
+            static_cast<double>(connection));
     }
 
     void dispatch_le_value_changed(BackendEvent& event)
@@ -2501,21 +2876,22 @@ namespace
             : 0;
         if (!characteristic)
         {
-            GMBT_TRACE("LE characteristic_value_changed for unknown characteristic %llu (connection=%llu), dropping",
+            GMBT_TRACE("LE value for unknown characteristic %llu (connection=%llu), dropping",
                 static_cast<unsigned long long>(characteristic_instance), static_cast<unsigned long long>(connection));
             g_dropped_events++;
             return;
         }
 
-        const GMFunction callback = event_callback(g_callback_le_characteristic_value_changed);
-        if (!callback)
+        // Unsubscribed meanwhile: the value is never stored.
+        const GMFunction on_value = counted(subscription_receiver(characteristic));
+        if (!on_value)
             return;
 
         const std::size_t size = event.bytes.size();
         const std::uint64_t value = store_value(std::move(event.bytes), ValueOwner::Le);
 
-        // callback(characteristic, connection, value, size)
-        invoke_callback("le_characteristic_value_changed", callback, static_cast<double>(characteristic),
+        // on_value(characteristic, connection, value, size)
+        invoke_callback("le on_value", on_value, static_cast<double>(characteristic),
             static_cast<double>(connection), static_cast<double>(value), static_cast<double>(size));
     }
 
@@ -2525,9 +2901,12 @@ namespace
     void dispatch_le_server_central(const BackendEvent& event)
     {
         if (event.connected)
+        {
             note_server_central(event.central.key, le_server_event_device(event.central));
-        else
-            retire_server_central(event.central.key);
+            return;
+        }
+        const Error error = event.error != Error::Ok ? event.error : Error::Disconnected;
+        retire_server_central(event.central.key, error, event.message);
     }
 
     void dispatch_le_server_read_request(const BackendEvent& event)
@@ -2545,8 +2924,8 @@ namespace
         const std::int32_t offset = static_cast<std::int32_t>(event.offset);
         const std::uint64_t connection = note_server_central(event.central.key, le_server_event_device(event.central));
 
-        const GMFunction callback = event_callback(g_callback_le_server_read_request);
-        if (!callback)
+        const GMFunction on_read = counted(le_server_callback(&LeServerSession::on_read));
+        if (!on_read)
         {
             // Nobody will answer it, so the central hears now instead of
             // waiting out the ATT timeout and dropping the link.
@@ -2563,9 +2942,9 @@ namespace
             g_pending_le_server_requests[request_id] = std::move(request);
         }
 
-        // callback(request_id, connection, characteristic, descriptor_or_0, offset)
+        // on_read(request_id, connection, characteristic, descriptor, offset)
         // GML answers with the value's bytes from offset on, as on Android.
-        invoke_callback("le_server_read_request", callback, static_cast<double>(request_id), static_cast<double>(connection),
+        invoke_callback("le_server on_read", on_read, static_cast<double>(request_id), static_cast<double>(connection),
             static_cast<double>(characteristic), static_cast<double>(descriptor), static_cast<double>(offset));
     }
 
@@ -2586,8 +2965,8 @@ namespace
         const std::int32_t offset = static_cast<std::int32_t>(event.offset);
         const std::uint64_t connection = note_server_central(event.central.key, le_server_event_device(event.central));
 
-        const GMFunction callback = event_callback(g_callback_le_server_write_request);
-        if (!callback)
+        const GMFunction on_write = counted(le_server_callback(&LeServerSession::on_write));
+        if (!on_write)
         {
             // As for a read; a write without response needs no answer.
             if (response_needed)
@@ -2608,21 +2987,37 @@ namespace
             g_pending_le_server_requests[request_id] = std::move(request);
         }
 
-        // callback(request_id, connection, characteristic, descriptor_or_0, offset, response_needed, value, size)
-        invoke_callback("le_server_write_request", callback, static_cast<double>(request_id), static_cast<double>(connection),
+        // on_write(request_id, connection, characteristic, descriptor, offset, response_needed, value, size)
+        invoke_callback("le_server on_write", on_write, static_cast<double>(request_id), static_cast<double>(connection),
             static_cast<double>(characteristic), static_cast<double>(descriptor), static_cast<double>(offset), response_needed,
             static_cast<double>(value_id), static_cast<double>(size));
     }
 
+    // A scan the backend ended: a stop the core asked for is never reported,
+    // so this is the scan's last event.
     void dispatch_scan_stopped(const BackendEvent& event)
     {
-        // callback(error_code, message, transport)
-        invoke_callback("scan_stopped", event_callback(g_callback_scan_stopped),
-            static_cast<double>(event.error), event.message, static_cast<double>(event.transport));
+        const ScanSession ended = end_scan(event.transport);
+        if (!ended.running)
+        {
+            g_dropped_events++;
+            return;
+        }
+        fire_stopped("scan on_stopped", ended.on_stopped, event.error, event.message);
     }
 
-    // The connect completion callback is one-shot and per-connection, not
-    // one of the persistently-registered callbacks.
+    void dispatch_le_advertise_stopped(const BackendEvent& event)
+    {
+        const AdvertiseSession ended = end_session(g_advertise);
+        if (!ended.running)
+        {
+            g_dropped_events++;
+            return;
+        }
+        const Error error = event.error != Error::Ok ? event.error : Error::OperationFailed;
+        fire_stopped("advertise on_stopped", ended.on_stopped, error, event.message);
+    }
+
     void dispatch_classic_connect_result(const BackendEvent& event)
     {
         // The core knows which device the handle was made for; a backend
@@ -2646,10 +3041,18 @@ namespace
             static_cast<double>(event.connection), static_cast<double>(device));
     }
 
+    // An inbound link the backend accepted, already given its connection
+    // through create_classic_connection.
     void dispatch_classic_client_connected(const BackendEvent& event)
     {
-        // callback(connection, device)
-        invoke_callback("classic_client_connected", event_callback(g_callback_classic_client_connected),
+        GMFunction on_connected;
+        {
+            std::scoped_lock lock(g_session_mutex);
+            if (g_classic_server.running)
+                on_connected = g_classic_server.on_connected;
+        }
+        // on_connected(connection, device)
+        invoke_callback("classic_server on_connected", counted(on_connected),
             static_cast<double>(event.connection), static_cast<double>(event.device));
     }
 
@@ -2659,11 +3062,10 @@ namespace
     void dispatch_classic_data(BackendEvent& event)
     {
         const bool valid = g_classic_connection_manager.is_valid(event.connection);
-        const GMFunction callback = valid ? event_callback(g_callback_classic_data) : GMFunction();
-        if (!callback)
+        const GMFunction on_data = valid ? g_classic_connection_manager.get_on_data(event.connection) : GMFunction();
+        if (!on_data)
         {
-            if (!valid)
-                g_dropped_events++;
+            g_dropped_events++;
             if (g_backend)
                 g_backend->classic_receive_consumed(event.connection, event.bytes.size());
             return;
@@ -2671,26 +3073,33 @@ namespace
 
         const std::size_t size = event.bytes.size();
         const std::uint64_t value = store_value(std::move(event.bytes), ValueOwner::Classic, event.connection);
-        // callback(connection, value, size)
-        invoke_callback("classic_data", callback, static_cast<double>(event.connection), static_cast<double>(value),
+        // on_data(connection, value, size)
+        invoke_callback("classic on_data", on_data, static_cast<double>(event.connection), static_cast<double>(value),
             static_cast<double>(size));
     }
 
     void dispatch_classic_disconnected(const BackendEvent& event)
     {
-        if (!g_classic_connection_manager.is_valid(event.connection))
+        // Every byte reached GML as a value before this, so the handle is
+        // retired here, as an LE link is (R1-245).
+        const auto record = g_classic_connection_manager.take_connection(event.connection);
+        if (!record)
         {
             g_dropped_events++;
             return;
         }
 
-        // Every byte reached GML as a value before this, so the handle is
-        // retired here, as an LE link is (R1-245).
-        g_classic_connection_manager.remove_connection(event.connection);
-
-        // callback(error_code, message, connection)
-        invoke_callback("classic_disconnected", event_callback(g_callback_classic_disconnected),
-            static_cast<double>(event.error), event.message, static_cast<double>(event.connection));
+        if (const GMFunction connect_callback = g_classic_connection_manager.take_connect_callback(event.connection))
+        {
+            // callback(error_code, message, connection, device)
+            invoke_callback("classic_connect", connect_callback, static_cast<double>(Error::ConnectionFailed),
+                event.message, static_cast<double>(event.connection), static_cast<double>(record->device));
+            return;
+        }
+        const Error error = event.error != Error::Ok ? event.error : Error::Disconnected;
+        // on_disconnected(error_code, message, connection)
+        invoke_callback("classic on_disconnected", counted(record->on_disconnected), static_cast<double>(error),
+            event.message, static_cast<double>(event.connection));
     }
 
     // Same one-shot idea as a connect, but keyed by device handle since
@@ -2716,8 +3125,8 @@ namespace
         invoke_callback("pair", callback, static_cast<double>(event.error), event.message, static_cast<double>(event.device));
     }
 
-    // The devices a query found enter the cache without device_found, like a
-    // server central, and the callback gets their handles.
+    // The devices a query found enter the cache without any scan callback,
+    // like a server central, and the callback gets their handles.
     void dispatch_devices_queried(const BackendEvent& event)
     {
         GMFunction callback;
@@ -2740,7 +3149,7 @@ namespace
         {
             for (const auto& device : event.devices)
             {
-                const double handle = static_cast<double>(g_device_manager.upsert_device(device));
+                const double handle = static_cast<double>(g_device_manager.upsert_device(device, false));
                 if (std::find(devices.begin(), devices.end(), handle) == devices.end())
                     devices.push_back(handle);
             }
@@ -2752,43 +3161,34 @@ namespace
     {
         CoreHooks hooks;
         hooks.upsert_device = [](const DiscoveredDevice& device) {
-            // Only LE scans report LE devices through this hook, so the scan's
-            // filters decide whether a new one enters the cache; one already in
-            // it keeps updating. 0 tells the scan path the device was held.
-            std::optional<DiscoveredDevice> admitted;
-            if (device.transport == Transport::LowEnergy && g_device_manager.find_id(device.id) == 0)
-            {
-                admitted = g_scan_filters.admit(device);
-                if (!admitted)
-                    return std::uint64_t{ 0 };
-            }
-
-            bool created = false;
-            const std::uint64_t handle = g_device_manager.upsert_device(admitted ? *admitted : device, &created);
-            if (!created)
-                return handle;
-
-            GMBT_LOG("device added: handle=%llu transport=%d id='%s' name='%s' rssi=%d (available=%d) connectable=%d",
-                static_cast<unsigned long long>(handle),
-                static_cast<int>(device.transport),
-                device.id.c_str(),
-                device.name.c_str(),
-                device.rssi,
-                device.rssi_available ? 1 : 0,
-                device.connectable ? 1 : 0);
-
-            invoke_callback("device_found", event_callback(g_callback_device_found), static_cast<double>(handle));
-            return handle;
+            return scan_saw_device(device);
         };
+        hooks.add_device = [](const DiscoveredDevice& device) {
+            return g_device_manager.upsert_device(device, false);
+        };
+        // An inbound link serves the running server's on_data and
+        // on_disconnected, and keeps them after the server stops.
         hooks.create_classic_connection = [](std::uint64_t device) {
-            const std::uint64_t connection = g_classic_connection_manager.create_connection(device);
+            ConnectionRecord record;
+            record.device = device;
+            {
+                std::scoped_lock lock(g_session_mutex);
+                if (g_classic_server.running)
+                {
+                    record.on_data = g_classic_server.on_data;
+                    record.on_disconnected = g_classic_server.on_disconnected;
+                }
+            }
+            const std::uint64_t connection = g_classic_connection_manager.create_connection(std::move(record));
             GMBT_LOG("classic connection created: connection=%llu device=%llu",
                 static_cast<unsigned long long>(connection),
                 static_cast<unsigned long long>(device));
             return connection;
         };
         hooks.create_le_connection = [](std::uint64_t device) {
-            const std::uint64_t connection = g_le_connection_manager.create_connection(device);
+            ConnectionRecord record;
+            record.device = device;
+            const std::uint64_t connection = g_le_connection_manager.create_connection(std::move(record));
             GMBT_LOG("LE connection created: connection=%llu device=%llu",
                 static_cast<unsigned long long>(connection),
                 static_cast<unsigned long long>(device));
@@ -2834,6 +3234,9 @@ namespace
                 case BackendEventType::LeServerCentral:
                     dispatch_le_server_central(event);
                     return;
+                case BackendEventType::LeAdvertiseStopped:
+                    dispatch_le_advertise_stopped(event);
+                    return;
                 case BackendEventType::LeServerReadRequest:
                     dispatch_le_server_read_request(event);
                     return;
@@ -2841,10 +3244,14 @@ namespace
                     dispatch_le_server_write_request(event);
                     return;
                 case BackendEventType::LeServerServicesReset:
-                    // The platform dropped the server's services and the game
-                    // adds them again, so none of them is a duplicate now.
-                    forget_le_server_services();
+                {
+                    // The services are gone with the radio: the server ends as
+                    // the radio-off rule ends it (R2-85).
+                    std::string ignored;
+                    end_le_server(true, Error::BluetoothDisabled, "The platform dropped the GATT server's services",
+                        ignored);
                     return;
+                }
                 case BackendEventType::LeOpCompleted:
                     complete_le_op(event);
                     return;
@@ -2927,7 +3334,7 @@ void bluetooth_shutdown()
     }
 
     // Every one-shot callback still waiting is failed once, with its usual
-    // arguments; the registered event callbacks stay (R1-64).
+    // arguments (R1-64).
     const std::string message = "Bluetooth was shut down before the operation completed";
     fail_le_ops(g_le_ops.take_all(), Error::NotInitialized, message);
 
@@ -2953,6 +3360,14 @@ void bluetooth_shutdown()
     for (const auto& [query, callback] : query_callbacks)
         fire_query_callback(callback, Error::NotInitialized, message, {});
 
+    // Every event callback goes without firing (rule 7); state_changed stays.
+    end_session(g_le_scan);
+    end_session(g_classic_scan);
+    end_session(g_advertise);
+    end_session(g_le_server);
+    end_session(g_classic_server);
+    { std::scoped_lock lock(g_subscriptions_mutex); g_subscriptions.clear(); }
+    { std::scoped_lock lock(g_discovery_jobs_mutex); g_discovery_jobs.clear(); }
     g_scan_filters.start({});
 
     {
@@ -2988,38 +3403,13 @@ std::string bluetooth_last_error_message()
     return g_last_error_message;
 }
 
-bool bluetooth_le_is_supported()
-{
-    return g_backend && g_backend->supports_ble();
-}
-
-bool bluetooth_le_advertise_is_supported()
-{
-    return g_backend && g_backend->supports_le_advertise();
-}
-
-bool bluetooth_le_server_is_supported()
-{
-    return g_backend && g_backend->supports_le_server();
-}
-
-bool bluetooth_classic_is_supported()
-{
-    return g_backend && g_backend->supports_classic();
-}
-
-bool bluetooth_classic_server_is_supported()
-{
-    return g_backend && g_backend->supports_classic_server();
-}
-
 bool bluetooth_feature_is_supported(BluetoothFeature feature)
 {
     if (!g_backend)
         return false;
 
-    // The five with their own query answer the same here; the backend knows
-    // the rest (R1-79).
+    // The roles come from the backend's supports_* calls, the rest from its
+    // feature list (R1-79).
     switch (feature)
     {
         case BluetoothFeature::LeCentral: return g_backend->supports_ble();
@@ -3089,7 +3479,7 @@ BluetoothError bluetooth_request_enable(const gm::wire::GMFunction& callback)
         return to_gm(g_last_error);
 
     // Already on: the answer is known, so it fires at once (R1-143).
-    if (g_backend->current_bluetooth_state() == 5) // PoweredOn
+    if (g_backend->current_bluetooth_state() == k_state_powered_on)
     {
         // callback(error_code, message)
         invoke_callback("request_enable", callback, static_cast<double>(Error::Ok), std::string());
@@ -3117,88 +3507,100 @@ BluetoothError bluetooth_request_enable(const gm::wire::GMFunction& callback)
     return to_gm(error);
 }
 
-BluetoothError bluetooth_le_scan_start(bool active, const std::vector<BluetoothLeScanFilter>& filters)
+// --- Scans ---
+
+BluetoothError bluetooth_le_scan_start(const std::optional<BluetoothLeScanSettings>& settings,
+    const std::optional<std::vector<BluetoothLeScanFilter>>& filters, const gm::wire::GMFunction& on_found,
+    const std::optional<gm::wire::GMFunction>& on_updated, const std::optional<gm::wire::GMFunction>& on_stopped)
 {
-    GMBT_LOG("BLE scan start requested (active=%d, filters=%zu)", active ? 1 : 0, filters.size());
+    GMBT_LOG("BLE scan start requested (filters=%zu)", filters ? filters->size() : std::size_t{ 0 });
 
     if (!require_backend())
-    {
-        GMBT_LOG("BLE scan start rejected: backend is not initialized");
         return to_gm(g_last_error);
+
+    LeScanSettings scan_settings;
+    std::chrono::milliseconds update_interval(1000);
+    if (settings)
+    {
+        if (settings->active)
+            scan_settings.active = *settings->active;
+        if (settings->mode)
+        {
+            const auto mode = static_cast<std::int32_t>(*settings->mode);
+            if (mode < static_cast<std::int32_t>(LeScanMode::LowPower) || mode > static_cast<std::int32_t>(LeScanMode::LowLatency))
+                return fail(Error::InvalidArgument, "mode must be a BluetoothLeScanMode");
+            scan_settings.mode = static_cast<LeScanMode>(mode);
+        }
+        if (settings->update_interval_ms)
+        {
+            const std::int32_t ms = *settings->update_interval_ms;
+            if (ms < 0 || ms > 60000)
+                return fail(Error::InvalidArgument, "update_interval_ms must be 0-60000, got " + std::to_string(ms));
+            update_interval = std::chrono::milliseconds(ms);
+        }
     }
 
     std::vector<LeScanFilter> checked;
-    checked.reserve(filters.size());
-    for (const auto& filter : filters)
+    if (filters)
     {
-        if (!filter.service_uuid && !filter.name && !filter.company_id)
-            return fail(Error::InvalidArgument, "A scan filter must set service_uuid, name or company_id");
-
-        LeScanFilter out;
-        if (filter.service_uuid)
+        checked.reserve(filters->size());
+        for (const auto& filter : *filters)
         {
-            if (!check_uuid(*filter.service_uuid))
+            LeScanFilter out;
+            if (!check_scan_filter(filter, out))
                 return to_gm(g_last_error);
-            out.service_uuid = canonical_uuid(*filter.service_uuid);
+            checked.push_back(std::move(out));
         }
-        out.name = filter.name;
-        if (filter.company_id)
-        {
-            if (*filter.company_id < 0 || *filter.company_id > 0xFFFF)
-                return fail(Error::InvalidArgument, "A scan filter's company_id must be 0-65535");
-            out.company_id = static_cast<std::uint16_t>(*filter.company_id);
-        }
-        checked.push_back(std::move(out));
     }
 
     if (!check_radio())
         return to_gm(g_last_error);
 
-    // A start while scanning starts nothing new and keeps that scan's filters.
-    if (g_backend->le_scan_is_running())
-    {
-        GMBT_LOG("BLE scan start: already running, filters unchanged");
-        return to_gm(Error::Ok);
-    }
+    if (session_running(g_le_scan))
+        return fail(Error::Busy, "An LE scan is already running; stop it first");
 
-    // In place before the backend starts: results can arrive before it returns.
+    // In place before the backend starts: results can arrive before it
+    // returns. Starts run on the game thread only, and no result is taken
+    // while no scan runs, so nothing reads the filters in between.
     g_scan_filters.start(checked);
 
+    ScanSession session;
+    session.on_found = on_found;
+    session.on_updated = optional_callback(on_updated);
+    session.on_stopped = optional_callback(on_stopped);
+    session.update_interval = update_interval;
+    if (!begin_session(g_le_scan, std::move(session)))
+        return fail(Error::Busy, "An LE scan is already running; stop it first");
+
     std::string message;
-    const Error error = g_backend->le_scan_start(active, checked, message);
+    const Error error = g_backend->le_scan_start(scan_settings, checked, message);
     set_last_error(error, message);
     if (error != Error::Ok)
-        g_scan_filters.start({});
-    GMBT_LOG("BLE scan start -> error=%d message='%s' | backend reports running=%d",
-        static_cast<int>(error),
-        message.c_str(),
-        g_backend->le_scan_is_running() ? 1 : 0);
+        end_scan(Transport::LowEnergy);
+    GMBT_LOG("BLE scan start -> error=%d message='%s'", static_cast<int>(error), message.c_str());
     return to_gm(error);
 }
 
 BluetoothError bluetooth_le_scan_stop()
 {
-    GMBT_LOG("BLE scan stop requested");
-
     if (!require_backend())
-    {
-        GMBT_LOG("BLE scan stop rejected: backend is not initialized");
         return to_gm(g_last_error);
-    }
+
+    // Ended before the backend is asked, so nothing it reports for the scan
+    // reaches GML (rule 3).
+    if (!end_scan(Transport::LowEnergy).running)
+        return to_gm(Error::Ok);
 
     std::string message;
     const Error error = g_backend->le_scan_stop(message);
     set_last_error(error, message);
-    GMBT_LOG("BLE scan stop -> error=%d message='%s' | backend reports running=%d",
-        static_cast<int>(error),
-        message.c_str(),
-        g_backend->le_scan_is_running() ? 1 : 0);
+    GMBT_LOG("BLE scan stop -> error=%d message='%s'", static_cast<int>(error), message.c_str());
     return to_gm(error);
 }
 
 bool bluetooth_le_scan_is_running()
 {
-    const bool running = g_backend && g_backend->le_scan_is_running();
+    const bool running = session_running(g_le_scan);
 
     // Polled from Step and Draw every frame - only speak up on a transition.
     static int last_running = -1;
@@ -3211,7 +3613,8 @@ bool bluetooth_le_scan_is_running()
     return running;
 }
 
-BluetoothError bluetooth_classic_scan_start()
+BluetoothError bluetooth_classic_scan_start(const gm::wire::GMFunction& on_found,
+    const std::optional<gm::wire::GMFunction>& on_updated, const std::optional<gm::wire::GMFunction>& on_stopped)
 {
     if (!require_backend())
         return to_gm(g_last_error);
@@ -3219,9 +3622,20 @@ BluetoothError bluetooth_classic_scan_start()
     if (!check_radio())
         return to_gm(g_last_error);
 
+    // No throttle: a Classic device answers an inquiry rarely, and a resolved
+    // name is worth reporting at once.
+    ScanSession session;
+    session.on_found = on_found;
+    session.on_updated = optional_callback(on_updated);
+    session.on_stopped = optional_callback(on_stopped);
+    if (!begin_session(g_classic_scan, std::move(session)))
+        return fail(Error::Busy, "A Classic scan is already running; stop it first");
+
     std::string message;
     const Error error = g_backend->classic_scan_start(message);
     set_last_error(error, message);
+    if (error != Error::Ok)
+        end_scan(Transport::Classic);
     return to_gm(error);
 }
 
@@ -3229,6 +3643,9 @@ BluetoothError bluetooth_classic_scan_stop()
 {
     if (!require_backend())
         return to_gm(g_last_error);
+
+    if (!end_scan(Transport::Classic).running)
+        return to_gm(Error::Ok);
 
     std::string message;
     const Error error = g_backend->classic_scan_stop(message);
@@ -3238,22 +3655,29 @@ BluetoothError bluetooth_classic_scan_stop()
 
 bool bluetooth_classic_scan_is_running()
 {
-    return g_backend && g_backend->classic_scan_is_running();
+    return session_running(g_classic_scan);
 }
+
+// --- Device cache ---
 
 void bluetooth_device_clear()
 {
     GMBT_LOG("clearing device cache (%d cached)", g_device_manager.get_count());
     g_device_manager.clear();
     g_scan_filters.clear_pending();
+
+    // Handles are never reused, so what the scans announced names nothing now.
+    std::scoped_lock lock(g_session_mutex);
+    g_le_scan.announced.clear();
+    g_classic_scan.announced.clear();
 }
 
-int bluetooth_device_get_count()
+std::int32_t bluetooth_device_get_count()
 {
     return g_device_manager.get_count();
 }
 
-std::uint64_t bluetooth_device_get_at(int index)
+std::uint64_t bluetooth_device_get_at(std::int32_t index)
 {
     return g_device_manager.get_at(index);
 }
@@ -3281,28 +3705,29 @@ std::string bluetooth_device_get_name(std::uint64_t device)
     return dev ? dev->name : std::string();
 }
 
-bool bluetooth_device_has_address(std::uint64_t device)
+std::optional<std::string> bluetooth_device_get_address(std::uint64_t device)
 {
     const auto dev = g_device_manager.get_device(device);
-    return dev ? dev->address_available : false;
+    if (!dev || !dev->address_available)
+        return std::nullopt;
+    return dev->address;
 }
 
-std::string bluetooth_device_get_address(std::uint64_t device)
+std::optional<std::int32_t> bluetooth_device_get_rssi(std::uint64_t device)
 {
     const auto dev = g_device_manager.get_device(device);
-    return dev ? dev->address : std::string();
+    if (!dev || !dev->rssi_available)
+        return std::nullopt;
+    return dev->rssi;
 }
 
-bool bluetooth_device_has_rssi(std::uint64_t device)
+std::optional<std::int32_t> bluetooth_device_get_last_seen_age(std::uint64_t device)
 {
-    const auto dev = g_device_manager.get_device(device);
-    return dev ? dev->rssi_available : false;
-}
-
-int bluetooth_device_get_rssi(std::uint64_t device)
-{
-    const auto dev = g_device_manager.get_device(device);
-    return dev ? dev->rssi : 0;
+    const auto age = g_device_manager.last_seen_age(device);
+    if (!age)
+        return std::nullopt;
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(*age).count();
+    return static_cast<std::int32_t>(std::min<long long>(ms, INT32_MAX));
 }
 
 bool bluetooth_device_is_connectable(std::uint64_t device)
@@ -3347,7 +3772,7 @@ std::uint64_t bluetooth_device_from_id(std::string_view id)
     if (error != Error::Ok)
         return 0;
 
-    const std::uint64_t handle = g_device_manager.upsert_device(device);
+    const std::uint64_t handle = g_device_manager.upsert_device(device, false);
     GMBT_LOG("device from id '%s' -> handle=%llu", key.c_str(), static_cast<unsigned long long>(handle));
     return handle;
 }
@@ -3356,6 +3781,10 @@ BluetoothError bluetooth_le_connected_devices_query(const std::vector<std::strin
 {
     if (!require_backend())
         return to_gm(g_last_error);
+
+    // The same answer everywhere, though only Apple can filter (R2-128).
+    if (service_uuids.empty())
+        return fail(Error::InvalidArgument, "service_uuids must name at least one service");
 
     std::vector<std::string> uuids;
     uuids.reserve(service_uuids.size());
@@ -3390,20 +3819,29 @@ BluetoothError bluetooth_paired_devices_query(const gm::wire::GMFunction& callba
     });
 }
 
-std::uint64_t bluetooth_classic_connect(std::uint64_t device, std::string_view service_uuid, const gm::wire::GMFunction& callback)
+// --- Bluetooth Classic ---
+
+std::uint64_t bluetooth_classic_connect(std::uint64_t device, std::string_view service_uuid,
+    const std::optional<BluetoothConnectOptions>& options, const gm::wire::GMFunction& on_data,
+    const gm::wire::GMFunction& on_disconnected, const gm::wire::GMFunction& callback)
 {
     if (!require_backend())
         return 0;
 
+    std::chrono::milliseconds timeout;
     const auto dev = check_device(device, Transport::Classic);
-    if (!dev || !check_uuid(service_uuid) || !check_radio())
+    if (!dev || !check_uuid(service_uuid) || !connect_timeout(options, timeout) || !check_radio())
         return 0;
 
-    const std::uint64_t connection = g_classic_connection_manager.create_connection(device);
+    ConnectionRecord record;
+    record.device = device;
+    record.on_data = on_data;
+    record.on_disconnected = on_disconnected;
+    const std::uint64_t connection = g_classic_connection_manager.create_connection(std::move(record));
     g_classic_connection_manager.set_connect_callback(connection, callback);
 
     std::string message;
-    const Error error = g_backend->classic_connect(connection, *dev, std::string(service_uuid), message);
+    const Error error = g_backend->classic_connect(connection, *dev, canonical_uuid(service_uuid), timeout, message);
     set_last_error(error, message);
 
     if (error != Error::Ok)
@@ -3469,22 +3907,22 @@ BluetoothError bluetooth_classic_disconnect(std::uint64_t connection)
     if (!require_backend())
         return to_gm(g_last_error);
 
-    if (!g_classic_connection_manager.is_valid(connection))
+    // Retired before the backend is asked, so its report of the close finds
+    // nothing (rule 3). A connect still in flight is cancelled, not
+    // completed: its callback fires now, and a late completion finds none.
+    const GMFunction connect_callback = g_classic_connection_manager.take_connect_callback(connection);
+    const auto record = g_classic_connection_manager.take_connection(connection);
+    if (!record)
         return fail(Error::InvalidHandle, "Invalid Bluetooth Classic connection handle");
 
     std::string message;
     const Error error = g_backend->classic_disconnect(connection, message);
     set_last_error(error, message);
 
-    // A connect still in flight is cancelled, not completed: its callback
-    // fires now, and a late completion from the backend finds none.
-    const GMFunction connect_callback = g_classic_connection_manager.take_connect_callback(connection);
-    const std::uint64_t device = g_classic_connection_manager.get_device(connection);
-    g_classic_connection_manager.remove_connection(connection);
     // callback(error_code, message, connection, device)
     invoke_callback("classic_connect", connect_callback, static_cast<double>(Error::ConnectionFailed),
         std::string("Connection cancelled by bluetooth_classic_disconnect"), static_cast<double>(connection),
-        static_cast<double>(device));
+        static_cast<double>(record->device));
 
     return to_gm(error);
 }
@@ -3522,8 +3960,9 @@ BluetoothError bluetooth_classic_send(std::uint64_t connection, struct gm::wire:
     return to_gm(error);
 }
 
-
-BluetoothError bluetooth_classic_server_start(std::string_view name, std::string_view service_uuid)
+BluetoothError bluetooth_classic_server_start(std::string_view name, std::string_view service_uuid,
+    const gm::wire::GMFunction& on_connected, const gm::wire::GMFunction& on_data,
+    const gm::wire::GMFunction& on_disconnected, const std::optional<gm::wire::GMFunction>& on_stopped)
 {
     if (!require_backend())
         return to_gm(g_last_error);
@@ -3534,21 +3973,31 @@ BluetoothError bluetooth_classic_server_start(std::string_view name, std::string
     if (!check_uuid(service_uuid) || !check_radio())
         return to_gm(g_last_error);
 
-    // One answer on every platform, rather than a running server that quietly
-    // keeps its old name and UUID.
-    if (g_backend->classic_server_is_running())
+    // In place before the backend starts: a link can arrive before it returns.
+    ClassicServerSession session;
+    session.on_connected = on_connected;
+    session.on_data = on_data;
+    session.on_disconnected = on_disconnected;
+    session.on_stopped = optional_callback(on_stopped);
+    if (!begin_session(g_classic_server, std::move(session)))
         return fail(Error::Busy, "A Classic server is already running; stop it first");
 
     std::string message;
-    const Error error = g_backend->classic_server_start(std::string(name), std::string(service_uuid), message);
+    const Error error = g_backend->classic_server_start(std::string(name), canonical_uuid(service_uuid), message);
     set_last_error(error, message);
+    if (error != Error::Ok)
+        end_session(g_classic_server);
     return to_gm(error);
 }
 
+// The links the server accepted stay open, with their callbacks.
 BluetoothError bluetooth_classic_server_stop()
 {
     if (!require_backend())
         return to_gm(g_last_error);
+
+    if (!end_session(g_classic_server).running)
+        return to_gm(Error::Ok);
 
     std::string message;
     const Error error = g_backend->classic_server_stop(message);
@@ -3558,10 +4007,10 @@ BluetoothError bluetooth_classic_server_stop()
 
 bool bluetooth_classic_server_is_running()
 {
-    return g_backend && g_backend->classic_server_is_running();
+    return session_running(g_classic_server);
 }
 
-BluetoothError bluetooth_classic_discoverable_start(std::int32_t duration_seconds)
+BluetoothError bluetooth_classic_discoverable_start(std::int32_t duration_seconds, const gm::wire::GMFunction& callback)
 {
     if (!require_backend())
         return to_gm(g_last_error);
@@ -3572,10 +4021,23 @@ BluetoothError bluetooth_classic_discoverable_start(std::int32_t duration_second
     if (!check_radio())
         return to_gm(g_last_error);
 
+    if (g_backend->classic_discoverable_is_running())
+        return fail(Error::Busy, "The device is already discoverable");
+
+    // The same bounds everywhere, Android's (R2-130).
+    const std::int32_t granted = duration_seconds <= 0 ? 120 : std::clamp(duration_seconds, 1, 3600);
+
     std::string message;
-    const Error error = g_backend->classic_discoverable_start(duration_seconds, message);
+    const Error error = g_backend->classic_discoverable_start(granted, message);
     set_last_error(error, message);
-    return to_gm(error);
+    if (error != Error::Ok)
+        return to_gm(error);
+
+    // The backends here grant it at once (R2-129).
+    // callback(error_code, message, duration_seconds)
+    invoke_callback("classic_discoverable_start", callback, static_cast<double>(Error::Ok), std::string(),
+        static_cast<double>(granted));
+    return to_gm(Error::Ok);
 }
 
 BluetoothError bluetooth_classic_discoverable_stop()
@@ -3594,7 +4056,8 @@ bool bluetooth_classic_discoverable_is_running()
     return g_backend && g_backend->classic_discoverable_is_running();
 }
 
-// Callback registration functions
+// --- The state callback, the one global slot ---
+
 bool bluetooth_set_callback_state_changed(const gm::wire::GMFunction& callback)
 {
     set_callback(g_callback_state_changed, callback, "Bluetooth state changed");
@@ -3611,65 +4074,17 @@ bool bluetooth_remove_callback_state_changed()
     return remove_callback(g_callback_state_changed, "Bluetooth state changed");
 }
 
-bool bluetooth_set_callback_device_found(const gm::wire::GMFunction& callback)
-{
-    return set_callback(g_callback_device_found, callback, "Device found");
-}
-
-bool bluetooth_remove_callback_device_found()
-{
-    return remove_callback(g_callback_device_found, "Device found");
-}
-
-bool bluetooth_set_callback_scan_stopped(const gm::wire::GMFunction& callback)
-{
-    return set_callback(g_callback_scan_stopped, callback, "Scan stopped");
-}
-
-bool bluetooth_remove_callback_scan_stopped()
-{
-    return remove_callback(g_callback_scan_stopped, "Scan stopped");
-}
-
-bool bluetooth_set_callback_classic_client_connected(const gm::wire::GMFunction& callback)
-{
-    return set_callback(g_callback_classic_client_connected, callback, "Classic client connected");
-}
-
-bool bluetooth_remove_callback_classic_client_connected()
-{
-    return remove_callback(g_callback_classic_client_connected, "Classic client connected");
-}
-
-bool bluetooth_set_callback_classic_data(const gm::wire::GMFunction& callback)
-{
-    return set_callback(g_callback_classic_data, callback, "Classic data");
-}
-
-bool bluetooth_remove_callback_classic_data()
-{
-    return remove_callback(g_callback_classic_data, "Classic data");
-}
-
-bool bluetooth_set_callback_classic_disconnected(const gm::wire::GMFunction& callback)
-{
-    return set_callback(g_callback_classic_disconnected, callback, "Classic disconnected");
-}
-
-bool bluetooth_remove_callback_classic_disconnected()
-{
-    return remove_callback(g_callback_classic_disconnected, "Classic disconnected");
-}
-
 // --- BLE GATT client: connect / disconnect ---
 
-std::uint64_t bluetooth_le_connect(std::uint64_t device, const gm::wire::GMFunction& callback)
+std::uint64_t bluetooth_le_connect(std::uint64_t device, const std::optional<BluetoothConnectOptions>& options,
+    const gm::wire::GMFunction& on_disconnected, const gm::wire::GMFunction& callback)
 {
     if (!require_backend())
         return 0;
 
+    std::chrono::milliseconds timeout;
     const auto dev = check_device(device, Transport::LowEnergy);
-    if (!dev || !check_radio())
+    if (!dev || !connect_timeout(options, timeout) || !check_radio())
         return 0;
 
     // One client connection per device, connecting or connected (R1-197).
@@ -3679,11 +4094,14 @@ std::uint64_t bluetooth_le_connect(std::uint64_t device, const gm::wire::GMFunct
         return 0;
     }
 
-    const std::uint64_t connection = g_le_connection_manager.create_connection(device);
+    ConnectionRecord record;
+    record.device = device;
+    record.on_disconnected = on_disconnected;
+    const std::uint64_t connection = g_le_connection_manager.create_connection(std::move(record));
     g_le_connection_manager.set_connect_callback(connection, callback);
 
     std::string message;
-    const Error error = g_backend->le_connect(connection, *dev, message);
+    const Error error = g_backend->le_connect(connection, *dev, timeout, message);
     set_last_error(error, message);
 
     if (error != Error::Ok)
@@ -3704,49 +4122,58 @@ BluetoothError bluetooth_le_disconnect(std::uint64_t connection)
     // A handle already retired - by an earlier disconnect, a drop or a failed
     // open - may share its peripheral with a newer link; the backend is never
     // asked to close it (R1-225). A connect still in flight is a valid handle.
-    if (!g_le_connection_manager.is_valid(connection))
+    // Retired before the backend is asked, so its report of the close finds
+    // nothing (rule 3), and no op waiting on the link outlives the call.
+    const auto record = retire_le_connection(connection);
+    if (!record)
         return fail(Error::InvalidHandle, "Invalid LE connection handle");
 
     std::string message;
     const Error error = g_backend->le_disconnect(connection, message);
     set_last_error(error, message);
 
-    // Whatever the backend answered, the game is done with this link: no op
-    // waiting on it may outlive the call, and its handle is retired.
-    const std::uint64_t device = g_le_connection_manager.get_device(connection);
-    retire_le_connection(connection);
-
     // A connect still in flight is cancelled, not completed: its callback
     // fires now, and a late open event from the backend finds none.
     // callback(error_code, message, connection, device)
     invoke_callback("le_connect", g_le_connection_manager.take_connect_callback(connection),
         static_cast<double>(Error::ConnectionFailed), std::string("Connection cancelled by bluetooth_le_disconnect"),
-        static_cast<double>(connection), static_cast<double>(device));
+        static_cast<double>(connection), static_cast<double>(record->device));
 
     return to_gm(error);
 }
 
+// The connection getters answer for a server connection too (R2-32, R2-119).
 bool bluetooth_le_connection_is_valid(std::uint64_t connection)
 {
-    return g_le_connection_manager.is_valid(connection);
+    return g_le_connection_manager.is_valid(connection) || find_server_central(connection).has_value();
 }
 
 bool bluetooth_le_connection_is_connected(std::uint64_t connection)
 {
-    return g_backend && g_backend->le_connection_is_connected(connection);
+    if (g_le_connection_manager.is_valid(connection))
+        return g_backend && g_backend->le_connection_is_connected(connection);
+    return find_server_central(connection).has_value();
 }
 
 std::uint64_t bluetooth_le_connection_get_device(std::uint64_t connection)
 {
-    return g_le_connection_manager.get_device(connection);
+    if (const std::uint64_t device = g_le_connection_manager.get_device(connection))
+        return device;
+    const auto central = find_server_central(connection);
+    return central ? central->device : 0;
 }
 
 std::int32_t bluetooth_le_connection_get_mtu(std::uint64_t connection)
 {
-    if (!g_backend || !g_le_connection_manager.is_valid(connection) ||
-        !g_backend->le_connection_is_connected(connection))
+    if (!g_backend)
         return 0;
-    return g_backend->le_connection_mtu(connection);
+    if (g_le_connection_manager.is_valid(connection))
+        return g_backend->le_connection_is_connected(connection) ? g_backend->le_connection_mtu(connection) : 0;
+
+    std::string key;
+    if (!find_server_central(connection, &key))
+        return 0;
+    return g_backend->le_server_connection_mtu(key);
 }
 
 BluetoothError bluetooth_le_connection_request_mtu(std::uint64_t connection, std::int32_t mtu, const gm::wire::GMFunction& callback)
@@ -3804,14 +4231,55 @@ BluetoothError bluetooth_le_connection_request_priority(std::uint64_t connection
 
 // --- BLE GATT client: service / characteristic / descriptor discovery ---
 
-BluetoothError bluetooth_le_services_discover(std::uint64_t connection, const gm::wire::GMFunction& callback)
+BluetoothError bluetooth_le_services_discover(std::uint64_t connection, const std::optional<BluetoothLeDiscoverOptions>& options,
+    const gm::wire::GMFunction& callback)
 {
     if (!check_le_client_connection(connection))
         return to_gm(g_last_error);
 
-    return start_le_op(LeOpKind::ServicesDiscover, callback, connection, connection, [&](std::uint64_t op_id, std::string& message) {
-        return g_backend->le_services_discover(op_id, connection, message);
-    });
+    DiscoveryJob job;
+    job.callback = callback;
+    job.connection = connection;
+    if (options)
+    {
+        if (options->service_uuids)
+        {
+            for (const auto& uuid : *options->service_uuids)
+            {
+                if (!check_uuid(uuid))
+                    return to_gm(g_last_error);
+                job.service_uuids.push_back(canonical_uuid(uuid));
+            }
+        }
+        job.descriptors = options->descriptors.value_or(false);
+        job.characteristics = job.descriptors || options->characteristics.value_or(false);
+    }
+
+    if (!job.characteristics)
+    {
+        return start_le_op(LeOpKind::ServicesDiscover, callback, connection, connection, [&](std::uint64_t op_id, std::string& message) {
+            return g_backend->le_services_discover(op_id, connection, message);
+        });
+    }
+
+    // The deeper levels chain from the services step's completion (R2-35).
+    std::uint64_t job_id = 0;
+    {
+        std::scoped_lock lock(g_discovery_jobs_mutex);
+        job_id = g_next_discovery_job++;
+        g_discovery_jobs.emplace(job_id, std::move(job));
+    }
+
+    std::string message;
+    const Error error = start_discovery_step(job_id, LeOpKind::ServicesDiscover, connection, connection, message);
+    if (error != Error::Ok)
+    {
+        // Failed before it started: the callback never fires.
+        std::scoped_lock lock(g_discovery_jobs_mutex);
+        g_discovery_jobs.erase(job_id);
+    }
+    set_last_error(error, message);
+    return to_gm(error);
 }
 
 std::int32_t bluetooth_le_service_get_count(std::uint64_t connection)
@@ -3829,6 +4297,20 @@ std::string bluetooth_le_service_get_uuid(std::uint64_t service)
     if (const auto server = find_le_server_attribute(service, HandleKind::LeServerService))
         return server->uuid;
     return g_service_cache.get_uuid(service);
+}
+
+std::uint64_t bluetooth_le_service_find(std::uint64_t connection, std::string_view uuid)
+{
+    if (!g_le_connection_manager.is_valid(connection) && !find_server_central(connection))
+    {
+        fail(Error::InvalidHandle, "Invalid LE connection handle");
+        return 0;
+    }
+    if (!check_uuid(uuid))
+        return 0;
+
+    const std::string canonical = canonical_uuid(uuid);
+    return found(g_service_cache.find_by_uuid(connection, canonical), "discovered service", canonical);
 }
 
 BluetoothError bluetooth_le_characteristics_discover(std::uint64_t service, const gm::wire::GMFunction& callback)
@@ -3868,6 +4350,24 @@ std::string bluetooth_le_characteristic_get_uuid(std::uint64_t characteristic)
     if (const auto server = find_le_server_attribute(characteristic, HandleKind::LeServerCharacteristic))
         return server->uuid;
     return g_characteristic_cache.get_uuid(characteristic);
+}
+
+std::uint64_t bluetooth_le_characteristic_find(std::uint64_t service, std::string_view uuid)
+{
+    const auto server = find_le_server_attribute(service, HandleKind::LeServerService);
+    if (!server && !g_service_cache.is_valid(service))
+    {
+        fail(Error::InvalidHandle, "Invalid service handle");
+        return 0;
+    }
+    if (!check_uuid(uuid))
+        return 0;
+
+    const std::string canonical = canonical_uuid(uuid);
+    const std::uint64_t handle = server
+        ? find_le_server_child(*server, canonical)
+        : g_characteristic_cache.find_by_uuid(service, canonical);
+    return found(handle, "characteristic", canonical);
 }
 
 std::int32_t bluetooth_le_characteristic_get_properties(std::uint64_t characteristic)
@@ -3912,6 +4412,24 @@ std::string bluetooth_le_descriptor_get_uuid(std::uint64_t descriptor)
     if (const auto server = find_le_server_attribute(descriptor, HandleKind::LeServerDescriptor))
         return server->uuid;
     return g_descriptor_cache.get_uuid(descriptor);
+}
+
+std::uint64_t bluetooth_le_descriptor_find(std::uint64_t characteristic, std::string_view uuid)
+{
+    const auto server = find_le_server_attribute(characteristic, HandleKind::LeServerCharacteristic);
+    if (!server && !g_characteristic_cache.is_valid(characteristic))
+    {
+        fail(Error::InvalidHandle, "Invalid characteristic handle");
+        return 0;
+    }
+    if (!check_uuid(uuid))
+        return 0;
+
+    const std::string canonical = canonical_uuid(uuid);
+    const std::uint64_t handle = server
+        ? find_le_server_child(*server, canonical)
+        : g_descriptor_cache.find_by_uuid(characteristic, canonical);
+    return found(handle, "descriptor", canonical);
 }
 
 // --- BLE GATT client: characteristic / descriptor read, write, subscribe ---
@@ -3969,7 +4487,8 @@ BluetoothError bluetooth_le_characteristic_write(std::uint64_t characteristic, s
     });
 }
 
-BluetoothError bluetooth_le_characteristic_subscribe(std::uint64_t characteristic, BluetoothLeSubscribeMode mode, const gm::wire::GMFunction& callback)
+BluetoothError bluetooth_le_characteristic_subscribe(std::uint64_t characteristic, BluetoothLeSubscribeMode mode,
+    const gm::wire::GMFunction& on_value, const gm::wire::GMFunction& callback)
 {
     if (!require_backend())
         return to_gm(g_last_error);
@@ -3977,8 +4496,7 @@ BluetoothError bluetooth_le_characteristic_subscribe(std::uint64_t characteristi
     if (!g_characteristic_cache.is_valid(characteristic))
         return fail(Error::InvalidHandle, "Invalid characteristic handle");
 
-    if (mode != BluetoothLeSubscribeMode::Unsubscribe && mode != BluetoothLeSubscribeMode::Notify &&
-        mode != BluetoothLeSubscribeMode::Indicate)
+    if (mode != BluetoothLeSubscribeMode::Notify && mode != BluetoothLeSubscribeMode::Indicate)
         return fail(Error::InvalidArgument, "mode must be a BluetoothLeSubscribeMode");
 
     if (mode == BluetoothLeSubscribeMode::Notify &&
@@ -3989,11 +4507,48 @@ BluetoothError bluetooth_le_characteristic_subscribe(std::uint64_t characteristi
         !characteristic_has_property(characteristic, BluetoothLeCharacteristicProperty::Indicate))
         return fail(Error::NotSupported, "The characteristic does not support indications");
 
+    // In place before the backend is asked: a value can arrive before the
+    // subscribe completes.
+    const std::uint64_t token = add_subscription(characteristic, on_value);
+    if (token == 0)
+        return fail(Error::Busy, "The characteristic is already subscribed or subscribing");
+
     const std::uint64_t connection = characteristic_connection(characteristic);
     const LeAttributeRef ref = characteristic_ref(characteristic);
 
-    return start_le_op(LeOpKind::CharacteristicSubscribe, callback, characteristic, connection, [&](std::uint64_t op_id, std::string& message) {
+    PendingLeOp op{ LeOpKind::CharacteristicSubscribe, callback, characteristic, connection };
+    op.token = token;
+    const BluetoothError result = start_le_op(std::move(op), [&](std::uint64_t op_id, std::string& message) {
         return g_backend->le_characteristic_subscribe(op_id, connection, ref, static_cast<std::int32_t>(mode), message);
+    });
+    if (result != BluetoothError::Ok)
+        drop_subscription(characteristic, token);
+    return result;
+}
+
+BluetoothError bluetooth_le_characteristic_unsubscribe(std::uint64_t characteristic, const gm::wire::GMFunction& callback)
+{
+    if (!require_backend())
+        return to_gm(g_last_error);
+
+    if (!g_characteristic_cache.is_valid(characteristic))
+        return fail(Error::InvalidHandle, "Invalid characteristic handle");
+
+    // on_value stops here, whatever the platform answers.
+    if (!drop_subscription(characteristic))
+    {
+        // callback(error_code, message, characteristic)
+        invoke_callback("le_characteristic_unsubscribe", callback, static_cast<double>(Error::Ok), std::string(),
+            static_cast<double>(characteristic));
+        return to_gm(Error::Ok);
+    }
+
+    const std::uint64_t connection = characteristic_connection(characteristic);
+    const LeAttributeRef ref = characteristic_ref(characteristic);
+
+    // Mode 0 is the backends' unsubscribe.
+    return start_le_op(LeOpKind::CharacteristicUnsubscribe, callback, characteristic, connection, [&](std::uint64_t op_id, std::string& message) {
+        return g_backend->le_characteristic_subscribe(op_id, connection, ref, 0, message);
     });
 }
 
@@ -4041,8 +4596,8 @@ BluetoothError bluetooth_le_descriptor_write(std::uint64_t descriptor, struct gm
 
 // --- Values ---
 
-// The bytes copied, or -1 on error (R1-214).
-std::int32_t bluetooth_value_fetch(std::uint64_t value, struct gm::wire::GMBuffer out_data, unsigned int offset)
+// The size the callback reported is what lands in the buffer (R2-120).
+BluetoothError bluetooth_value_fetch(std::uint64_t value, struct gm::wire::GMBuffer out_data, unsigned int offset)
 {
     std::string message;
     std::size_t copied = 0;
@@ -4050,7 +4605,7 @@ std::int32_t bluetooth_value_fetch(std::uint64_t value, struct gm::wire::GMBuffe
     const Error error = g_values.fetch(value, out_data, offset, copied, message, left);
     set_last_error(error, message);
     settle_left_values(left);
-    return error == Error::Ok ? static_cast<std::int32_t>(copied) : -1;
+    return to_gm(error);
 }
 
 BluetoothError bluetooth_value_release(std::uint64_t value)
@@ -4066,69 +4621,96 @@ BluetoothError bluetooth_value_release(std::uint64_t value)
 
 // --- BLE advertise ---
 
-BluetoothError bluetooth_le_advertise_start(const BluetoothLeAdvertiseSettings& settings, const BluetoothLeAdvertiseData& data, const gm::wire::GMFunction& callback)
+BluetoothError bluetooth_le_advertise_start(const std::optional<BluetoothLeAdvertiseSettings>& settings,
+    const BluetoothLeAdvertiseData& data, const std::optional<gm::wire::GMFunction>& on_stopped,
+    const gm::wire::GMFunction& callback)
 {
     if (!require_backend())
         return to_gm(g_last_error);
 
     // Checked once here, so every backend sees only what it can act on; what a
-    // backend cannot send is its own NotSupported (R1-36).
+    // backend cannot send is its own NotSupported (R1-36). An undefined field
+    // is off or empty, except connectable (R2-49).
     LeAdvertiseSettings advertise_settings;
-    advertise_settings.connectable = settings.connectable;
-    if (settings.tx_power)
+    if (settings)
     {
-        const auto level = static_cast<std::int32_t>(*settings.tx_power);
-        if (level < static_cast<std::int32_t>(LeAdvertiseTxPower::UltraLow) || level > static_cast<std::int32_t>(LeAdvertiseTxPower::High))
-            return fail(Error::InvalidArgument, "tx_power must be a BluetoothLeAdvertiseTxPower");
-        advertise_settings.tx_power = static_cast<LeAdvertiseTxPower>(level);
+        advertise_settings.connectable = settings->connectable.value_or(true);
+        if (settings->tx_power)
+        {
+            const auto level = static_cast<std::int32_t>(*settings->tx_power);
+            if (level < static_cast<std::int32_t>(LeAdvertiseTxPower::UltraLow) || level > static_cast<std::int32_t>(LeAdvertiseTxPower::High))
+                return fail(Error::InvalidArgument, "tx_power must be a BluetoothLeAdvertiseTxPower");
+            advertise_settings.tx_power = static_cast<LeAdvertiseTxPower>(level);
+        }
     }
 
     LeAdvertiseData advertise_data;
-    advertise_data.include_name = data.include_name;
-    advertise_data.include_tx_power = data.include_tx_power;
+    advertise_data.include_name = data.include_name.value_or(false);
+    advertise_data.include_tx_power = data.include_tx_power.value_or(false);
 
-    for (const auto& uuid : data.service_uuids)
+    if (data.service_uuids)
     {
-        if (!check_uuid(uuid))
-            return to_gm(Error::InvalidArgument);
-        advertise_data.service_uuids.push_back(canonical_uuid(uuid));
+        for (const auto& uuid : *data.service_uuids)
+        {
+            if (!check_uuid(uuid))
+                return to_gm(Error::InvalidArgument);
+            advertise_data.service_uuids.push_back(canonical_uuid(uuid));
+        }
     }
 
-    for (const auto& entry : data.service_data)
+    if (data.service_data)
     {
-        if (!check_uuid(entry.uuid))
-            return to_gm(Error::InvalidArgument);
-        const std::string uuid = canonical_uuid(entry.uuid);
-        // A UUID with data is advertised as a UUID too, on every platform.
-        if (std::find(advertise_data.service_uuids.begin(), advertise_data.service_uuids.end(), uuid) == advertise_data.service_uuids.end())
-            return fail(Error::InvalidArgument, "Service data for " + uuid + " needs the uuid in service_uuids too");
-        advertise_data.service_data.push_back({ uuid, entry.data });
+        for (const auto& entry : *data.service_data)
+        {
+            if (!check_uuid(entry.uuid))
+                return to_gm(Error::InvalidArgument);
+            const std::string uuid = canonical_uuid(entry.uuid);
+            // A UUID with data is advertised as a UUID too, on every platform.
+            if (std::find(advertise_data.service_uuids.begin(), advertise_data.service_uuids.end(), uuid) == advertise_data.service_uuids.end())
+                return fail(Error::InvalidArgument, "Service data for " + uuid + " needs the uuid in service_uuids too");
+            advertise_data.service_data.push_back({ uuid, entry.data });
+        }
     }
 
-    for (const auto& entry : data.manufacturer_data)
+    if (data.manufacturer_data)
     {
-        if (entry.company_id < 0 || entry.company_id > 0xFFFF)
-            return fail(Error::InvalidArgument, "company_id must be 0-65535, got " + std::to_string(entry.company_id));
-        advertise_data.manufacturer_data.push_back({ static_cast<std::uint16_t>(entry.company_id), entry.data });
+        for (const auto& entry : *data.manufacturer_data)
+        {
+            if (entry.company_id < 0 || entry.company_id > 0xFFFF)
+                return fail(Error::InvalidArgument, "company_id must be 0-65535, got " + std::to_string(entry.company_id));
+            advertise_data.manufacturer_data.push_back({ static_cast<std::uint16_t>(entry.company_id), entry.data });
+        }
     }
 
     if (!check_radio())
         return to_gm(g_last_error);
 
-    // A start or a running advertisement is stopped first: the new settings,
-    // data and callback would otherwise be dropped (R1-72).
-    if (g_backend->le_advertise_is_running())
+    // Busy while starting or running: the new settings, data and callbacks
+    // would otherwise be dropped (R1-72).
+    AdvertiseSession session;
+    session.token = g_next_advertise_token++;
+    session.on_stopped = optional_callback(on_stopped);
+    const std::uint64_t token = session.token;
+    if (!begin_session(g_advertise, std::move(session)))
         return fail(Error::Busy, "Bluetooth LE advertising is already running; stop it first");
 
-    return start_le_op(LeOpKind::AdvertiseStart, callback, 0, 0, [&](std::uint64_t op_id, std::string& message) {
+    PendingLeOp op{ LeOpKind::AdvertiseStart, callback };
+    op.token = token;
+    const BluetoothError result = start_le_op(std::move(op), [&](std::uint64_t op_id, std::string& message) {
         return g_backend->le_advertise_start(op_id, advertise_settings, advertise_data, message);
     });
+    if (result != BluetoothError::Ok)
+        end_advertise_session_of(token);
+    return result;
 }
 
 BluetoothError bluetooth_le_advertise_stop()
 {
     if (!require_backend())
         return to_gm(g_last_error);
+
+    if (!end_session(g_advertise).running)
+        return to_gm(Error::Ok);
 
     std::string message;
     const Error error = g_backend->le_advertise_stop(message);
@@ -4143,50 +4725,49 @@ bool bluetooth_le_advertise_is_running()
 
 // --- BLE GATT server (peripheral) ---
 
-BluetoothError bluetooth_le_server_start()
+BluetoothError bluetooth_le_server_start(const gm::wire::GMFunction& on_connected, const gm::wire::GMFunction& on_disconnected,
+    const gm::wire::GMFunction& on_read, const gm::wire::GMFunction& on_write, const std::optional<gm::wire::GMFunction>& on_stopped)
 {
     if (!require_backend())
         return to_gm(g_last_error);
 
-    // Starting a running server starts nothing new (R1-72, R1-223).
-    if (g_backend->le_server_is_running())
-        return to_gm(Error::Ok);
-
     if (!check_radio())
         return to_gm(g_last_error);
+
+    // In place before the backend starts: a central can arrive before it
+    // returns.
+    LeServerSession session;
+    session.on_connected = on_connected;
+    session.on_disconnected = on_disconnected;
+    session.on_read = on_read;
+    session.on_write = on_write;
+    session.on_stopped = optional_callback(on_stopped);
+    if (!begin_session(g_le_server, std::move(session)))
+        return fail(Error::Busy, "The LE server is already running; stop it first");
 
     std::string message;
     const Error error = g_backend->le_server_start(message);
     set_last_error(error, message);
+    if (error != Error::Ok)
+        end_session(g_le_server);
     return to_gm(error);
 }
 
+// Ends advertising too (R2-20), and fires nothing (rule 3).
 BluetoothError bluetooth_le_server_stop()
 {
     if (!require_backend())
         return to_gm(g_last_error);
 
-    // Stopping a stopped server is Ok and fires nothing.
-    if (!g_backend->le_server_is_running())
-        return to_gm(Error::Ok);
-
-    // Answered while the backend still holds them; it forgets them on stop.
-    answer_pending_le_server_requests();
-
     std::string message;
-    const Error error = g_backend->le_server_stop(message);
+    const Error error = end_le_server(false, Error::Ok, std::string(), message);
     set_last_error(error, message);
-    if (error == Error::Ok)
-    {
-        retire_server_centrals();
-        forget_le_server_services();
-    }
     return to_gm(error);
 }
 
 bool bluetooth_le_server_is_running()
 {
-    return g_backend && g_backend->le_server_is_running();
+    return session_running(g_le_server);
 }
 
 BluetoothError bluetooth_le_server_add_service(const BluetoothLeServiceDefinition& service, const gm::wire::GMFunction& callback)
@@ -4196,35 +4777,44 @@ BluetoothError bluetooth_le_server_add_service(const BluetoothLeServiceDefinitio
 
     if (!check_uuid(service.uuid))
         return to_gm(Error::InvalidArgument);
-    for (const auto& characteristic : service.characteristics)
+    if (service.characteristics)
     {
-        if (!check_uuid(characteristic.uuid))
-            return to_gm(Error::InvalidArgument);
-        if ((characteristic.properties & ~0xFF) != 0)
+        for (const auto& characteristic : *service.characteristics)
         {
-            return fail(Error::InvalidArgument, "Characteristic " + characteristic.uuid + ": properties " +
-                std::to_string(characteristic.properties) + " has bits that are not BluetoothLeCharacteristicProperty flags");
-        }
-        if ((characteristic.permissions & ~kPermissionAll) != 0)
-        {
-            return fail(Error::InvalidArgument, "Characteristic " + characteristic.uuid + ": permissions " +
-                std::to_string(characteristic.permissions) + " has bits that are not BluetoothLeAttributePermission flags");
-        }
-        // The ATT limit on an attribute value.
-        if (characteristic.value.size() > 512)
-        {
-            return fail(Error::InvalidArgument, "Characteristic " + characteristic.uuid + ": the initial value is " +
-                std::to_string(characteristic.value.size()) + " bytes; an attribute value holds at most 512");
-        }
-        for (const auto& descriptor : characteristic.descriptors)
-        {
-            if (!check_uuid(descriptor.uuid))
+            if (!check_uuid(characteristic.uuid))
                 return to_gm(Error::InvalidArgument);
+            if ((characteristic.properties & ~0xFF) != 0)
+            {
+                return fail(Error::InvalidArgument, "Characteristic " + characteristic.uuid + ": properties " +
+                    std::to_string(characteristic.properties) + " has bits that are not BluetoothLeCharacteristicProperty flags");
+            }
+            if ((characteristic.permissions & ~kPermissionAll) != 0)
+            {
+                return fail(Error::InvalidArgument, "Characteristic " + characteristic.uuid + ": permissions " +
+                    std::to_string(characteristic.permissions) + " has bits that are not BluetoothLeAttributePermission flags");
+            }
+            if (characteristic.value && characteristic.value->size() > k_max_attribute_value)
+            {
+                return fail(Error::InvalidArgument, "Characteristic " + characteristic.uuid + ": the initial value is " +
+                    std::to_string(characteristic.value->size()) + " bytes; an attribute value holds at most 512");
+            }
+            if (!characteristic.descriptors)
+                continue;
+            for (const auto& descriptor : *characteristic.descriptors)
+            {
+                if (!check_uuid(descriptor.uuid))
+                    return to_gm(Error::InvalidArgument);
+                if (descriptor.value && descriptor.value->size() > k_max_attribute_value)
+                {
+                    return fail(Error::InvalidArgument, "Descriptor " + descriptor.uuid + ": the value is " +
+                        std::to_string(descriptor.value->size()) + " bytes; an attribute value holds at most 512");
+                }
+            }
         }
     }
 
     // The server pre-flight every platform shares (R1-223).
-    if (!g_backend->le_server_is_running())
+    if (!session_running(g_le_server))
         return fail(Error::OperationFailed, "The LE server is not running; call bluetooth_le_server_start first");
 
     const std::string service_uuid = canonical_uuid(service.uuid);
@@ -4257,47 +4847,65 @@ BluetoothError bluetooth_le_server_clear_services()
         return to_gm(g_last_error);
 
     // A stopped server holds no services: clearing it is Ok (R1-223).
-    if (!g_backend->le_server_is_running())
+    if (!session_running(g_le_server))
         return to_gm(Error::Ok);
 
-    // The services the requests name are going away.
+    // The services the requests and the queued adds name are going away.
     answer_pending_le_server_requests();
+    fail_le_ops(g_le_ops.take_kind(LeOpKind::ServerAddService), Error::OperationFailed,
+        "The LE server's services were cleared before the service was added");
 
     std::string message;
     const Error error = g_backend->le_server_clear_services(message);
     set_last_error(error, message);
-    if (error == Error::Ok)
-        forget_le_server_services();
+    forget_le_server_services();
     return to_gm(error);
 }
 
-BluetoothError bluetooth_le_server_respond_read(std::int32_t request_id, BluetoothAttError error_code, struct gm::wire::GMBuffer data, unsigned int offset, unsigned int size)
+BluetoothError bluetooth_le_server_respond_read(std::int32_t request_id, struct gm::wire::GMBuffer data, unsigned int offset, unsigned int size)
 {
     if (!require_backend())
         return to_gm(g_last_error);
-
-    if (!check_att_error(error_code, "bluetooth_le_server_respond_read"))
-        return to_gm(Error::InvalidArgument);
 
     // Checked before the request is erased, so a call with a bad id, kind or
     // range can be retried instead of leaving the remote central to time out.
     if (!check_le_server_request(request_id, false, "bluetooth_le_server_respond_write"))
         return to_gm(g_last_error);
 
-    // A refused read sends no value, so its buffer is never touched.
-    const bool success = error_code == BluetoothAttError::Success;
-    if (success && size > 0 && !buffer_range_valid(data, offset, size, "bluetooth_le_server_respond_read"))
+    if (!buffer_range_valid(data, offset, size, "bluetooth_le_server_respond_read"))
         return to_gm(Error::InvalidArgument);
 
     if (!take_le_server_request(request_id))
         return to_gm(g_last_error);
 
-    std::vector<std::uint8_t> value;
-    if (success && size > 0)
-        value = slice_bytes(data, offset, size);
+    const std::vector<std::uint8_t> value = slice_bytes(data, offset, size);
 
     std::string message;
-    const Error error = g_backend->le_server_respond_read(request_id, static_cast<std::int32_t>(error_code), value, message);
+    const Error error = g_backend->le_server_respond_read(request_id, static_cast<std::int32_t>(BluetoothAttError::Success),
+        value, message);
+    set_last_error(error, message);
+    return to_gm(error);
+}
+
+// A refusal carries no value, so it needs no buffer (R2-122).
+BluetoothError bluetooth_le_server_respond_read_error(std::int32_t request_id, BluetoothAttError error_code)
+{
+    if (!require_backend())
+        return to_gm(g_last_error);
+
+    if (!check_att_error(error_code, "bluetooth_le_server_respond_read_error"))
+        return to_gm(Error::InvalidArgument);
+    if (error_code == BluetoothAttError::Success)
+        return fail(Error::InvalidArgument, "bluetooth_le_server_respond_read_error: Success is answered with bluetooth_le_server_respond_read");
+
+    if (!check_le_server_request(request_id, false, "bluetooth_le_server_respond_write"))
+        return to_gm(g_last_error);
+
+    if (!take_le_server_request(request_id))
+        return to_gm(g_last_error);
+
+    std::string message;
+    const Error error = g_backend->le_server_respond_read(request_id, static_cast<std::int32_t>(error_code), {}, message);
     set_last_error(error, message);
     return to_gm(error);
 }
@@ -4321,9 +4929,7 @@ BluetoothError bluetooth_le_server_respond_write(std::int32_t request_id, Blueto
     // A write without response was completed when it arrived; answering it is
     // allowed everywhere and changes nothing (R1-15).
     if (!request->response_needed)
-    {
         return to_gm(Error::Ok);
-    }
 
     std::string message;
     const Error error = g_backend->le_server_respond_write(request_id, static_cast<std::int32_t>(error_code), message);
@@ -4357,56 +4963,4 @@ BluetoothError bluetooth_le_server_notify_value(std::uint64_t characteristic, st
     const Error error = g_backend->le_server_notify_value(characteristic, central, value, message);
     set_last_error(error, message);
     return to_gm(error);
-}
-
-// --- BLE callbacks ---
-
-bool bluetooth_set_callback_le_disconnected(const gm::wire::GMFunction& callback)
-{
-    return set_callback(g_callback_le_disconnected, callback, "LE disconnected");
-}
-
-bool bluetooth_remove_callback_le_disconnected()
-{
-    return remove_callback(g_callback_le_disconnected, "LE disconnected");
-}
-
-bool bluetooth_set_callback_le_characteristic_value_changed(const gm::wire::GMFunction& callback)
-{
-    return set_callback(g_callback_le_characteristic_value_changed, callback, "LE characteristic value changed");
-}
-
-bool bluetooth_remove_callback_le_characteristic_value_changed()
-{
-    return remove_callback(g_callback_le_characteristic_value_changed, "LE characteristic value changed");
-}
-
-bool bluetooth_set_callback_le_server_connection_state_changed(const gm::wire::GMFunction& callback)
-{
-    return set_callback(g_callback_le_server_connection_state_changed, callback, "LE server connection state changed");
-}
-
-bool bluetooth_remove_callback_le_server_connection_state_changed()
-{
-    return remove_callback(g_callback_le_server_connection_state_changed, "LE server connection state changed");
-}
-
-bool bluetooth_set_callback_le_server_read_request(const gm::wire::GMFunction& callback)
-{
-    return set_callback(g_callback_le_server_read_request, callback, "LE server read request");
-}
-
-bool bluetooth_remove_callback_le_server_read_request()
-{
-    return remove_callback(g_callback_le_server_read_request, "LE server read request");
-}
-
-bool bluetooth_set_callback_le_server_write_request(const gm::wire::GMFunction& callback)
-{
-    return set_callback(g_callback_le_server_write_request, callback, "LE server write request");
-}
-
-bool bluetooth_remove_callback_le_server_write_request()
-{
-    return remove_callback(g_callback_le_server_write_request, "LE server write request");
 }

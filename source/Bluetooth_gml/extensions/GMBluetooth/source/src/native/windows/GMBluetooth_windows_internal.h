@@ -429,6 +429,24 @@ namespace gmbluetooth
             return address;
         }
 
+        // The device ids every platform shares (R2-127): "classic:" and the
+        // address for a Classic device; "le:public:" or "le:random:" and the
+        // address for an LE device of a known address type, "le:" and the
+        // address when the type is not known. address is uppercase.
+        inline std::string classic_device_id(const std::string& address)
+        {
+            return "classic:" + address;
+        }
+
+        inline std::string le_device_id(const std::string& address, std::optional<WDB::BluetoothAddressType> type)
+        {
+            if (type == WDB::BluetoothAddressType::Public)
+                return "le:public:" + address;
+            if (type == WDB::BluetoothAddressType::Random)
+                return "le:random:" + address;
+            return "le:" + address;
+        }
+
         // A remote device id ends in its address ("BluetoothLE#BluetoothLE
         // <local>-<remote>"); empty when it does not.
         inline std::string address_from_device_id(const std::string& device_id)
@@ -1000,7 +1018,7 @@ namespace gmbluetooth
 
             // ===== LE scan =====
 
-            Error le_scan_start(bool active, const std::vector<LeScanFilter>& filters, std::string& message) override;
+            Error le_scan_start(const LeScanSettings& settings, const std::vector<LeScanFilter>& filters, std::string& message) override;
 
             Error le_scan_stop(std::string& message) override;
 
@@ -1011,6 +1029,7 @@ namespace gmbluetooth
             Error le_connect(
                 std::uint64_t connection,
                 const DiscoveredDevice& device,
+                std::chrono::milliseconds timeout,
                 std::string& message) override;
 
             Error le_disconnect(
@@ -1095,6 +1114,8 @@ namespace gmbluetooth
 
             bool le_server_is_running() const override;
 
+            std::int32_t le_server_connection_mtu(const std::string& central) const override;
+
             Error le_server_add_service(std::uint64_t op_id, const LeServerService& service, std::string& message) override;
 
             Error le_server_clear_services(std::string& message) override;
@@ -1128,6 +1149,7 @@ namespace gmbluetooth
                 std::uint64_t connection,
                 const DiscoveredDevice& device,
                 const std::string& service_uuid,
+                std::chrono::milliseconds timeout,
                 std::string& message) override;
 
             Error pair(

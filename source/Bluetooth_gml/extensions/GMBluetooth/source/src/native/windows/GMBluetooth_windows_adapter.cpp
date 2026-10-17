@@ -449,7 +449,7 @@ namespace gmbluetooth::win
                 DiscoveredDevice device;
                 device.transport = Transport::LowEnergy;
                 device.address = format_bluetooth_address(address);
-                device.id = "win:ble:" + device.address;
+                device.id = le_device_id(device.address, remote.BluetoothAddressType());
                 device.address_available = true;
                 device.connectable = true;
                 device.name = winrt::to_string(info.Name());
@@ -468,7 +468,7 @@ namespace gmbluetooth::win
         }
     }
 
-    Error WindowsBackend::le_scan_start(bool active, const std::vector<LeScanFilter>& filters, std::string& message)
+    Error WindowsBackend::le_scan_start(const LeScanSettings& settings, const std::vector<LeScanFilter>& filters, std::string& message)
     {
         if (!initialized_)
         {
@@ -485,7 +485,8 @@ namespace gmbluetooth::win
 
         // The core matches every result against the filters. A WinRT
         // AdvertisementFilter takes one pattern and ANDs its fields, so
-        // it cannot say "any of these" (R1-139).
+        // it cannot say "any of these" (R1-139). Windows has no scan modes
+        // (LeScanMode), so settings.mode is ignored.
         (void)filters;
 
         if (le_->le_scanning.load())
@@ -499,7 +500,7 @@ namespace gmbluetooth::win
             release_watcher_noexcept();
             watcher_ = WDBA::BluetoothLEAdvertisementWatcher{};
             watcher_.ScanningMode(
-                active
+                settings.active
                     ? WDBA::BluetoothLEScanningMode::Active
                     : WDBA::BluetoothLEScanningMode::Passive);
 
@@ -522,7 +523,7 @@ namespace gmbluetooth::win
 
                     const std::uint64_t raw_address = args.BluetoothAddress();
                     device.address = format_bluetooth_address(raw_address);
-                    device.id = "win:ble:" + device.address;
+                    device.id = le_device_id(device.address, args.BluetoothAddressType());
                     device.address_available = true;
                     device.rssi = static_cast<std::int32_t>(args.RawSignalStrengthInDBm());
                     device.rssi_available = device.rssi != -127;
@@ -558,16 +559,16 @@ namespace gmbluetooth::win
                     if (!le || !le->alive.load() || le->scan_generation.load() != generation)
                         return;
 
-                    // A stop Windows made (radio off, an error); one the game
-                    // asked for has already reported.
+                    // A stop Windows made (radio off, an error); one the core
+                    // asked for is never reported.
                     if (!le->le_scanning.exchange(false))
                         return;
 
                     BackendEvent event;
                     event.type = BackendEventType::ScanStopped;
                     event.transport = Transport::LowEnergy;
-                    event.error = map_bluetooth_error(args.Error());
-                    event.message = bluetooth_error_message(args.Error());
+                    event.error = map_bluetooth_failure(args.Error());
+                    event.message = bluetooth_failure_message(args.Error());
                     push_le_event(le, std::move(event));
                 });
 
@@ -586,14 +587,14 @@ namespace gmbluetooth::win
         }
     }
 
-    // Reports ScanStopped itself, as Android does, with the watcher's
-    // handlers already gone: each scan reports one stop.
+    // Reports nothing: the core has ended the scan's session, and the
+    // watcher's handlers are gone with the generation bump.
     Error WindowsBackend::le_scan_stop(std::string& message)
     {
         if (!initialized_)
             return Error::NotInitialized;
 
-        const bool was_scanning = le_->le_scanning.exchange(false);
+        le_->le_scanning.store(false);
         ++le_->scan_generation;
 
         std::string failure;
@@ -607,15 +608,6 @@ namespace gmbluetooth::win
             failure = winrt::to_string(error.message());
         }
         release_watcher_noexcept();
-
-        if (was_scanning)
-        {
-            BackendEvent event;
-            event.type = BackendEventType::ScanStopped;
-            event.transport = Transport::LowEnergy;
-            event.error = Error::Ok;
-            push_le_event(le_, std::move(event));
-        }
 
         if (!failure.empty())
         {

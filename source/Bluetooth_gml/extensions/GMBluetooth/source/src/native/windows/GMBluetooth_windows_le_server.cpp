@@ -10,15 +10,20 @@ namespace gmbluetooth::win
     {
         // The central a GATT server event carries: the key the core maps to a
         // server connection, and the device address when known, with the id a
-        // scan result for the same peer has (R1-155).
-        LeServerCentral server_central(const std::string& key, const std::string& address)
+        // scan result for the same peer has (R1-155): typed when a scan saw
+        // the address.
+        LeServerCentral server_central(SharedLeState& le, const std::string& key, const std::string& address)
         {
             LeServerCentral central;
             central.key = key;
             if (!address.empty())
             {
+                BTH_ADDR parsed = 0;
+                std::optional<WDB::BluetoothAddressType> type;
+                if (parse_bluetooth_address(address, parsed))
+                    type = find_address_type(le, static_cast<std::uint64_t>(parsed));
                 central.address = address;
-                central.device_id = "win:ble:" + address;
+                central.device_id = le_device_id(address, type);
             }
             return central;
         }
@@ -149,6 +154,8 @@ namespace gmbluetooth::win
             std::uint64_t id = 0;
             winrt::guid guid{};
             std::string uuid;
+            // Served by Windows, never reaching on_read (R2-90).
+            std::optional<std::vector<std::uint8_t>> value;
         };
 
         struct LocalCharacteristicDefinition
@@ -159,8 +166,13 @@ namespace gmbluetooth::win
             std::int32_t properties = 0;
             std::int32_t permissions = 0;
             std::vector<std::uint8_t> value;
+            // A User Description (0x2901), which Windows publishes from the
+            // characteristic's parameters and not as a descriptor (R2-12).
+            std::optional<std::string> user_description;
             std::vector<LocalDescriptorDefinition> descriptors;
         };
+
+        constexpr std::string_view k_user_description_uuid = "00002901-0000-1000-8000-00805f9b34fb";
 
         struct LocalServiceDefinition
         {
@@ -182,7 +194,7 @@ namespace gmbluetooth::win
             BackendEvent event;
             event.type = BackendEventType::LeServerCentral;
             event.transport = Transport::LowEnergy;
-            event.central = server_central(central, address);
+            event.central = server_central(*le, central, address);
             event.connected = connected;
             push_le_event(le, std::move(event));
         }
@@ -324,7 +336,9 @@ namespace gmbluetooth::win
             }
         }
 
-        // Completes the start once. False when it was already completed.
+        // Completes the start once. False when it was already completed. A
+        // start that succeeded keeps its handlers for the advertisement's
+        // life, so a later stop is heard (R2-10).
         bool finish_advertise_start(
             const std::shared_ptr<SharedLeState>& le,
             const std::shared_ptr<AdvertiseStartTracker>& tracker,
@@ -334,9 +348,81 @@ namespace gmbluetooth::win
             if (tracker->done.exchange(true))
                 return false;
 
-            revoke_advertise_handlers(tracker);
+            if (error != Error::Ok)
+                revoke_advertise_handlers(tracker);
             complete_le_op(le, tracker->op_id, error, std::move(message));
             return true;
+        }
+
+        // Stops the publisher and the providers a start began.
+        void stop_advertisers_noexcept(
+            const WDBA::BluetoothLEAdvertisementPublisher& publisher,
+            const std::vector<WDBG::GattServiceProvider>& providers) noexcept
+        {
+            try
+            {
+                if (publisher)
+                    publisher.Stop();
+            }
+            catch (...)
+            {
+            }
+
+            for (const auto& provider : providers)
+            {
+                try
+                {
+                    provider.StopAdvertising();
+                }
+                catch (...)
+                {
+                }
+            }
+        }
+
+        void tracker_advertisers(
+            const std::shared_ptr<AdvertiseStartTracker>& tracker,
+            WDBA::BluetoothLEAdvertisementPublisher& publisher,
+            std::vector<WDBG::GattServiceProvider>& providers)
+        {
+            std::scoped_lock lock(tracker->mutex);
+            publisher = tracker->publisher;
+            for (const auto& pair : tracker->providers)
+                providers.push_back(pair.first);
+        }
+
+        // Advertising that had started ended without le_advertise_stop: its
+        // publisher or one of its providers stopped or aborted (R2-10).
+        // Windows publishes a service only while its provider advertises, so
+        // the whole advertisement ends: the newest start reports it once, with
+        // le_advertising cleared under advertise_flag_mutex, and stops what
+        // else it began. le_advertise_stop bumps the generation first, so its
+        // own stops are never reported.
+        void advertising_lost(
+            const std::shared_ptr<SharedLeState>& le,
+            const std::shared_ptr<AdvertiseStartTracker>& tracker,
+            Error error,
+            std::string message)
+        {
+            {
+                std::scoped_lock flag_lock(le->advertise_flag_mutex);
+                if (tracker->generation != le->advertise_generation.load() || !le->le_advertising.load())
+                    return;
+                le->le_advertising.store(false);
+            }
+
+            WDBA::BluetoothLEAdvertisementPublisher publisher{nullptr};
+            std::vector<WDBG::GattServiceProvider> providers;
+            tracker_advertisers(tracker, publisher, providers);
+            revoke_advertise_handlers(tracker);
+            stop_advertisers_noexcept(publisher, providers);
+
+            BackendEvent event;
+            event.type = BackendEventType::LeAdvertiseStopped;
+            event.transport = Transport::LowEnergy;
+            event.error = error;
+            event.message = std::move(message);
+            push_le_event(le, std::move(event));
         }
 
         void advertise_start_progress(
@@ -357,40 +443,32 @@ namespace gmbluetooth::win
         {
             WDBA::BluetoothLEAdvertisementPublisher publisher{nullptr};
             std::vector<WDBG::GattServiceProvider> providers;
-            {
-                std::scoped_lock lock(tracker->mutex);
-                publisher = tracker->publisher;
-                for (const auto& pair : tracker->providers)
-                    providers.push_back(pair.first);
-            }
+            tracker_advertisers(tracker, publisher, providers);
 
             if (!finish_advertise_start(le, tracker, error, std::move(message)))
                 return;
 
-            if (tracker->generation != le->advertise_generation.load())
-                return;
-
-            try
             {
-                if (publisher)
-                    publisher.Stop();
+                std::scoped_lock flag_lock(le->advertise_flag_mutex);
+                if (tracker->generation != le->advertise_generation.load())
+                    return;
+                le->le_advertising.store(false);
             }
-            catch (...)
-            {
-            }
+            stop_advertisers_noexcept(publisher, providers);
+        }
 
-            for (auto& provider : providers)
-            {
-                try
-                {
-                    provider.StopAdvertising();
-                }
-                catch (...)
-                {
-                }
-            }
-
-            le->le_advertising.store(false);
+        // A publisher or provider status that ends advertising: before the
+        // start completed it fails the start, after it the advertisement.
+        void advertiser_ended(
+            const std::shared_ptr<SharedLeState>& le,
+            const std::shared_ptr<AdvertiseStartTracker>& tracker,
+            Error error,
+            std::string message)
+        {
+            if (tracker->done.load())
+                advertising_lost(le, tracker, error, std::move(message));
+            else
+                advertise_start_failed(le, tracker, error, std::move(message));
         }
 
         // BluetoothLeAdvertiseTxPower in dBm: the values Android documents for
@@ -449,26 +527,20 @@ namespace gmbluetooth::win
                     const WDBA::BluetoothLEAdvertisementPublisherStatusChangedEventArgs& args)
                 {
                     const auto le = weak.lock();
-                    if (!le)
+                    if (!le || !le->alive.load())
                         return;
 
                     // Only the newest start's publisher may say advertising
                     // ended; an older one's late event leaves it (R1-242).
-                    const auto advertising_ended = [&le, &tracker]()
-                    {
-                        std::scoped_lock flag_lock(le->advertise_flag_mutex);
-                        if (tracker->generation == le->advertise_generation.load())
-                            le->le_advertising.store(false);
-                    };
                     const auto status = args.Status();
                     if (status == WDBA::BluetoothLEAdvertisementPublisherStatus::Started)
                     {
-                        advertise_start_progress(le, tracker);
+                        if (!tracker->done.load())
+                            advertise_start_progress(le, tracker);
                     }
                     else if (status == WDBA::BluetoothLEAdvertisementPublisherStatus::Aborted)
                     {
-                        advertising_ended();
-                        advertise_start_failed(
+                        advertiser_ended(
                             le,
                             tracker,
                             map_bluetooth_failure(args.Error()),
@@ -476,12 +548,13 @@ namespace gmbluetooth::win
                     }
                     else if (status == WDBA::BluetoothLEAdvertisementPublisherStatus::Stopped)
                     {
-                        advertising_ended();
-                        advertise_start_failed(
+                        advertiser_ended(
                             le,
                             tracker,
                             Error::OperationFailed,
-                            "BLE advertisement stopped before it started");
+                            tracker->done.load()
+                                ? "Windows stopped the BLE advertisement"
+                                : "BLE advertisement stopped before it started");
                     }
                 });
         }
@@ -499,31 +572,35 @@ namespace gmbluetooth::win
                     const WDBG::GattServiceProviderAdvertisementStatusChangedEventArgs& args)
                 {
                     const auto le = weak.lock();
-                    if (!le)
+                    if (!le || !le->alive.load())
                         return;
 
                     switch (args.Status())
                     {
                         case WDBG::GattServiceProviderAdvertisementStatus::Started:
-                            advertise_start_progress(le, tracker);
+                            if (!tracker->done.load())
+                                advertise_start_progress(le, tracker);
                             break;
                         case WDBG::GattServiceProviderAdvertisementStatus::StartedWithoutAllAdvertisementData:
                             GMBT_LOG("GATT service advertising started without all of its advertisement data");
-                            advertise_start_progress(le, tracker);
+                            if (!tracker->done.load())
+                                advertise_start_progress(le, tracker);
                             break;
                         case WDBG::GattServiceProviderAdvertisementStatus::Aborted:
-                            advertise_start_failed(
+                            advertiser_ended(
                                 le,
                                 tracker,
                                 map_bluetooth_failure(args.Error()),
                                 "Windows aborted GATT service advertising: " + bluetooth_failure_message(args.Error()));
                             break;
                         case WDBG::GattServiceProviderAdvertisementStatus::Stopped:
-                            advertise_start_failed(
+                            advertiser_ended(
                                 le,
                                 tracker,
                                 Error::OperationFailed,
-                                "GATT service advertising stopped before it started");
+                                tracker->done.load()
+                                    ? "GATT service advertising stopped"
+                                    : "GATT service advertising stopped before it started");
                             break;
                         default:
                             break;
@@ -569,7 +646,7 @@ namespace gmbluetooth::win
                 event.type = BackendEventType::LeServerReadRequest;
                 event.transport = Transport::LowEnergy;
                 event.request_id = request_id;
-                event.central = server_central(central, central_address);
+                event.central = server_central(*le, central, central_address);
                 event.attribute.characteristic = characteristic_id;
                 event.attribute.descriptor = descriptor_id;
                 event.offset = request.Offset();
@@ -629,7 +706,7 @@ namespace gmbluetooth::win
                 event.type = BackendEventType::LeServerWriteRequest;
                 event.transport = Transport::LowEnergy;
                 event.request_id = request_id;
-                event.central = server_central(central, central_address);
+                event.central = server_central(*le, central, central_address);
                 event.attribute.characteristic = characteristic_id;
                 event.attribute.descriptor = descriptor_id;
                 event.offset = request.Offset();
@@ -855,6 +932,21 @@ namespace gmbluetooth::win
                         return Error::InvalidArgument;
                     }
 
+                    // CreateDescriptorAsync refuses a User Description, and
+                    // the characteristic parameters take only a fixed text.
+                    if (descriptor.uuid == k_user_description_uuid)
+                    {
+                        if (!source_descriptor.value)
+                        {
+                            message = "Windows publishes a User Description (0x2901) only with a static value";
+                            return Error::NotSupported;
+                        }
+                        characteristic.user_description =
+                            std::string(source_descriptor.value->begin(), source_descriptor.value->end());
+                        continue;
+                    }
+
+                    descriptor.value = source_descriptor.value;
                     characteristic.descriptors.push_back(std::move(descriptor));
                 }
 
@@ -879,6 +971,8 @@ namespace gmbluetooth::win
             WDBG::GattLocalDescriptorParameters descriptor_parameters;
             descriptor_parameters.ReadProtectionLevel(WDBG::GattProtectionLevel::Plain);
             descriptor_parameters.WriteProtectionLevel(WDBG::GattProtectionLevel::Plain);
+            if (descriptor.value)
+                descriptor_parameters.StaticValue(bytes_to_buffer(*descriptor.value));
 
             const auto descriptor_result = characteristic_state.characteristic
                 .CreateDescriptorAsync(descriptor.guid, descriptor_parameters).get();
@@ -933,6 +1027,8 @@ namespace gmbluetooth::win
             parameters.WriteProtectionLevel(write_protection_from_permissions(characteristic.permissions));
             if (!characteristic.value.empty())
                 parameters.StaticValue(bytes_to_buffer(characteristic.value));
+            if (characteristic.user_description)
+                parameters.UserDescription(winrt::to_hstring(*characteristic.user_description));
 
             const auto characteristic_result = service_state.provider.Service()
                 .CreateCharacteristicAsync(characteristic.guid, parameters).get();
@@ -1184,11 +1280,10 @@ namespace gmbluetooth::win
                 tracker->publisher = advertiser_;
             }
 
+            // Every provider is watched for the advertisement's life, also one
+            // already advertising, which only the count above leaves out (R2-10).
             for (const auto& provider : providers)
             {
-                if (provider.AdvertisementStatus() == WDBG::GattServiceProviderAdvertisementStatus::Started)
-                    continue;
-
                 const auto token = watch_provider_status(provider, weak, tracker);
 
                 std::scoped_lock lock(tracker->mutex);
@@ -1230,8 +1325,16 @@ namespace gmbluetooth::win
         }
     }
 
+    // Reports nothing: the generation moves on before anything stops, so
+    // the status events the stops cause are stale (R2-10).
     Error WindowsBackend::le_advertise_stop(std::string& message)
     {
+        {
+            std::scoped_lock flag_lock(le_->advertise_flag_mutex);
+            le_->le_advertising.store(false);
+            ++le_->advertise_generation;
+        }
+
         if (advertise_tracker_)
         {
             finish_advertise_start(
@@ -1239,6 +1342,7 @@ namespace gmbluetooth::win
                 advertise_tracker_,
                 Error::OperationFailed,
                 "Advertising stopped before it started");
+            revoke_advertise_handlers(advertise_tracker_);
             advertise_tracker_.reset();
         }
 
@@ -1253,13 +1357,11 @@ namespace gmbluetooth::win
                 }
             }
             release_advertiser_noexcept();
-            le_->le_advertising.store(false);
             message.clear();
             return Error::Ok;
         }
         catch (const winrt::hresult_error& error)
         {
-            le_->le_advertising.store(false);
             release_advertiser_noexcept();
             message = winrt::to_string(error.message());
             return Error::OperationFailed;
@@ -1289,8 +1391,13 @@ namespace gmbluetooth::win
         return Error::Ok;
     }
 
+    // Ends advertising too (R2-20): Windows publishes a service only while
+    // its provider advertises, so the two cannot outlive each other.
     Error WindowsBackend::le_server_stop(std::string& message)
     {
+        std::string ignored;
+        le_advertise_stop(ignored);
+
         le_server_open_.store(false);
         clear_queued_notifies(notify_queue_);
         complete_parked_gatt_requests_noexcept();
@@ -1303,6 +1410,29 @@ namespace gmbluetooth::win
     bool WindowsBackend::le_server_is_running() const
     {
         return le_server_open_.load();
+    }
+
+    // What the central's session negotiated (R2-32): the key is its
+    // session's device id.
+    std::int32_t WindowsBackend::le_server_connection_mtu(const std::string& central) const
+    {
+        WDBG::GattSession session{nullptr};
+        {
+            std::scoped_lock lock(le_->server_sessions_mutex);
+            const auto it = le_->server_sessions.find(central);
+            if (it != le_->server_sessions.end())
+                session = it->second.session;
+        }
+
+        try
+        {
+            if (session)
+                return static_cast<std::int32_t>(session.MaxPduSize());
+        }
+        catch (const winrt::hresult_error&)
+        {
+        }
+        return 23;
     }
 
     Error WindowsBackend::le_server_add_service(std::uint64_t op_id, const LeServerService& service, std::string& message)

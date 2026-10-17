@@ -1182,8 +1182,9 @@ calls no scan callback. To remember a device between runs of the game, store its
 invalid, and <a href="devices.html#bluetooth_device_get_count">bluetooth_device_get_count</a> returns 0 afterwards.</p>
 <p>The cache keeps every device seen since the last clear, whichever scan found it, so you should
 call this function from time to time during a long scan in a busy place. Device handles are never
-reused: a device seen again after the clear enters the cache under a new handle, which the running
-scan reports. An old handle can therefore never name a different device.</p>
+reused: a device that a running scan sees again after the clear enters the cache under a new
+handle, which the scan reports through its <code>on_found</code> callback. An old handle can therefore never
+name a different device.</p>
 <p>Clearing the cache does not close anything. A connection made to a device stays open, and a
 pairing still in progress still calls its callback with the old handle, but the device getters
 return their empty values for that handle from now on.</p>
@@ -1206,7 +1207,8 @@ return their empty values for that handle from now on.</p>
 <p><pre class="highlight"><code class="language-gml">bluetooth_device_clear();
 devices = [];</code></pre>
 The above code empties the device cache and the instance's own <code>devices</code> array. A scan that is
-running keeps running and reports each device it sees again under a new handle, so the <code>devices</code>
+running keeps running and reports each device it sees again under a new handle through its
+<code>on_found</code> callback, so the <code>devices</code>
 array can fill up again with valid handles.</p>
 <p><br></p>
 <hr />
@@ -1561,7 +1563,8 @@ The above code shows the name of the device in the output log, or "(unnamed)" wh
 
 <h1 id="bluetooth_device_get_address">bluetooth_device_get_address<a class="headerlink" href="#bluetooth_device_get_address" title="Permanent link">&para;</a></h1>
 <p>This function returns the Bluetooth address of the given device, in the form
-<code>AA:BB:CC:DD:EE:FF</code>, or <code>undefined</code> when the platform does not expose it.</p>
+<code>AA:BB:CC:DD:EE:FF</code>, or <code>undefined</code> when the platform does not expose it. It also returns
+<code>undefined</code> for a handle that is not valid.</p>
 <p>To remember a device between runs of the game, store its id from
 <a href="devices.html#bluetooth_device_get_id">bluetooth_device_get_id</a> instead: not every platform exposes an address.</p>
 <div class="admonition note">
@@ -1611,7 +1614,8 @@ it.</p>
 
 <h1 id="bluetooth_device_get_rssi">bluetooth_device_get_rssi<a class="headerlink" href="#bluetooth_device_get_rssi" title="Permanent link">&para;</a></h1>
 <p>This function returns the most recent signal strength (RSSI) reported for the given device,
-in dBm, or <code>undefined</code> when none has been reported. Values are negative, and a value closer to 0
+in dBm, or <code>undefined</code> when none has been reported and for a handle that is not valid. Values are
+negative, and a value closer to 0
 means a stronger signal. The value is updated by every later advertisement or inquiry result the
 device sends while a scan runs.</p>
 <p>Scans report the signal strength. A device that entered the cache without a scan (through
@@ -1675,7 +1679,8 @@ strength.</p>
 <h1 id="bluetooth_device_get_last_seen_age">bluetooth_device_get_last_seen_age<a class="headerlink" href="#bluetooth_device_get_last_seen_age" title="Permanent link">&para;</a></h1>
 <p>This function returns how long ago a scan last saw the given device, in milliseconds, or
 <code>undefined</code> when no scan has seen it: a device added with <a href="devices.html#bluetooth_device_from_id">bluetooth_device_from_id</a>, by
-a device query, or by connecting to the LE or Classic server.</p>
+a device query, or by connecting to the LE or Classic server. It also returns <code>undefined</code> for a
+handle that is not valid.</p>
 <p>The age grows while the device stays silent, so you can use it to drop devices that have gone out
 of range from your own list, instead of waiting for an event: no callback reports a device that has
 stopped advertising.</p>

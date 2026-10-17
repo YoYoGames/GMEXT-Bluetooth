@@ -1775,10 +1775,10 @@
 <p>The scan keeps its callbacks until it ends. When it ends without <a href="le_client.html#bluetooth_le_scan_stop">bluetooth_le_scan_stop</a>, for example with <a href="core.html#bluetootherror">BluetoothError</a>.BluetoothDisabled when the radio is turned off, <code>on_stopped</code> is called once with the reason; a scan you stop yourself calls nothing. Only an LE scan reports LE devices, and a device that enters the cache in another way, such as through <a href="devices.html#bluetooth_device_from_id">bluetooth_device_from_id</a>, calls no scan callback.</p>
 <p>The given <code>settings</code> is a <a href="le_client.html#bluetoothlescansettings">BluetoothLeScanSettings</a>, or <code>undefined</code> for an active scan in <a href="le_client.html#bluetoothlescanmode">BluetoothLeScanMode</a>.LowLatency mode with an update interval of 1000 milliseconds. The given <code>filters</code> array holds <a href="le_client.html#bluetoothlescanfilter">BluetoothLeScanFilter</a> structs; <code>undefined</code> or an empty array reports every device. Otherwise the scan reports a device once its advertisement record, merged over every advertisement and scan response it has sent, matches any one of the filters.</p>
 <p>Only one LE scan runs at a time: a start while a scan is running returns <a href="core.html#bluetootherror">BluetoothError</a>.Busy, so stop the scan first to change its settings, filters or callbacks. While the Bluetooth state is still <a href="core.html#bluetoothstate">BluetoothState</a>.Unknown the scan starts once the radio is ready.</p>
-<p>If the scan cannot start, the function returns a <a href="core.html#bluetootherror">BluetoothError</a> other than <code>Ok</code>: NotInitialized, InvalidArgument for a bad setting or filter (a filter that sets no field, a malformed UUID, a <code>company_id</code> outside 0-65535, data without its key, a mask of another length than its data, an <code>update_interval_ms</code> outside 0-60000), Busy while a scan runs, PermissionDenied when the Bluetooth permission is missing or was refused, BluetoothDisabled when the radio is off or resetting, NotSupported when there is no Bluetooth LE hardware, or OperationFailed when the platform refused to start. The reason is in <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>, and no scan callback is called.</p>
+<p>If the scan cannot start, the function returns a <a href="core.html#bluetootherror">BluetoothError</a> other than <code>Ok</code>: NotInitialized, InvalidArgument for a bad setting or filter (a filter that sets no field, a malformed UUID, a <code>company_id</code> outside 0-65535, data without its key, a mask of another length than its data, an <code>update_interval_ms</code> outside 0-60000, a <code>mode</code> that is not a <a href="le_client.html#bluetoothlescanmode">BluetoothLeScanMode</a>), Busy while a scan runs, PermissionDenied when the Bluetooth permission is missing or was refused, BluetoothDisabled when the radio is off or resetting, NotSupported when there is no Bluetooth LE hardware, or OperationFailed when the platform refused to start. The reason is in <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>, and no scan callback is called.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>Android filters in the Bluetooth stack and allows 5 scan starts per 30 seconds: a sixth starts but finds nothing. It also pauses unfiltered scans while the screen is off, and on Android 6 to 11 a scan returns PermissionDenied while the system Location setting is off. With the manifest's <code>neverForLocation</code> flag it also leaves out some beacon advertisements. Only Android uses the <code>mode</code> of the settings (<a href="core.html#bluetoothfeature">BluetoothFeature</a>.LeScanMode).</p>
+<p>Android filters in the Bluetooth stack and allows 5 scan starts per 30 seconds: a sixth starts but finds nothing. It also pauses unfiltered scans while the screen is off, and on Android 6 to 11 a scan returns PermissionDenied while the system Location setting is off. With the manifest's <code>neverForLocation</code> flag it also leaves out some beacon advertisements. Only Android uses the <code>mode</code> of the settings (<a href="core.html#bluetoothfeature">BluetoothFeature</a>.LeScanMode), and it reads a <code>mode</code> that is not a <a href="le_client.html#bluetoothlescanmode">BluetoothLeScanMode</a> as <code>undefined</code>, that is LowLatency.</p>
 </div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
@@ -2966,7 +2966,7 @@ The above code writes the UUID of every service discovered on the connection sto
 <blockquote>
 <p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></p>
 </blockquote>
-<p>The service handle, or 0 if there is none with that UUID.</p>
+<p>The service handle, or 0 if none has that UUID or the call fails.</p>
 <p><br></p>
 <p><strong>Example:</strong></p>
 <p><pre class="highlight"><code class="language-gml">heart_rate_service = bluetooth_le_service_find(connection, "180d");
@@ -3233,7 +3233,7 @@ The above code writes the UUID of every characteristic of the service stored in 
 <blockquote>
 <p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></p>
 </blockquote>
-<p>The characteristic handle, or 0 if there is none with that UUID.</p>
+<p>The characteristic handle, or 0 if none has that UUID or the call fails.</p>
 <p><br></p>
 <p><strong>Example:</strong></p>
 <p><pre class="highlight"><code class="language-gml">measurement = bluetooth_le_characteristic_find(heart_rate_service, "2a37");
@@ -3537,7 +3537,7 @@ The above code writes the UUID of every descriptor of the characteristic stored 
 <blockquote>
 <p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Data_Types.htm">Real</a></p>
 </blockquote>
-<p>The descriptor handle, or 0 if there is none with that UUID.</p>
+<p>The descriptor handle, or 0 if none has that UUID or the call fails.</p>
 <p><br></p>
 <p><strong>Example:</strong></p>
 <p><pre class="highlight"><code class="language-gml">user_description = bluetooth_le_descriptor_find(measurement, "2901");</code></pre>

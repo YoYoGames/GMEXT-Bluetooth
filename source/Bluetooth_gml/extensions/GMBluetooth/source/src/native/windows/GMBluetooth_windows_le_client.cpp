@@ -461,12 +461,22 @@ namespace gmbluetooth::win
                 close_le_client_connection_noexcept(current);
         }
 
-        // The open of a connection: the first job on its worker.
+        // What is left of a connect's window, never below zero.
+        std::chrono::milliseconds time_left(std::chrono::steady_clock::time_point deadline)
+        {
+            const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
+            return std::max(left, std::chrono::milliseconds(0));
+        }
+
+        // The open of a connection: the first job on its worker. deadline
+        // ends the window the connect call was given (R2-135): the device
+        // lookup and the uncached GATT probe both count toward it.
         void open_le_connection(
             const std::shared_ptr<SharedLeClientState>& shared,
             const std::shared_ptr<RemoteGattConnectionState>& state,
             std::uint64_t address,
-            std::optional<WDB::BluetoothAddressType> address_type)
+            std::optional<WDB::BluetoothAddressType> address_type,
+            std::chrono::steady_clock::time_point deadline)
         {
             // What it opened is closed and the core told why.
             const auto fail_open = [&shared, &state](Error failure, const std::string& why)
@@ -487,10 +497,18 @@ namespace gmbluetooth::win
                 if (!shared->alive->load() || state->closing.load())
                     return;
 
-                // The advertised address type, when the scan saw one (R1-182).
-                const auto remote = address_type
-                    ? WDB::BluetoothLEDevice::FromBluetoothAddressAsync(address, *address_type).get()
-                    : WDB::BluetoothLEDevice::FromBluetoothAddressAsync(address).get();
+                // The address type the id or the scan gave, when there is one
+                // (R1-182, R2-115).
+                const auto lookup = address_type
+                    ? WDB::BluetoothLEDevice::FromBluetoothAddressAsync(address, *address_type)
+                    : WDB::BluetoothLEDevice::FromBluetoothAddressAsync(address);
+                if (lookup.wait_for(time_left(deadline)) == WF::AsyncStatus::Started)
+                {
+                    lookup.Cancel();
+                    fail_open(Error::Timeout, "The Bluetooth LE device was not found in time");
+                    return;
+                }
+                const auto remote = lookup.GetResults();
 
                 if (!remote)
                 {
@@ -566,14 +584,14 @@ namespace gmbluetooth::win
                 // An uncached GATT query is intentional here. Microsoft
                 // documents that creating BluetoothLEDevice alone does not
                 // necessarily initiate a physical connection; an uncached
-                // GATT operation does. The probe is bounded by the 15 s every
-                // platform documents for a connect (R1-66).
+                // GATT operation does. The probe gets what is left of the
+                // connect's window (R1-66, R2-135).
                 const auto services_query =
                     remote.GetGattServicesAsync(WDB::BluetoothCacheMode::Uncached);
-                if (services_query.wait_for(std::chrono::seconds(15)) == winrt::Windows::Foundation::AsyncStatus::Started)
+                if (services_query.wait_for(time_left(deadline)) == WF::AsyncStatus::Started)
                 {
                     services_query.Cancel();
-                    fail_open(Error::Timeout, "The Bluetooth LE device did not answer within 15 seconds");
+                    fail_open(Error::Timeout, "The Bluetooth LE device did not answer in time");
                     return;
                 }
                 const auto services_result = services_query.GetResults();
@@ -797,8 +815,10 @@ namespace gmbluetooth::win
     Error WindowsBackend::le_connect(
         std::uint64_t connection,
         const DiscoveredDevice& device,
+        std::chrono::milliseconds timeout,
         std::string& message)
     {
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
         if (!initialized_)
         {
             message = "Bluetooth backend is not initialized";
@@ -840,12 +860,20 @@ namespace gmbluetooth::win
             le_client_->connections[connection] = state;
         }
 
+        // A typed id says the type; an untyped one ("le:" from Android below
+        // API 35) takes what a scan saw, if one did.
         const auto shared = le_client_;
-        const auto address_type = find_address_type(*le_, static_cast<std::uint64_t>(address));
+        std::optional<WDB::BluetoothAddressType> address_type;
+        if (device.id.rfind("le:public:", 0) == 0)
+            address_type = WDB::BluetoothAddressType::Public;
+        else if (device.id.rfind("le:random:", 0) == 0)
+            address_type = WDB::BluetoothAddressType::Random;
+        else
+            address_type = find_address_type(*le_, static_cast<std::uint64_t>(address));
         const bool posted = state->worker->post(
-            [shared, state, address, address_type]()
+            [shared, state, address, address_type, deadline]()
             {
-                open_le_connection(shared, state, static_cast<std::uint64_t>(address), address_type);
+                open_le_connection(shared, state, static_cast<std::uint64_t>(address), address_type, deadline);
             });
 
         if (!posted)
