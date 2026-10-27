@@ -720,8 +720,9 @@
 
 /**
  * @function bluetooth_classic_discoverable_is_running
- * @desc This function checks whether this device is currently discoverable to Classic scans. It reads
- * the state from the system, so it also reflects a change the user made outside the game.
+ * @desc This function checks whether the discoverable window this game started is still open. It reads
+ * the state from the system, so it turns `false` as soon as the window ends, early or not, and a window
+ * another app or the system settings opened does not count.
  *
  * [[Note: On Android this function needs the Bluetooth scan permission on Android 12 and later;
  * without it the function returns `false` and sets ${function.bluetooth_last_error_code} to

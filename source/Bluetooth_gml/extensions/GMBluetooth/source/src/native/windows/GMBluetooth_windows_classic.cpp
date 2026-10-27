@@ -1431,6 +1431,14 @@ namespace gmbluetooth::win
         }
         BluetoothFindRadioClose(find);
 
+        // Discoverable already, from Settings say: Busy, as on Android.
+        if (BluetoothIsDiscoverable(radio_handle) != FALSE)
+        {
+            CloseHandle(radio_handle);
+            message = "The device is already discoverable";
+            return Error::Busy;
+        }
+
         // Incoming connections are a system setting; whatever this turns
         // on is turned back off by the stop or the expiry (R1-184). A radio
         // already connectable is left alone: enabling it again fails with
@@ -1552,8 +1560,10 @@ namespace gmbluetooth::win
 
     bool WindowsBackend::classic_discoverable_is_running() const
     {
-        if (!discoverable_radio_)
-            return classic_discoverable_active_.load();
+        // Only the game's own window, as on Android: discovery that Settings
+        // turned on after it ended does not count.
+        if (!discoverable_radio_ || !classic_discoverable_active_.load())
+            return false;
         return BluetoothIsDiscoverable(discoverable_radio_) != FALSE;
     }
 }

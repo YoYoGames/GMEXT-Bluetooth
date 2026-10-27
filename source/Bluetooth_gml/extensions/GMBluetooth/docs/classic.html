@@ -2425,8 +2425,9 @@ The above code ends discoverability only on a platform that can end it early.</p
 <p align="right"><a href="#top">Back To Top</a></p>
 
 <h1 id="bluetooth_classic_discoverable_is_running">bluetooth_classic_discoverable_is_running<a class="headerlink" href="#bluetooth_classic_discoverable_is_running" title="Permanent link">&para;</a></h1>
-<p>This function checks whether this device is currently discoverable to Classic scans. It reads
-the state from the system, so it also reflects a change the user made outside the game.</p>
+<p>This function checks whether the discoverable window this game started is still open. It reads
+the state from the system, so it turns <code>false</code> as soon as the window ends, early or not, and a window
+another app or the system settings opened does not count.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>On Android this function needs the Bluetooth scan permission on Android 12 and later;

@@ -506,7 +506,7 @@
  *
  * A stop while nothing runs returns `Ok` and calls nothing. What the game ends fires no event: a stop or a disconnect that you ask for takes effect when the call returns, and no `on_stopped` or `on_disconnected` callback is called for it, nor for the centrals and the advertisement that ${function.bluetooth_le_server_stop} ends.
  *
- * An outcome the extension recognises reads the same on every platform: when the other device closes the link, the message is `Remote device disconnected`, and a Classic connect to a service the device does not offer fails with `ConnectionFailed` and `The device does not offer service <uuid>, or nothing is listening on it`. A failure the extension cannot classify carries the platform's own text, as `<operation> failed (<code>): <system text>`.
+ * An outcome the extension recognises reads the same on every platform: when the other device closes the link, the message is `Remote device disconnected`, when the radio turns off it is `BluetoothDisabled` with `Bluetooth was turned off or became unavailable`, and a Classic connect to a service the device does not offer fails with `ConnectionFailed` and `The device does not offer service <uuid>, or nothing is listening on it`. A failure the extension cannot classify carries the platform's own text, as `<operation> failed (<code>): <system text>`.
  * @member Ok The call or operation succeeded.
  * @member Unknown The platform reported an error that matches no other code; the message holds its description.
  * @member NotSupported The device has no Bluetooth hardware, or the platform or adapter cannot do what was asked.

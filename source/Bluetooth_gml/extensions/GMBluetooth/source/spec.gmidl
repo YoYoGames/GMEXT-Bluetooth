@@ -33,7 +33,8 @@ module GMBluetooth;
 // A stop while idle is Ok and fires nothing.
 //
 // An outcome the extension recognises reads the same on every platform: the peer
-// closing the link is "Remote device disconnected", and a Classic connect to a service
+// closing the link is "Remote device disconnected", radio off is BluetoothDisabled with
+// "Bluetooth was turned off or became unavailable", and a Classic connect to a service
 // the device does not offer is ConnectionFailed with "The device does not offer service
 // <uuid>, or nothing is listening on it". A failure it cannot classify carries the
 // platform's text, as "<operation> failed (<code>): <system text>".

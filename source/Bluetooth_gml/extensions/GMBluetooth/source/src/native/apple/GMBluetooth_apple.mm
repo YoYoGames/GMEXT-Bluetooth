@@ -585,7 +585,7 @@ static BOOL gmbt_core_ends_everything(CBManagerState state) {
 static gmbluetooth::Error gmbt_radio_off_error(CBManagerState state, std::string &message) {
     if (!gmbt_core_ends_everything(state)) return gmbt_unavailable_error(state, message);
     return gmbt_fail(message, gmbluetooth::Error::BluetoothDisabled,
-                     "Bluetooth was turned off or became unavailable (" + gmbt_string(gmbt_manager_state_name(state)) + ")");
+                     "Bluetooth was turned off or became unavailable");
 }
 
 // The BluetoothError and message a CoreBluetooth NSError reports to GML. An

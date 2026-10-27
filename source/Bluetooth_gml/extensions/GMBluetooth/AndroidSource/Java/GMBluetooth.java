@@ -238,7 +238,7 @@ public class GMBluetooth extends GMBluetoothInternal
     private static final String NOT_INITIALIZED_MESSAGE = "Bluetooth is not initialized";
     private static final String NO_ADAPTER_MESSAGE = "This device has no Bluetooth adapter";
     private static final String RECEIVER_FAILED_MESSAGE = "Could not register for Bluetooth broadcasts";
-    private static final String RADIO_OFF_MESSAGE = "Bluetooth was turned off";
+    private static final String RADIO_OFF_MESSAGE = "Bluetooth was turned off or became unavailable";
     private static final String REMOTE_DISCONNECTED_MESSAGE = "Remote device disconnected";
 
     // The permission, enable and discoverable requests need one to launch from.
@@ -10650,6 +10650,12 @@ public class GMBluetooth extends GMBluetoothInternal
         BluetoothAdapter current = adapter;
 
         if (!initialized || current == null)
+            return false;
+
+        // Only the game's own window, so it reads false once on_stopped fired,
+        // before the scan mode catches up, and while another app's runs.
+        DiscoverableWindow window = discoverable.get();
+        if (window == null || !window.granted)
             return false;
 
         // getScanMode needs BLUETOOTH_SCAN from Android 12.
