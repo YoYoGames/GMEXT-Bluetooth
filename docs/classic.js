@@ -473,9 +473,10 @@
  *
  * [[Note: On Windows and Android an empty name is published as "GMBluetooth RFCOMM", and incoming
  * links are secure (authenticated and encrypted) RFCOMM links. On Android the permission is the
- * Bluetooth connect permission. macOS has no API to require a secure link, so incoming links there
- * use the system's default security, and it returns PermissionDenied until
- * ${function.bluetooth_permission_request} has been called.]]
+ * Bluetooth connect permission. macOS cannot make the service require a secure link, so it closes an
+ * incoming link from a device that is not paired or whose link is not encrypted, and the game never
+ * hears of it. It returns PermissionDenied until ${function.bluetooth_permission_request} has been
+ * called.]]
  * @param {String} name The name of the service, as other devices see it.
  * @param {String} service_uuid The UUID of the service, in the full 36-character form or as 4 or 8
  * hex digits.

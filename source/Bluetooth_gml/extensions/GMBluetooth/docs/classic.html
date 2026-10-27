@@ -1940,9 +1940,10 @@ to publish the service.</p>
 <p class="admonition-title">Note</p>
 <p>On Windows and Android an empty name is published as "GMBluetooth RFCOMM", and incoming
 links are secure (authenticated and encrypted) RFCOMM links. On Android the permission is the
-Bluetooth connect permission. macOS has no API to require a secure link, so incoming links there
-use the system's default security, and it returns PermissionDenied until
-<a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a> has been called.</p>
+Bluetooth connect permission. macOS cannot make the service require a secure link, so it closes an
+incoming link from a device that is not paired or whose link is not encrypted, and the game never
+hears of it. It returns PermissionDenied until <a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a> has been
+called.</p>
 </div>
 <p>This function operates asynchronously, which means that it does not immediately return the requested result. Instead, upon completion of the task, it will trigger the <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a>.</p>
 <p><br></p>

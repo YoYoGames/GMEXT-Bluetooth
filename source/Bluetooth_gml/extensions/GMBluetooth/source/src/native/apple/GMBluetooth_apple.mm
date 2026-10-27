@@ -3543,9 +3543,10 @@ namespace
             });
 
             // The baseband link opens authenticated first, as Android's secure
-            // RFCOMM does (R1-254); a link already open is used as it is.
+            // RFCOMM does (R1-254); a link already open is authenticated on
+            // its own (R2-166).
             if ([btDevice isConnected])
-                return classic_connect_after_open(connection, btDevice, service_uuid, message);
+                return classic_connect_on_existing_link(connection, btDevice, service_uuid, message);
 
             GMBTBasebandOpenHandler* openHandler = [GMBTBasebandOpenHandler new];
             const std::string uuidCopy = service_uuid;
@@ -3573,7 +3574,7 @@ namespace
                 classic_pending_open_.erase(connection);
             }
             if (status == kBluetoothHCIErrorACLConnectionAlreadyExists)
-                return classic_connect_after_open(connection, btDevice, service_uuid, message);
+                return classic_connect_on_existing_link(connection, btDevice, service_uuid, message);
 
             {
                 std::scoped_lock lock(classic_mutex_);
@@ -3583,6 +3584,54 @@ namespace
             return Error::OperationFailed;
         }
 
+        // A baseband link that was already open skipped the authenticated
+        // open (R2-166). An encrypted one is used as it is. Any other is
+        // authenticated off the main queue, since requestAuthentication
+        // blocks until pairing completes, and the connect goes on from
+        // handle_classic_authentication_complete. The connect's timeout
+        // still bounds it.
+        Error classic_connect_on_existing_link(std::uint64_t connection, IOBluetoothDevice* btDevice, const std::string& service_uuid, std::string& message)
+        {
+            if ([btDevice getEncryptionMode] != kEncryptionDisabled)
+                return classic_connect_after_open(connection, btDevice, service_uuid, message);
+
+            GMBT_LOG("Classic connect: the existing link is not encrypted - requesting authentication");
+            AppleBackend* self = this;
+            std::weak_ptr<int> alive = lifetime_;
+            const std::string uuidCopy = service_uuid;
+            IOBluetoothDevice* device = btDevice;
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                const IOReturn status = [device requestAuthentication];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if (alive.expired()) return;
+                    self->handle_classic_authentication_complete(connection, device, status, uuidCopy);
+                });
+            });
+            message.clear();
+            return Error::Ok;
+        }
+
+        void handle_classic_authentication_complete(std::uint64_t connection, IOBluetoothDevice* device, IOReturn status, const std::string& service_uuid)
+        {
+            GMBT_LOG("Classic connect: authentication of the existing link -> IOReturn=0x%08x", status);
+            {
+                std::scoped_lock lock(classic_mutex_);
+                if (classic_connections_.find(connection) == classic_connections_.end()) return; // timed out/cancelled meanwhile
+            }
+            if (status != kIOReturnSuccess)
+            {
+                char text[96];
+                std::snprintf(text, sizeof(text), "The existing Classic link could not be authenticated (status 0x%08x)", status);
+                complete_classic_connect(connection, Error::ConnectionFailed, text);
+                return;
+            }
+
+            std::string message;
+            const Error error = classic_connect_after_open(connection, device, service_uuid, message);
+            if (error != Error::Ok)
+                complete_classic_connect(connection, error, message);
+        }
+
         // Past the authenticated open: the RFCOMM channel from the cached SDP
         // record, or from a fresh query.
         Error classic_connect_after_open(std::uint64_t connection, IOBluetoothDevice* btDevice, const std::string& service_uuid, std::string& message)
@@ -3590,16 +3639,30 @@ namespace
             // Paired devices keep the SDP records from pairing (or the last
             // query) cached on the IOBluetoothDevice. Use them directly when
             // they already hold the requested service: a fresh SDP query can
-            // stall without ever calling back.
+            // stall without ever calling back. A record can be stale - the
+            // peer's server restarted on another channel - so a failed open
+            // falls back to one fresh query (R2-168).
             BluetoothRFCOMMChannelID cachedChannel = 0;
             if (classic_find_rfcomm_channel(btDevice, service_uuid, cachedChannel))
             {
                 GMBT_LOG("Classic connect: using cached SDP record, RFCOMM channel %d", (int)cachedChannel);
+                {
+                    std::scoped_lock lock(classic_mutex_);
+                    auto it = classic_connections_.find(connection);
+                    if (it == classic_connections_.end()) { message.clear(); return Error::Ok; } // cancelled meanwhile
+                    it->second->opened_from_cache = true;
+                    it->second->service_uuid = service_uuid;
+                }
                 classic_open_rfcomm(connection, btDevice, cachedChannel);
                 message.clear();
                 return Error::Ok;
             }
+            return classic_query_sdp(connection, btDevice, service_uuid, message);
+        }
 
+        // A fresh SDP query; its completion opens the channel it finds.
+        Error classic_query_sdp(std::uint64_t connection, IOBluetoothDevice* btDevice, const std::string& service_uuid, std::string& message)
+        {
             GMBTSDPQueryHandler* sdpHandler = [GMBTSDPQueryHandler new];
             AppleBackend* self = this;
             std::weak_ptr<int> alive = lifetime_;
@@ -4088,6 +4151,11 @@ namespace
             bool writing = false;
             // The bytes of the writeAsync in flight, kept until it completes.
             NSMutableData* in_flight = nil;
+
+            // Main queue only. The channel being opened came from the cached
+            // SDP records: its failure earns one fresh query (R2-168).
+            bool opened_from_cache = false;
+            std::string service_uuid;
         };
 
         // Bytes a connection may hold waiting to be sent.
@@ -4292,8 +4360,12 @@ namespace
                 return;
             }
 
+            // A link that already existed was not opened by this call, so it
+            // is not known to be authenticated (R2-166).
             std::string message;
-            const Error error = classic_connect_after_open(connection, device, service_uuid, message);
+            const Error error = status == kBluetoothHCIErrorACLConnectionAlreadyExists
+                ? classic_connect_on_existing_link(connection, device, service_uuid, message)
+                : classic_connect_after_open(connection, device, service_uuid, message);
             if (error != Error::Ok)
                 complete_classic_connect(connection, error, message);
         }
@@ -4357,6 +4429,7 @@ namespace
             GMBT_LOG("Classic RFCOMM open (channel %d) -> IOReturn=0x%08x", (int)channelID, openStatus);
             if (openStatus != kIOReturnSuccess || !channel)
             {
+                if (classic_retry_with_fresh_query(connection, device)) return;
                 complete_classic_connect(connection, Error::ConnectionFailed, "RFCOMM channel could not be opened");
                 return;
             }
@@ -4378,11 +4451,44 @@ namespace
             classic_detach_channel(channel, delegate);
         }
 
+        // A failed open on a channel the cached SDP records named: detaches the
+        // failed channel and runs one fresh query instead (R2-168). False when
+        // the open was not from the cache, or was retried already.
+        bool classic_retry_with_fresh_query(std::uint64_t connection, IOBluetoothDevice* device)
+        {
+            IOBluetoothRFCOMMChannel* channel = nil;
+            GMBTClassicChannelDelegate* delegate = nil;
+            std::string service_uuid;
+            {
+                std::scoped_lock lock(classic_mutex_);
+                auto it = classic_connections_.find(connection);
+                if (it == classic_connections_.end() || !it->second->opened_from_cache) return false;
+                it->second->opened_from_cache = false;
+                service_uuid = it->second->service_uuid;
+                channel = it->second->channel;
+                delegate = it->second->delegate;
+                it->second->channel = nil;
+                it->second->delegate = nil;
+            }
+            if (!device && channel) device = [channel getDevice];
+            // Closed with the lock released, as classic_open_rfcomm does.
+            classic_detach_channel(channel, delegate);
+            if (!device) return false;
+
+            GMBT_LOG("Classic connect: the cached RFCOMM channel failed - querying SDP again");
+            std::string message;
+            const Error error = classic_query_sdp(connection, device, service_uuid, message);
+            if (error != Error::Ok)
+                complete_classic_connect(connection, error, message);
+            return true;
+        }
+
         void handle_classic_channel_open_complete(std::uint64_t connection, IOReturn status)
         {
             GMBT_LOG("Classic RFCOMM open complete: IOReturn=0x%08x", status);
             if (status != kIOReturnSuccess)
             {
+                if (classic_retry_with_fresh_query(connection, nil)) return;
                 complete_classic_connect(connection, Error::ConnectionFailed, "RFCOMM channel open failed");
                 return;
             }
@@ -4674,6 +4780,17 @@ namespace
             const DiscoveredDevice d = classic_device_entry(device);
             GMBT_LOG("Classic server: incoming RFCOMM channel %d from %s (%s)",
                 (int)[channel getChannelID], d.address.c_str(), d.name.c_str());
+
+            // macOS cannot make the service require a secure link, so one
+            // that is not paired and encrypted is closed here, before the
+            // game hears of it (R2-165).
+            if (![device isPaired] || [device getEncryptionMode] == kEncryptionDisabled)
+            {
+                GMBT_LOG("Classic server: refused %s - the link is not paired and encrypted (paired=%d)",
+                    d.address.c_str(), [device isPaired] ? 1 : 0);
+                classic_detach_channel(channel, nil);
+                return;
+            }
             // Cached without any scan callback: no scan saw it (R2-73).
             const std::uint64_t device_handle = hooks_.add_device(d);
             const std::uint64_t connection = hooks_.create_classic_connection(device_handle);
