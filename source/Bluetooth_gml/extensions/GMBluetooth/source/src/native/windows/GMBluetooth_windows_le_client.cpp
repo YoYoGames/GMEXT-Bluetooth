@@ -433,8 +433,9 @@ namespace gmbluetooth::win
                 return;
             }
 
-            const bool was_connected = current->connected.exchange(connected);
-            if (connected || !was_connected)
+            // Only the open sets connected; it runs this check itself once it
+            // has, for a drop that came before (R2-08, R2-159).
+            if (connected || !current->connected.exchange(false))
                 return;
 
             // Only a link the game did not close reports; Windows gives no
@@ -559,7 +560,14 @@ namespace gmbluetooth::win
                 // session keeps it for the connection's life (R1-114).
                 try
                 {
-                    auto session = WDBG::GattSession::FromDeviceIdAsync(remote.BluetoothDeviceId()).get();
+                    const auto session_lookup = WDBG::GattSession::FromDeviceIdAsync(remote.BluetoothDeviceId());
+                    if (session_lookup.wait_for(time_left(deadline)) == WF::AsyncStatus::Started)
+                    {
+                        session_lookup.Cancel();
+                        fail_open(Error::Timeout, "The Bluetooth LE device did not answer in time");
+                        return;
+                    }
+                    auto session = session_lookup.GetResults();
                     if (session)
                     {
                         if (session.CanMaintainConnection())
@@ -662,7 +670,13 @@ namespace gmbluetooth::win
                     return;
                 }
 
-                push_le_connect_result(shared, state->handle, Error::Ok, std::string());
+                // A drop during the open found connected false and reported
+                // nothing; now it reports, and the core fails the connect.
+                le_connection_status_changed(shared, state, remote);
+                if (state->closing.load())
+                    push_le_connect_result(shared, state->handle, Error::ConnectionFailed, cancelled_message());
+                else
+                    push_le_connect_result(shared, state->handle, Error::Ok, std::string());
             }
             catch (const winrt::hresult_error& error)
             {

@@ -4426,9 +4426,16 @@ public class GMBluetooth extends GMBluetoothInternal
                     return;
 
                 // bluetooth_le_disconnect retires the handle and closes the
-                // link itself, so a closed link reports nothing more.
+                // link itself, so a closed link reports nothing more. An
+                // entry erased before its gatt was set leaves this client
+                // to close here (R2-161).
                 LeConnectionEntry entry = getLeConnection(connection);
-                if (entry == null || entry.manualClosing)
+                if (entry == null)
+                {
+                    closeGatt(gatt);
+                    return;
+                }
+                if (entry.manualClosing)
                     return;
 
                 if (newState == BluetoothProfile.STATE_CONNECTED)
@@ -4997,6 +5004,14 @@ public class GMBluetooth extends GMBluetoothInternal
             eraseLeConnection(connection);
             setLastError(OPERATION_FAILED, throwableMessage(throwable));
             return 0;
+        }
+
+        // Radio off erased the entry before its gatt was set, and has fired
+        // the callback; the client is this call's to close (R2-161).
+        if (getLeConnection(connection) != entry)
+        {
+            closeGatt(entry.gatt);
+            return connection;
         }
 
         // connectGatt with autoConnect off gives up on its own only after
@@ -7382,7 +7397,8 @@ public class GMBluetooth extends GMBluetoothInternal
     }
 
 
-    private void sendServerResponse(
+    // False when the response was not sent.
+    private boolean sendServerResponse(
         BluetoothDevice device,
         int stackRequestId,
         int status,
@@ -7392,14 +7408,15 @@ public class GMBluetooth extends GMBluetoothInternal
         BluetoothGattServer server = gattServer;
 
         if (server == null || device == null)
-            return;
+            return false;
 
         try
         {
-            server.sendResponse(device, stackRequestId, status, offset, value);
+            return server.sendResponse(device, stackRequestId, status, offset, value);
         }
         catch (Throwable ignored)
         {
+            return false;
         }
     }
 
@@ -7694,7 +7711,8 @@ public class GMBluetooth extends GMBluetoothInternal
 
     // One attribute of an executed prepared write has been answered; the
     // execute itself is answered after the last one, with the first error.
-    private void finishLeServerWriteBatchPart(LeServerWriteBatch batch, int status)
+    // False when this part was the last and the Execute answer was not sent.
+    private boolean finishLeServerWriteBatchPart(LeServerWriteBatch batch, int status)
     {
         boolean done;
 
@@ -7707,8 +7725,7 @@ public class GMBluetooth extends GMBluetoothInternal
             done = batch.remaining == 0;
         }
 
-        if (done)
-            sendServerResponse(batch.device, batch.stackRequestId, batch.status, 0, null);
+        return !done || sendServerResponse(batch.device, batch.stackRequestId, batch.status, 0, null);
     }
 
 
@@ -8289,6 +8306,10 @@ public class GMBluetooth extends GMBluetoothInternal
     }
 
 
+    private static final String RESPONSE_REFUSED_MESSAGE =
+        "The system refused the response: the request is gone or the link is down";
+
+
     private BluetoothError answerLeServerReadRequest(int request_id, int status, byte[] payload)
     {
         LeServerRequestEntry request;
@@ -8308,7 +8329,8 @@ public class GMBluetooth extends GMBluetoothInternal
 
         try
         {
-            server.sendResponse(request.device, request.stackRequestId, status, 0, payload);
+            if (!server.sendResponse(request.device, request.stackRequestId, status, 0, payload))
+                return result(OPERATION_FAILED, RESPONSE_REFUSED_MESSAGE);
             return OK;
         }
         catch (Throwable throwable)
@@ -8362,7 +8384,8 @@ public class GMBluetooth extends GMBluetoothInternal
 
         if (request.batch != null)
         {
-            finishLeServerWriteBatchPart(request.batch, status);
+            if (!finishLeServerWriteBatchPart(request.batch, status))
+                return result(OPERATION_FAILED, RESPONSE_REFUSED_MESSAGE);
             return OK;
         }
 
@@ -8373,12 +8396,13 @@ public class GMBluetooth extends GMBluetoothInternal
 
         try
         {
-            server.sendResponse(
-                request.device,
-                request.stackRequestId,
-                status,
-                0,
-                status == BluetoothGatt.GATT_SUCCESS ? request.writeValue : null);
+            if (!server.sendResponse(
+                    request.device,
+                    request.stackRequestId,
+                    status,
+                    0,
+                    status == BluetoothGatt.GATT_SUCCESS ? request.writeValue : null))
+                return result(OPERATION_FAILED, RESPONSE_REFUSED_MESSAGE);
             return OK;
         }
         catch (Throwable throwable)
