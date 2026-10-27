@@ -85,8 +85,24 @@
 @property (nonatomic, strong) NSTimer *timer;
 // connectPeripheral: was sent for it.
 @property (nonatomic) BOOL issued;
+// The device's peripheralKey:, set even while peripheral is nil: a connect
+// asked for while the central was still Unknown waits for PoweredOn to
+// retrieve it by identifier (R2-162).
+@property (nonatomic, copy) NSString *key;
+@property (nonatomic, strong) NSUUID *identifier;
 
 - (instancetype)initWithOpId:(NSNumber *)opId peripheral:(CBPeripheral *)peripheral timer:(NSTimer *)timer;
+@end
+
+// Builds a connected-devices query's DevicesQueried event: the peripherals
+// on Ok, none otherwise.
+typedef gmbluetooth::BackendEvent (^GMBTConnectedQueryAnswer)(gmbluetooth::Error error, const std::string &message, NSArray<CBPeripheral *> *peripherals);
+
+// A connected-devices query asked for while the central was still Unknown,
+// answered once it reaches a final state (R2-162).
+@interface GMBTHeldConnectedQuery : NSObject
+@property (nonatomic, strong) NSArray<NSString *> *serviceUuids;
+@property (nonatomic, copy) GMBTConnectedQueryAnswer answer;
 @end
 
 @interface GMBTQueuedService : GMBTQueuedPeripheral
@@ -209,6 +225,9 @@
 // userInfo.
 @property(nonatomic, strong) NSMutableArray<GMBTQueuedTimedPeripheral *> *openPeripheralQueue;
 
+// In request order, while the central is Unknown.
+@property(nonatomic, strong) NSMutableArray<GMBTHeldConnectedQuery *> *heldConnectedQueries;
+
 // Keyed by peripheralKey:. An entry goes when its peripheral's link ends;
 // the core fails the ops it held.
 @property(nonatomic, strong) NSMutableDictionary<NSString *, GMBTPeripheralQueues *> *peripheralQueues;
@@ -296,7 +315,7 @@
 - (gmbluetooth::Error) bt_le_peripheral_read_rssi:(NSString *)peripheralUuid opId:(NSNumber *)opId message:(std::string &)message;
 
 - (CBPeripheral *) bt_le_retrieve_peripheral:(NSUUID *)identifier error:(gmbluetooth::Error &)error message:(std::string &)message;
-- (NSArray<CBPeripheral *> *) bt_le_connected_peripherals:(NSArray<NSString *> *)serviceUuidStrings error:(gmbluetooth::Error &)error message:(std::string &)message;
+- (gmbluetooth::Error) bt_le_connected_peripherals:(NSArray<NSString *> *)serviceUuidStrings answer:(GMBTConnectedQueryAnswer)answer message:(std::string &)message;
 
 // The attribute calls name services, characteristics and descriptors by the
 // ids their discovery reported (GMBTPeripheralQueues), never by UUID.
@@ -354,6 +373,9 @@
     }
     return self;
 }
+@end
+
+@implementation GMBTHeldConnectedQuery
 @end
 
 @implementation GMBTQueuedService
@@ -651,12 +673,17 @@ static gmbluetooth::Error gmbt_error_from_nserror(NSError *error, std::string &m
 // The completion of bt_le_peripheral_open: Ok, or the failure's
 // BluetoothError and message.
 - (void) notifyOpen:(CBPeripheral *)peripheral error:(gmbluetooth::Error)error message:(const std::string &)message {
+    [self notifyOpenKey:[self peripheralKey:peripheral] error:error message:message];
+}
+
+// By key, for a queued connect whose peripheral was never retrieved.
+- (void) notifyOpenKey:(NSString *)key error:(gmbluetooth::Error)error message:(const std::string &)message {
     gmbluetooth::BackendEvent event;
     event.type = gmbluetooth::BackendEventType::LeConnectResult;
     event.transport = gmbluetooth::Transport::LowEnergy;
     event.error = error;
     if (error != gmbluetooth::Error::Ok) event.message = message;
-    [self sendEvent:std::move(event) key:[self peripheralKey:peripheral]];
+    [self sendEvent:std::move(event) key:key];
 }
 
 // A link that went away without bt_le_peripheral_close.
@@ -853,6 +880,7 @@ static gmbluetooth::Error gmbt_error_from_nserror(NSError *error, std::string &m
         _serverCentrals = [NSMutableDictionary new];
 
         _openPeripheralQueue = [NSMutableArray new];
+        _heldConnectedQueries = [NSMutableArray new];
 
         _peripheralQueues = [NSMutableDictionary new];
 
@@ -892,6 +920,9 @@ static bool _scanPendingPowerOn = false;
     for (GMBTQueuedTimedPeripheral *queued in _openPeripheralQueue)
         [queued.timer invalidate];
     [_openPeripheralQueue removeAllObjects];
+
+    // The core drops a query's callback at shutdown; nothing answers it.
+    [_heldConnectedQueries removeAllObjects];
 
     // The core fails the ops these held once the backend is gone.
     [_peripheralQueues removeAllObjects];
@@ -998,7 +1029,7 @@ static bool _scanPendingPowerOn = false;
 - (BOOL) peripheralIsInUse:(NSString *)key {
     if (_openedPeripherals[key]) return YES;
     for (GMBTQueuedTimedPeripheral *queued in _openPeripheralQueue) {
-        if ([[self peripheralKey:queued.peripheral] isEqualToString:key]) return YES;
+        if ([queued.key isEqualToString:key]) return YES;
     }
     return NO;
 }
@@ -1919,6 +1950,25 @@ static BOOL gmbt_contains_identical(NSArray *array, id object) {
     return array != nil && object != nil && [array indexOfObjectIdenticalTo:object] != NSNotFound;
 }
 
+// The connects queued while the central was Unknown, retrieved by
+// identifier once it is PoweredOn; one CoreBluetooth does not know fails
+// NotFound (R2-162). Only centralManagerDidUpdateState: calls it, so no
+// connect fails from inside another request.
+- (void) resolveQueuedOpens {
+    for (GMBTQueuedTimedPeripheral *queued in [_openPeripheralQueue copy]) {
+        if (queued.peripheral) continue;
+        CBPeripheral *peripheral = [_centralManager retrievePeripheralsWithIdentifiers:@[ queued.identifier ]].firstObject;
+        if (peripheral) {
+            [self rememberPeripheral:peripheral];
+            queued.peripheral = peripheral;
+            continue;
+        }
+        [self removeQueuedOpen:queued cancel:NO];
+        [self notifyOpenKey:queued.key error:gmbluetooth::Error::NotFound
+                    message:"The device is not known to CoreBluetooth; scan for it again"];
+    }
+}
+
 // Issues the head of the connect queue once the central can take it.
 - (void) handleOpenPeripheralQueue {
     if (!_centralManager || _centralManager.state != CBManagerStatePoweredOn) return;
@@ -1953,7 +2003,7 @@ static BOOL gmbt_contains_identical(NSArray *array, id object) {
     [_openPeripheralQueue removeAllObjects];
     for (GMBTQueuedTimedPeripheral *entry in queued) {
         [entry.timer invalidate];
-        [self notifyOpen:entry.peripheral error:error message:message];
+        [self notifyOpenKey:entry.key error:error message:message];
     }
 }
 
@@ -2032,8 +2082,10 @@ static BOOL gmbt_contains_identical(NSArray *array, id object) {
 
 // Busy while the peripheral is open or connecting. A peripheral no scan has
 // reported since the central last powered on may still be known to
-// CoreBluetooth by its identifier; NotFound when it is not. timeout is the
-// whole window from this call, a wait in the queue included (R2-135).
+// CoreBluetooth by its identifier; NotFound when it is not. While the
+// central is still Unknown that lookup waits in the queue, and its NotFound
+// comes through the connect's callback (R2-162). timeout is the whole
+// window from this call, a wait in the queue included (R2-135).
 - (gmbluetooth::Error) bt_le_peripheral_open:(NSString*) peripheralUuid timeout:(NSTimeInterval)timeout message:(std::string &)message {
     const gmbluetooth::Error stateError = gmbt_require_powered_on(_centralManager.state, message);
     if (stateError != gmbluetooth::Error::Ok) return stateError;
@@ -2042,19 +2094,20 @@ static BOOL gmbt_contains_identical(NSArray *array, id object) {
     if ([self peripheralIsInUse:key])
         return gmbt_fail(message, gmbluetooth::Error::Busy, "The device already has a connection");
 
+    NSUUID *identifier = [[NSUUID alloc] initWithUUIDString:peripheralUuid];
     CBPeripheral *peripheral = _discoveredPeripherals[key];
-    if (!peripheral && _centralManager.state == CBManagerStatePoweredOn) {
-        NSUUID *identifier = [[NSUUID alloc] initWithUUIDString:peripheralUuid];
-        if (identifier) {
-            peripheral = [_centralManager retrievePeripheralsWithIdentifiers:@[ identifier ]].firstObject;
-            if (peripheral) [self rememberPeripheral:peripheral];
-        }
+    if (!peripheral && identifier && _centralManager.state == CBManagerStatePoweredOn) {
+        peripheral = [_centralManager retrievePeripheralsWithIdentifiers:@[ identifier ]].firstObject;
+        if (peripheral) [self rememberPeripheral:peripheral];
     }
-    if (!peripheral)
+    const BOOL waitForLookup = !peripheral && identifier && _centralManager.state == CBManagerStateUnknown;
+    if (!peripheral && !waitForLookup)
         return gmbt_fail(message, gmbluetooth::Error::NotFound, "The device is not known to CoreBluetooth; scan for it again");
 
     // No op id: the core matches the open by the peripheral's connection.
     GMBTQueuedTimedPeripheral *queuePeripheral = [[GMBTQueuedTimedPeripheral alloc] initWithOpId:nil peripheral:peripheral];
+    queuePeripheral.key = key;
+    queuePeripheral.identifier = identifier;
     queuePeripheral.timer = [NSTimer scheduledTimerWithTimeInterval:timeout
                                                              target:self
                                                            selector:@selector(connectionDidTimeout:)
@@ -2094,7 +2147,7 @@ static BOOL gmbt_contains_identical(NSArray *array, id object) {
 }
 
 // The device queries ask the central for what it already knows, so it has
-// to be on: no request waits for it here.
+// to be on. Their callers wait out Unknown themselves (R2-162).
 - (gmbluetooth::Error) requireCentralPoweredOn:(std::string &)message {
     const gmbluetooth::Error error = gmbt_require_powered_on(_centralManager.state, message);
     if (error != gmbluetooth::Error::Ok) return error;
@@ -2119,20 +2172,47 @@ static BOOL gmbt_contains_identical(NSArray *array, id object) {
     return peripheral;
 }
 
-// The peripherals connected to the system (by any app) that host one of the
-// services, each kept for bt_le_peripheral_open. The core validated the
-// UUIDs, so UUIDWithString cannot throw.
-- (NSArray<CBPeripheral *> *) bt_le_connected_peripherals:(NSArray<NSString *> *)serviceUuidStrings error:(gmbluetooth::Error &)error message:(std::string &)message {
-    error = [self requireCentralPoweredOn:message];
-    if (error != gmbluetooth::Error::Ok) return nil;
+// Sends answer's event for the peripherals connected to the system (by any
+// app) that host one of the services. While the central is Unknown the
+// query is held, and centralManagerDidUpdateState: answers it (R2-162).
+- (gmbluetooth::Error) bt_le_connected_peripherals:(NSArray<NSString *> *)serviceUuidStrings answer:(GMBTConnectedQueryAnswer)answer message:(std::string &)message {
+    if (_centralManager.state == CBManagerStateUnknown) {
+        GMBTHeldConnectedQuery *held = [GMBTHeldConnectedQuery new];
+        held.serviceUuids = serviceUuidStrings;
+        held.answer = answer;
+        [_heldConnectedQueries addObject:held];
+        return gmbt_ok(message);
+    }
 
+    const gmbluetooth::Error error = [self requireCentralPoweredOn:message];
+    if (error != gmbluetooth::Error::Ok) return error;
+
+    [self sendEvent:answer(gmbluetooth::Error::Ok, std::string(), [self connectedPeripheralsWithServices:serviceUuidStrings]) key:nil];
+    return gmbt_ok(message);
+}
+
+// Each kept for bt_le_peripheral_open. The core validated the UUIDs, so
+// UUIDWithString cannot throw.
+- (NSArray<CBPeripheral *> *) connectedPeripheralsWithServices:(NSArray<NSString *> *)serviceUuidStrings {
     NSMutableArray<CBUUID *> *services = [NSMutableArray arrayWithCapacity:serviceUuidStrings.count];
     for (NSString *uuidString in serviceUuidStrings) [services addObject:[CBUUID UUIDWithString:uuidString]];
 
     NSArray<CBPeripheral *> *peripherals = [_centralManager retrieveConnectedPeripheralsWithServices:services];
     for (CBPeripheral *peripheral in peripherals) [self rememberPeripheral:peripheral];
-    error = gmbt_ok(message);
     return peripherals ? peripherals : @[];
+}
+
+// Answers every held connected-devices query: with its list when error is
+// Ok, the central being PoweredOn, and with the error otherwise.
+- (void) answerHeldConnectedQueries:(gmbluetooth::Error)error message:(const std::string &)message {
+    NSArray<GMBTHeldConnectedQuery *> *held = [_heldConnectedQueries copy];
+    [_heldConnectedQueries removeAllObjects];
+    for (GMBTHeldConnectedQuery *query in held) {
+        if (error == gmbluetooth::Error::Ok)
+            [self sendEvent:query.answer(error, std::string(), [self connectedPeripheralsWithServices:query.serviceUuids]) key:nil];
+        else
+            [self sendEvent:query.answer(error, message, @[]) key:nil];
+    }
 }
 
 // Synchronous and silent: the core retires the connection itself. A
@@ -2151,7 +2231,7 @@ static BOOL gmbt_contains_identical(NSArray *array, id object) {
 
     GMBTQueuedTimedPeripheral *queued = nil;
     for (GMBTQueuedTimedPeripheral *entry in _openPeripheralQueue) {
-        if ([[self peripheralKey:entry.peripheral] isEqualToString:key]) {
+        if ([entry.key isEqualToString:key]) {
             queued = entry;
             break;
         }
@@ -2409,7 +2489,7 @@ static BOOL gmbt_contains_identical(NSArray *array, id object) {
         return;
 
     [self removeQueuedOpen:queuedPeripheral cancel:YES];
-    [self notifyOpen:queuedPeripheral.peripheral error:gmbluetooth::Error::Timeout message:"LE connect timed out"];
+    [self notifyOpenKey:queuedPeripheral.key error:gmbluetooth::Error::Timeout message:"LE connect timed out"];
     [self handleOpenPeripheralQueue];
 }
 
@@ -2514,8 +2594,14 @@ static BOOL gmbt_contains_identical(NSArray *array, id object) {
     }
     else [self queueDequeue:queue];
 
-    // There was not queued read request that matches the characteristic so it's a notification
-    if (queuedCharacteristic == nil) {
+    // A read response and a notification come through this one call, with
+    // nothing to tell them apart. On a notifying characteristic every value
+    // also goes to the subscription, so a notification that answers the read
+    // is not lost, and the read's own response, when it comes, arrives
+    // there as one more notification. An error answers only a read (R2-163).
+    const BOOL notification = queuedCharacteristic == nil || (characteristic.isNotifying && !error);
+
+    if (notification) {
         // Named by the ids its discovery reported. A characteristic no
         // discovery on this link reported has no handle in the core and is
         // dropped, as an unknown one always was.
@@ -2523,18 +2609,19 @@ static BOOL gmbt_contains_identical(NSArray *array, id object) {
         const std::uint64_t characteristicId = [queues knownIdForAttribute:characteristic];
         if (serviceId == 0 || characteristicId == 0) {
             GMBT_TRACE("value change on a characteristic no discovery reported - dropped");
-            return;
         }
-
-        gmbluetooth::BackendEvent event;
-        event.type = gmbluetooth::BackendEventType::LeValueChanged;
-        event.transport = gmbluetooth::Transport::LowEnergy;
-        event.attribute.service = serviceId;
-        event.attribute.characteristic = characteristicId;
-        event.bytes = gmbt_bytes(characteristic.value);
-        [self sendEvent:std::move(event) key:[self peripheralKey:peripheral]];
-        return;
+        else {
+            gmbluetooth::BackendEvent event;
+            event.type = gmbluetooth::BackendEventType::LeValueChanged;
+            event.transport = gmbluetooth::Transport::LowEnergy;
+            event.attribute.service = serviceId;
+            event.attribute.characteristic = characteristicId;
+            event.bytes = gmbt_bytes(characteristic.value);
+            [self sendEvent:std::move(event) key:[self peripheralKey:peripheral]];
+        }
     }
+
+    if (!queuedCharacteristic) return;
 
     if (error) [self completeOp:queuedCharacteristic.opId error:error];
     else [self completeOp:queuedCharacteristic.opId error:nil result:[self resultFromValue:characteristic.value]];
@@ -2595,6 +2682,8 @@ static BOOL gmbt_contains_identical(NSArray *array, id object) {
             NSLog(@"[GMBluetooth] central reached PoweredOn - starting the scan deferred at request time");
             [self beginScan];
         }
+        [self answerHeldConnectedQueries:gmbluetooth::Error::Ok message:std::string()];
+        [self resolveQueuedOpens];
         [self handleOpenPeripheralQueue];
     }
     // Unknown or Resetting before the central was ever PoweredOn: a deferred
@@ -2619,6 +2708,7 @@ static BOOL gmbt_contains_identical(NSArray *array, id object) {
         }
 
         [self failQueuedOpens:error message:message];
+        [self answerHeldConnectedQueries:error message:message];
 
         // The peripherals a scan found are not valid across a power cycle.
         [self forgetDiscoveredPeripherals];
@@ -3101,6 +3191,15 @@ namespace
                 if (!identifier) { message = "The id does not hold a valid CoreBluetooth identifier"; return Error::InvalidArgument; }
                 if (const Error e = require_managers(message); e != Error::Ok) return e;
 
+                // Until its first state update the central cannot be asked;
+                // the connect looks the peripheral up then (R2-162).
+                if (transport_.centralManager.state == CBManagerStateUnknown)
+                {
+                    device = le_device_from_identifier(identifier);
+                    message.clear();
+                    return Error::Ok;
+                }
+
                 Error error = Error::Ok;
                 CBPeripheral* peripheral = [transport_ bt_le_retrieve_peripheral:identifier error:error message:message];
                 if (!peripheral) return error;
@@ -3170,18 +3269,21 @@ namespace
             NSMutableArray<NSString*>* uuids = [NSMutableArray arrayWithCapacity:service_uuids.size()];
             for (const auto& uuid : service_uuids) [uuids addObject:gmbt_ns(uuid)];
 
-            Error error = Error::Ok;
-            NSArray<CBPeripheral*>* peripherals = [transport_ bt_le_connected_peripherals:uuids error:error message:message];
+            // The core registered the callback before asking, so the answer
+            // can go out at once, or once the central leaves Unknown.
+            const Error error = [transport_ bt_le_connected_peripherals:uuids
+                answer:^BackendEvent(Error result, const std::string& text, NSArray<CBPeripheral*>* peripherals) {
+                    BackendEvent ev;
+                    ev.type = BackendEventType::DevicesQueried;
+                    ev.transport = Transport::LowEnergy;
+                    ev.op_id = query_id;
+                    ev.error = result;
+                    ev.message = text;
+                    for (CBPeripheral* peripheral in peripherals) ev.devices.push_back(le_device_from_peripheral(peripheral));
+                    return ev;
+                }
+                message:message];
             if (error != Error::Ok) return error;
-
-            // The answer is known now; the core registered the callback
-            // before asking, so it can go out at once.
-            BackendEvent ev;
-            ev.type = BackendEventType::DevicesQueried;
-            ev.transport = Transport::LowEnergy;
-            ev.op_id = query_id;
-            for (CBPeripheral* peripheral in peripherals) ev.devices.push_back(le_device_from_peripheral(peripheral));
-            hooks_.push_event(std::move(ev));
             message.clear();
             return Error::Ok;
         }
@@ -3946,6 +4048,18 @@ namespace
             d.transport = Transport::LowEnergy;
             d.id = kGMBTLeApplePrefix + gmbt_string(gmbt_peripheral_key(peripheral));
             d.name = gmbt_string(peripheral.name);
+            d.address_available = false;
+            d.connectable = true;
+            return d;
+        }
+
+        // The same entry before CoreBluetooth can be asked for the
+        // peripheral: no name yet.
+        static DiscoveredDevice le_device_from_identifier(NSUUID* identifier)
+        {
+            DiscoveredDevice d;
+            d.transport = Transport::LowEnergy;
+            d.id = kGMBTLeApplePrefix + gmbt_string([identifier.UUIDString uppercaseString]);
             d.address_available = false;
             d.connectable = true;
             return d;

@@ -1992,7 +1992,7 @@ The above code sets the instance variable <code>scan_label</code> to a text that
 <p>Every UUID in the given <code>service_uuids</code> array is checked first. If the query cannot start, the function returns a <a href="core.html#bluetootherror">BluetoothError</a> other than <code>Ok</code>: NotInitialized, InvalidArgument for an empty array or a malformed UUID, PermissionDenied, BluetoothDisabled or NotSupported as for <a href="le_client.html#bluetooth_le_scan_start">bluetooth_le_scan_start</a>, and the callback is never called. The reason is in <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>Android and Windows cannot filter by service, so they list every connected LE device. Apple lists only the devices that expose one of the given services, and the radio must already be on (BluetoothDisabled otherwise).</p>
+<p>Android and Windows cannot filter by service, so they list every connected LE device. Apple lists only the devices that expose one of the given services, and the radio must be on (BluetoothDisabled otherwise). Just after <a href="core.html#bluetooth_initialize">bluetooth_initialize</a>, before the system has reported the radio's state, Apple waits for it and calls the callback then, with the reason the query failed if the radio turns out to be off.</p>
 </div>
 <p>This function operates asynchronously, which means that it does not immediately return the requested result. Instead, upon completion of the task, it will trigger the <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a>.</p>
 <p><br></p>
@@ -2094,7 +2094,7 @@ The above code asks for the LE devices connected to the system that expose the H
 </div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>On Apple the connect also returns 0 with NotFound for a device that CoreBluetooth no longer knows (scan for it again), and with PermissionDenied until <a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a> has been answered.</p>
+<p>On Apple the connect also returns 0 with NotFound for a device that CoreBluetooth no longer knows (scan for it again), and with PermissionDenied until <a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a> has been answered. A connect started just after <a href="core.html#bluetooth_initialize">bluetooth_initialize</a>, before the system has reported the radio's state, waits for it instead, and that NotFound then comes through <code>callback</code>.</p>
 </div>
 <p>This function operates asynchronously, which means that it does not immediately return the requested result. Instead, upon completion of the task, it will trigger the <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a>.</p>
 <p><br></p>
@@ -3555,7 +3555,7 @@ The above code looks up the Characteristic User Description descriptor (0x2901) 
 <p>If the read cannot start, the function returns a <a href="core.html#bluetootherror">BluetoothError</a> other than <code>Ok</code>: NotInitialized, InvalidHandle for a handle that is not a discovered characteristic, or Disconnected while the connection is not connected. The callback is then never called, and the reason is in <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>. A device that refuses the read reports NotPermitted, or InsufficientSecurity when it needs pairing or encryption first, through the callback.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>Apple reports reads and notifications through one system call, so on a subscribed characteristic a notification that arrives while the read is in flight can be what the read returns.</p>
+<p>Apple reports reads and notifications through one system call, so on a subscribed characteristic a notification that arrives while the read is in flight can be what the read returns. The subscription still receives that notification, and the read's own response can then arrive there as one more notification.</p>
 </div>
 <p>This function operates asynchronously, which means that it does not immediately return the requested result. Instead, upon completion of the task, it will trigger the <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a>.</p>
 <p><br></p>

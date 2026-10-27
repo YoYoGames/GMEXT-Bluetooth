@@ -107,7 +107,10 @@
  *
  * [[Note: On Apple platforms an LE id names a peripheral that CoreBluetooth must already know: the
  * function fails with BluetoothDisabled while the radio is off, NotFound for an id the system does not
- * know, and PermissionDenied until ${function.bluetooth_permission_request} has been called.]]
+ * know, and PermissionDenied until ${function.bluetooth_permission_request} has been called. Just after
+ * ${function.bluetooth_initialize}, before the system has reported the radio's state, the function
+ * cannot ask yet: it returns a handle with an empty name, and an id the system does not know then fails
+ * ${function.bluetooth_le_connect} with NotFound through its callback.]]
  *
  * [[Note: On Android the function fails with NotSupported on a device with no Bluetooth adapter,
  * and with OperationFailed when the device cannot be added to the cache. From Android 13 a device

@@ -1347,7 +1347,10 @@ Android, or an id holding an LE address on macOS or iOS.</p>
 <p class="admonition-title">Note</p>
 <p>On Apple platforms an LE id names a peripheral that CoreBluetooth must already know: the
 function fails with BluetoothDisabled while the radio is off, NotFound for an id the system does not
-know, and PermissionDenied until <a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a> has been called.</p>
+know, and PermissionDenied until <a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a> has been called. Just after
+<a href="core.html#bluetooth_initialize">bluetooth_initialize</a>, before the system has reported the radio's state, the function
+cannot ask yet: it returns a handle with an empty name, and an id the system does not know then fails
+<a href="le_client.html#bluetooth_le_connect">bluetooth_le_connect</a> with NotFound through its callback.</p>
 </div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>

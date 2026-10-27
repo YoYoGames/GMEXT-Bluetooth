@@ -105,7 +105,7 @@
  *
  * Every UUID in the given `service_uuids` array is checked first. If the query cannot start, the function returns a ${constant.BluetoothError} other than `Ok`: NotInitialized, InvalidArgument for an empty array or a malformed UUID, PermissionDenied, BluetoothDisabled or NotSupported as for ${function.bluetooth_le_scan_start}, and the callback is never called. The reason is in ${function.bluetooth_last_error_message}.
  *
- * [[Note: Android and Windows cannot filter by service, so they list every connected LE device. Apple lists only the devices that expose one of the given services, and the radio must already be on (BluetoothDisabled otherwise).]]
+ * [[Note: Android and Windows cannot filter by service, so they list every connected LE device. Apple lists only the devices that expose one of the given services, and the radio must be on (BluetoothDisabled otherwise). Just after ${function.bluetooth_initialize}, before the system has reported the radio's state, Apple waits for it and calls the callback then, with the reason the query failed if the radio turns out to be off.]]
  * @param {Array[String]} service_uuids The service UUIDs a device must expose one of; it must not be empty.
  * @param {Function} callback The function to call once with the list of connected devices.
  * @returns {Enum.BluetoothError} ${constant.BluetoothError}.Ok if the query started, otherwise the reason it did not.
@@ -151,7 +151,7 @@
  *
  * [[Note: A device can only have one client connection at a time, whether it is still connecting or already connected.]]
  *
- * [[Note: On Apple the connect also returns 0 with NotFound for a device that CoreBluetooth no longer knows (scan for it again), and with PermissionDenied until ${function.bluetooth_permission_request} has been answered.]]
+ * [[Note: On Apple the connect also returns 0 with NotFound for a device that CoreBluetooth no longer knows (scan for it again), and with PermissionDenied until ${function.bluetooth_permission_request} has been answered. A connect started just after ${function.bluetooth_initialize}, before the system has reported the radio's state, waits for it instead, and that NotFound then comes through `callback`.]]
  * @param {Real} device The handle of the LE device to connect to.
  * @param {Struct.BluetoothConnectOptions} [options] How the connect runs, or `undefined` for the defaults.
  * @param {Function} on_disconnected The function to call once if the open connection ends without ${function.bluetooth_le_disconnect}.
@@ -745,7 +745,7 @@
  *
  * If the read cannot start, the function returns a ${constant.BluetoothError} other than `Ok`: NotInitialized, InvalidHandle for a handle that is not a discovered characteristic, or Disconnected while the connection is not connected. The callback is then never called, and the reason is in ${function.bluetooth_last_error_message}. A device that refuses the read reports NotPermitted, or InsufficientSecurity when it needs pairing or encryption first, through the callback.
  *
- * [[Note: Apple reports reads and notifications through one system call, so on a subscribed characteristic a notification that arrives while the read is in flight can be what the read returns.]]
+ * [[Note: Apple reports reads and notifications through one system call, so on a subscribed characteristic a notification that arrives while the read is in flight can be what the read returns. The subscription still receives that notification, and the read's own response can then arrive there as one more notification.]]
  * @param {Real} characteristic The characteristic handle.
  * @param {Function} callback The function to call once with the value read.
  * @returns {Enum.BluetoothError} ${constant.BluetoothError}.Ok if the read started, otherwise the reason it did not.
