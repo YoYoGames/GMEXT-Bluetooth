@@ -4455,9 +4455,21 @@ public class GMBluetooth extends GMBluetoothInternal
 
             session.callback = createScanCallback(session);
 
-            ScanSettings nativeSettings = new ScanSettings.Builder()
-                .setScanMode(scanMode)
-                .build();
+            ScanSettings.Builder settingsBuilder = new ScanSettings.Builder()
+                .setScanMode(scanMode);
+
+            // The builder scans legacy advertisements on the 1M PHY only
+            // unless told otherwise (R2-158). A controller without extended
+            // support keeps that default.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                && adapter.isLeExtendedAdvertisingSupported())
+            {
+                settingsBuilder
+                    .setLegacy(false)
+                    .setPhy(ScanSettings.PHY_LE_ALL_SUPPORTED);
+            }
+
+            ScanSettings nativeSettings = settingsBuilder.build();
 
             // No filters is null: every device is reported.
             List<ScanFilter> scanFilters = buildScanFilters(session.filters);

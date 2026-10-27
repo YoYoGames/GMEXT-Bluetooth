@@ -1784,6 +1784,10 @@
 <p class="admonition-title">Note</p>
 <p>Apple and Android always scan actively; only Windows can scan passively (<a href="core.html#bluetoothfeature">BluetoothFeature</a>.LePassiveScan). iOS needs every filter to set <code>service_uuid</code> to scan in the background, and never reports iBeacon advertisements.</p>
 </div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Windows 10 version 2004 and later, and Android 8 and later on a Bluetooth controller that supports extended advertising, also receive extended advertisements, such as long-range Coded PHY ones. Earlier Windows and Android versions receive legacy advertisements only, so a device that sends only extended advertisements is not found there.</p>
+</div>
 <p>This function operates asynchronously, which means that it does not immediately return the requested result. Instead, upon completion of the task, it will trigger the <a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a>.</p>
 <p><br></p>
 <p><strong>Syntax:</strong></p>

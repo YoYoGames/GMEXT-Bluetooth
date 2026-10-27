@@ -8,10 +8,33 @@ namespace gmbluetooth::win
 {
     namespace
     {
-        bool advertisement_is_connectable(WDBA::BluetoothLEAdvertisementType type)
+        bool advertisement_is_connectable(const WDBA::BluetoothLEAdvertisementReceivedEventArgs& args)
         {
+            const auto type = args.AdvertisementType();
+
+            // An extended advertisement carries its connectable bit apart
+            // from its type (R2-158).
+            if (type == WDBA::BluetoothLEAdvertisementType::Extended)
+                return args.IsConnectable();
+
             return type == WDBA::BluetoothLEAdvertisementType::ConnectableUndirected ||
                    type == WDBA::BluetoothLEAdvertisementType::ConnectableDirected;
+        }
+
+        // Windows 10 2004 and later; the watcher receives legacy
+        // advertisements only until it is set (R2-158).
+        bool extended_advertisements_api_present() noexcept
+        {
+            try
+            {
+                return WFM::ApiInformation::IsPropertyPresent(
+                    L"Windows.Devices.Bluetooth.Advertisement.BluetoothLEAdvertisementWatcher",
+                    L"AllowExtendedAdvertisements");
+            }
+            catch (...)
+            {
+                return false;
+            }
         }
 
         std::int32_t normalized_radio_state(WDR::RadioState state)
@@ -504,6 +527,9 @@ namespace gmbluetooth::win
                     ? WDBA::BluetoothLEScanningMode::Active
                     : WDBA::BluetoothLEScanningMode::Passive);
 
+            if (extended_advertisements_api_present())
+                watcher_.AllowExtendedAdvertisements(true);
+
             // An event from an earlier watcher is stale once this
             // generation is current (R1-187).
             const std::uint64_t generation = ++le_->scan_generation;
@@ -527,7 +553,7 @@ namespace gmbluetooth::win
                     device.address_available = true;
                     device.rssi = static_cast<std::int32_t>(args.RawSignalStrengthInDBm());
                     device.rssi_available = device.rssi != -127;
-                    device.connectable = advertisement_is_connectable(args.AdvertisementType());
+                    device.connectable = advertisement_is_connectable(args);
 
                     const auto local_name = args.Advertisement().LocalName();
                     if (!local_name.empty())

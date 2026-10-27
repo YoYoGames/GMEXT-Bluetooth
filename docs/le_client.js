@@ -13,6 +13,8 @@
  * [[Note: Android filters in the Bluetooth stack and allows 5 scan starts per 30 seconds: a sixth starts but finds nothing. It also pauses unfiltered scans while the screen is off, and on Android 6 to 11 a scan returns PermissionDenied while the system Location setting is off. With the manifest's `neverForLocation` flag it also leaves out some beacon advertisements. Only Android uses the `mode` of the settings (${constant.BluetoothFeature}.LeScanMode), and it reads a `mode` that is not a ${constant.BluetoothLeScanMode} as `undefined`, that is LowLatency.]]
  *
  * [[Note: Apple and Android always scan actively; only Windows can scan passively (${constant.BluetoothFeature}.LePassiveScan). iOS needs every filter to set `service_uuid` to scan in the background, and never reports iBeacon advertisements.]]
+ *
+ * [[Note: Windows 10 version 2004 and later, and Android 8 and later on a Bluetooth controller that supports extended advertising, also receive extended advertisements, such as long-range Coded PHY ones. Earlier Windows and Android versions receive legacy advertisements only, so a device that sends only extended advertisements is not found there.]]
  * @param {Struct.BluetoothLeScanSettings} [settings] How the scan runs, or `undefined` for the defaults.
  * @param {Array[Struct.BluetoothLeScanFilter]} [filters] The filters a device must match one of, or `undefined` or an empty array for every device.
  * @param {Function} on_found The function to call the first time this scan sees a device.
