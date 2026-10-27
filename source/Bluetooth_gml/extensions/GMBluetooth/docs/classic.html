@@ -1413,10 +1413,10 @@ buffer full", after the part that fits is delivered.</p>
 <p class="admonition-title">Note</p>
 <p>On macOS the RFCOMM channel is found by looking up the service UUID in the device's SDP
 records, through IOBluetooth: the records cached from pairing when they hold the service,
-otherwise an SDP query, which fails with <a href="core.html#bluetootherror">BluetoothError</a>.NotFound when the device does
-not offer the service. The call itself returns 0 with NotFound when macOS cannot resolve the
-device's address, and with PermissionDenied until <a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a> has
-been called.</p>
+otherwise an SDP query. A device that does not offer the service fails with
+<a href="core.html#bluetootherror">BluetoothError</a>.ConnectionFailed, as on every platform. The call itself returns 0 with
+NotFound when macOS cannot resolve the device's address, and with PermissionDenied until
+<a href="core.html#bluetooth_permission_request">bluetooth_permission_request</a> has been called.</p>
 </div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
@@ -2227,8 +2227,11 @@ with <a href="core.html#bluetoothfeature">BluetoothFeature</a>.ClassicDiscoverab
 <p>The duration is clamped to 1 to 3600 seconds, and 0 or less asks for 120 seconds; there is no
 indefinite duration. The callback is called once: with <a href="core.html#bluetootherror">BluetoothError</a>.Ok and the
 duration granted, with <a href="core.html#bluetootherror">BluetoothError</a>.PermissionDenied when the user declined, or with
-<a href="core.html#bluetootherror">BluetoothError</a>.NotInitialized when <a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a> is called first.
-Turning the radio off ends discoverability, except on Android, which has no call to end it.</p>
+<a href="core.html#bluetootherror">BluetoothError</a>.NotInitialized when <a href="core.html#bluetooth_shutdown">bluetooth_shutdown</a> is called first.</p>
+<p>Once the device is discoverable, <code>on_stopped</code> is called when discoverability ends without
+<a href="classic.html#bluetooth_classic_discoverable_stop">bluetooth_classic_discoverable_stop</a>: with <a href="core.html#bluetootherror">BluetoothError</a>.Ok when its time
+runs out or the system ends it early, and with <a href="core.html#bluetootherror">BluetoothError</a>.BluetoothDisabled when
+the radio is turned off.</p>
 <p>The function returns a <a href="core.html#bluetootherror">BluetoothError</a>. When it is not
 <a href="core.html#bluetootherror">BluetoothError</a>.Ok the callback is never called, and the reason is in
 <a href="core.html#bluetooth_last_error_code">bluetooth_last_error_code</a> and <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>:
@@ -2240,13 +2243,17 @@ discoverability cannot be controlled, or OperationFailed when the system refused
 <p>On Windows the device becomes discoverable at once, the callback is called straight away
 with the duration, and discoverability ends when it runs out or on
 <a href="classic.html#bluetooth_classic_discoverable_stop">bluetooth_classic_discoverable_stop</a>. Incoming connections are also turned on if they
-were off, and turned back off when discoverability ends. It returns NotSupported when no
-Bluetooth radio is found.</p>
+were off, and turned back off when discoverability ends. Windows can also end it early, for
+example when the Bluetooth settings page is closed, and <code>on_stopped</code> hears it within a second. It
+returns NotSupported when no Bluetooth radio is found.</p>
 </div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>On Android the user is shown a system prompt asking to make the device discoverable, and
-the callback reports the answer. The permission is the Bluetooth advertise permission.</p>
+the callback reports the answer. The permission is the Bluetooth advertise permission. Some
+Android builds end discoverability again right after granting it (ColorOS did within 50 ms), so
+the callback reports Ok and <code>on_stopped</code> follows at once. Without the Bluetooth scan permission
+the end cannot be watched, and <code>on_stopped</code> is called when the granted time runs out.</p>
 </div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
@@ -2256,7 +2263,7 @@ the callback reports the answer. The permission is the Bluetooth advertise permi
 <p><br></p>
 <p><strong>Syntax:</strong></p>
 <blockquote>
-<pre class="highlight"><code class="language-gml">bluetooth_classic_discoverable_start(duration_seconds, callback)</code></pre>
+<pre class="highlight"><code class="language-gml">bluetooth_classic_discoverable_start(duration_seconds, callback, on_stopped=undefined)</code></pre>
 </blockquote>
 <table>
 <thead>
@@ -2276,6 +2283,11 @@ the callback reports the answer. The permission is the Bluetooth advertise permi
 <td>callback</td>
 <td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Script_Functions.htm">Function</a></td>
 <td>The function to call once with the outcome.</td>
+</tr>
+<tr>
+<td>on_stopped</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Script_Functions.htm">Function</a></td>
+<td>The function to call when discoverability ends without<br><a href="classic.html#bluetooth_classic_discoverable_stop">bluetooth_classic_discoverable_stop</a>, or <code>undefined</code>.</td>
 </tr>
 </tbody>
 </table>
@@ -2320,6 +2332,33 @@ before the answer.</p>
 </tbody>
 </table>
 <p><br></p>
+<blockquote>
+<p><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Method_Variables.htm">Callback</a> - on_stopped</p>
+</blockquote>
+<p>Called once, when discoverability that was granted ends without
+<a href="classic.html#bluetooth_classic_discoverable_stop">bluetooth_classic_discoverable_stop</a>. It is the last callback of the request.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>error_code</td>
+<td><a href="core.html#bluetootherror">BluetoothError</a></td>
+<td><a href="core.html#bluetootherror">BluetoothError</a>.Ok when the time ran out or the<br>system ended it, <a href="core.html#bluetootherror">BluetoothError</a>.BluetoothDisabled when the radio was turned off.</td>
+</tr>
+<tr>
+<td>message</td>
+<td><a href="https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Strings/Strings.htm">String</a></td>
+<td>A description of why discoverability ended.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
 <p><strong>Example:</strong></p>
 <p><pre class="highlight"><code class="language-gml">if (bluetooth_feature_is_supported(BluetoothFeature.ClassicDiscoverable))
 {
@@ -2350,7 +2389,8 @@ a debug message.</p>
 <p>This function ends discoverability early, before the duration given to
 <a href="classic.html#bluetooth_classic_discoverable_start">bluetooth_classic_discoverable_start</a> has passed. Use
 <a href="core.html#bluetooth_feature_is_supported">bluetooth_feature_is_supported</a> with <a href="core.html#bluetoothfeature">BluetoothFeature</a>.ClassicDiscoverableStop
-to check whether the platform can do this.</p>
+to check whether the platform can do this. The <code>on_stopped</code> callback is not called for a stop you
+ask for.</p>
 <p>The function returns a <a href="core.html#bluetootherror">BluetoothError</a>: NotInitialized before
 <a href="core.html#bluetooth_initialize">bluetooth_initialize</a>, or NotSupported where discoverability cannot be ended early,
 with the reason in <a href="core.html#bluetooth_last_error_message">bluetooth_last_error_message</a>.</p>

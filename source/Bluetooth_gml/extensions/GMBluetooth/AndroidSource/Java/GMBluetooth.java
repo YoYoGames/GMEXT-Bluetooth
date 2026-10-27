@@ -239,6 +239,7 @@ public class GMBluetooth extends GMBluetoothInternal
     private static final String NO_ADAPTER_MESSAGE = "This device has no Bluetooth adapter";
     private static final String RECEIVER_FAILED_MESSAGE = "Could not register for Bluetooth broadcasts";
     private static final String RADIO_OFF_MESSAGE = "Bluetooth was turned off";
+    private static final String REMOTE_DISCONNECTED_MESSAGE = "Remote device disconnected";
 
     // The permission, enable and discoverable requests need one to launch from.
     private static final String NO_ACTIVITY_MESSAGE = "No foreground activity is available";
@@ -444,6 +445,12 @@ public class GMBluetooth extends GMBluetoothInternal
 
         if (classicServer != null)
             invoke(classicServer.onStopped, BLUETOOTH_DISABLED, RADIO_OFF_MESSAGE);
+
+        // A dialog still up is answered by its result.
+        DiscoverableWindow window = discoverable.get();
+
+        if (window != null && window.granted)
+            endDiscoverableWindow(window, BLUETOOTH_DISABLED, RADIO_OFF_MESSAGE);
     }
 
 
@@ -3119,6 +3126,7 @@ public class GMBluetooth extends GMBluetoothInternal
 
         switch (status)
         {
+            case BluetoothGatt.GATT_SUCCESS: return REMOTE_DISCONNECTED_MESSAGE;
             case HCI_CONNECTION_TIMEOUT: name = "connection timeout"; break;
             case 0x13: name = "remote device terminated the connection"; break;
             case 0x16: name = "connection terminated by the local host"; break;
@@ -3289,7 +3297,14 @@ public class GMBluetooth extends GMBluetoothInternal
         // A dialog still up answers nobody: its result arrives after shutdown.
         firePermissionCallbacks(NOT_INITIALIZED, SHUTDOWN_MESSAGE, PERMISSION_UNKNOWN);
         fireEnableCallbacks(NOT_INITIALIZED, SHUTDOWN_MESSAGE);
-        fireDiscoverableCallbacks(NOT_INITIALIZED, SHUTDOWN_MESSAGE, 0);
+        // A granted window goes without firing, like every other subject.
+        DiscoverableWindow window = discoverable.getAndSet(null);
+        if (window != null)
+        {
+            releaseDiscoverableWindow(window);
+            if (!window.granted)
+                invoke(window.callback, NOT_INITIALIZED, SHUTDOWN_MESSAGE, 0);
+        }
 
         takeClassicServer();
         stopLeAdvertiseInternal(NOT_INITIALIZED, SHUTDOWN_MESSAGE);
@@ -3756,24 +3771,138 @@ public class GMBluetooth extends GMBluetoothInternal
     private final Object enableLock = new Object();
     private final ArrayList<GMFunction> pendingEnableCallbacks = new ArrayList<>();
 
-    // The same for the discoverable dialog, with the duration it asked for.
-    // Guarded by enableLock.
-    private final ArrayList<GMFunction> pendingDiscoverableCallbacks = new ArrayList<>();
-    private int discoverableRequestedSeconds = 0;
-
-
-    private void fireDiscoverableCallbacks(BluetoothError error, String message, int seconds)
+    // One discoverable request at a time, from its dialog to the end of the
+    // window it was granted; a start while one exists is Busy (R2-155).
+    private static final class DiscoverableWindow
     {
-        ArrayList<GMFunction> callbacks;
+        GMFunction callback;
+        GMFunction onStopped;
+        int requestedSeconds;
+        volatile boolean granted;
+        // The scan mode has been CONNECTABLE_DISCOVERABLE since the dialog.
+        volatile boolean seenDiscoverable;
+        Runnable expiry;
+    }
+
+    private final AtomicReference<DiscoverableWindow> discoverable = new AtomicReference<>();
+    private boolean discoverableReceiverRegistered = false;
+
+
+    // The window ends when the scan mode leaves CONNECTABLE_DISCOVERABLE, which
+    // ColorOS does 48 ms after granting it. Registered when the dialog opens:
+    // the stack applies the mode asynchronously, so the mode read at the
+    // dialog's answer may not have arrived yet, or may already be gone.
+    private final BroadcastReceiver discoverableReceiver = new BroadcastReceiver()
+    {
+        @Override
+        public void onReceive(Context receiverContext, Intent intent)
+        {
+            try
+            {
+                DiscoverableWindow window = discoverable.get();
+
+                if (!initialized || window == null || intent == null ||
+                    !BluetoothAdapter.ACTION_SCAN_MODE_CHANGED.equals(intent.getAction()))
+                    return;
+
+                int mode = intent.getIntExtra(BluetoothAdapter.EXTRA_SCAN_MODE, -1);
+
+                if (mode == BluetoothAdapter.SCAN_MODE_CONNECTABLE_DISCOVERABLE)
+                    window.seenDiscoverable = true;
+                else if (window.granted && window.seenDiscoverable)
+                    endDiscoverableWindow(window);
+            }
+            catch (Throwable ignored)
+            {
+            }
+        }
+    };
+
+
+    // Ends the window once: Ok, or BluetoothDisabled when the radio is not on.
+    private void endDiscoverableWindow(DiscoverableWindow window)
+    {
+        if (!adapterEnabled())
+            endDiscoverableWindow(window, BLUETOOTH_DISABLED, RADIO_OFF_MESSAGE);
+        else
+            endDiscoverableWindow(window, OK, "The system ended discoverability");
+    }
+
+
+    private void endDiscoverableWindow(DiscoverableWindow window, BluetoothError error, String message)
+    {
+        if (!discoverable.compareAndSet(window, null))
+            return;
+
+        releaseDiscoverableWindow(window);
+        invoke(window.onStopped, error, message);
+    }
+
+
+    private void releaseDiscoverableWindow(DiscoverableWindow window)
+    {
+        if (window.expiry != null)
+            timeoutHandler.removeCallbacks(window.expiry);
 
         synchronized (enableLock)
         {
-            callbacks = new ArrayList<>(pendingDiscoverableCallbacks);
-            pendingDiscoverableCallbacks.clear();
+            if (discoverableReceiverRegistered)
+            {
+                unregisterSystemReceiver(discoverableReceiver);
+                discoverableReceiverRegistered = false;
+            }
+        }
+    }
+
+
+    // The dialog answered: the callback hears it, and a granted window ends
+    // by the mode or, as a backstop and the only way without BLUETOOTH_SCAN,
+    // by the clock.
+    private void answerDiscoverableRequest(int resultCode)
+    {
+        DiscoverableWindow window = discoverable.get();
+
+        if (window == null || window.granted)
+            return;
+
+        if (resultCode == Activity.RESULT_CANCELED)
+        {
+            if (discoverable.compareAndSet(window, null))
+            {
+                releaseDiscoverableWindow(window);
+                invoke(window.callback, PERMISSION_DENIED, "The user declined", 0);
+            }
+            return;
         }
 
-        for (GMFunction callback : callbacks)
-            invoke(callback, error, message, seconds);
+        // The granted duration comes back as the result code; a stack that
+        // answers RESULT_OK instead granted what was asked.
+        int seconds = resultCode > 0 ? resultCode : window.requestedSeconds;
+
+        window.granted = true;
+        window.expiry = () -> endDiscoverableWindow(window, OK, "The discoverable time ran out");
+        invoke(window.callback, OK, "", seconds);
+        timeoutHandler.postDelayed(window.expiry, seconds * 1000L);
+
+        // Already withdrawn before the answer came.
+        if (window.seenDiscoverable && !scanModeIsDiscoverable())
+            endDiscoverableWindow(window);
+    }
+
+
+    private boolean scanModeIsDiscoverable()
+    {
+        BluetoothAdapter current = adapter;
+
+        try
+        {
+            return current != null &&
+                current.getScanMode() == BluetoothAdapter.SCAN_MODE_CONNECTABLE_DISCOVERABLE;
+        }
+        catch (Throwable ignored)
+        {
+            return false;
+        }
     }
 
 
@@ -3809,14 +3938,7 @@ public class GMBluetooth extends GMBluetoothInternal
         }
         else if (requestCode == REQUEST_CODE_DISCOVERABLE)
         {
-            // The granted duration comes back as the result code; a stack
-            // that answers RESULT_OK instead granted what was asked.
-            if (resultCode == Activity.RESULT_CANCELED)
-                fireDiscoverableCallbacks(PERMISSION_DENIED, "The user declined", 0);
-            else if (resultCode > 0)
-                fireDiscoverableCallbacks(OK, "", resultCode);
-            else
-                fireDiscoverableCallbacks(OK, "", discoverableRequestedSeconds);
+            answerDiscoverableRequest(resultCode);
         }
     }
 
@@ -9822,7 +9944,7 @@ public class GMBluetooth extends GMBluetoothInternal
             () ->
             {
                 BluetoothError error = DISCONNECTED;
-                String message = "Remote device disconnected";
+                String message = REMOTE_DISCONNECTED_MESSAGE;
 
                 try
                 {
@@ -9879,7 +10001,11 @@ public class GMBluetooth extends GMBluetoothInternal
                 }
                 catch (IOException exception)
                 {
-                    message = throwableMessage(exception);
+                    // A peer's clean close never reads -1: AOSP throws
+                    // "bt socket closed, read return: -1" (R2-157).
+                    String text = throwableMessage(exception);
+                    if (!text.startsWith("bt socket closed"))
+                        message = "read failed: " + text;
                 }
                 catch (Throwable throwable)
                 {
@@ -10433,7 +10559,10 @@ public class GMBluetooth extends GMBluetoothInternal
 
 
     @Override
-    public BluetoothError bluetooth_classic_discoverable_start(int duration_seconds, GMFunction callback)
+    public BluetoothError bluetooth_classic_discoverable_start(
+        int duration_seconds,
+        GMFunction callback,
+        Optional<GMFunction> on_stopped)
     {
         BluetoothError ready = requireAdapter();
         if (ready != OK)
@@ -10458,20 +10587,25 @@ public class GMBluetooth extends GMBluetoothInternal
         if (current == null)
             return result(OPERATION_FAILED, NO_ACTIVITY_MESSAGE);
 
-        boolean launch;
+        DiscoverableWindow window = new DiscoverableWindow();
+        window.callback = callback;
+        window.onStopped = on_stopped.orElse(null);
+        window.requestedSeconds = requestedDuration;
 
-        synchronized (enableLock)
+        if (scanModeIsDiscoverable() || !discoverable.compareAndSet(null, window))
+            return result(BUSY, "The device is already discoverable");
+
+        // getScanMode and the broadcast need BLUETOOTH_SCAN from Android 12;
+        // without it the clock alone ends the window.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || hasScanPermission())
         {
-            launch = pendingDiscoverableCallbacks.isEmpty();
-            pendingDiscoverableCallbacks.add(callback);
-
-            if (launch)
-                discoverableRequestedSeconds = requestedDuration;
+            synchronized (enableLock)
+            {
+                discoverableReceiverRegistered = registerSystemReceiver(
+                    discoverableReceiver,
+                    new IntentFilter(BluetoothAdapter.ACTION_SCAN_MODE_CHANGED));
+            }
         }
-
-        // A dialog is already up: this request waits for its answer.
-        if (!launch)
-            return OK;
 
         // For a result, so the answer reaches onActivityResult.
         try
@@ -10486,10 +10620,8 @@ public class GMBluetooth extends GMBluetoothInternal
         catch (Throwable throwable)
         {
             // A pre-flight failure fires nothing.
-            synchronized (enableLock)
-            {
-                pendingDiscoverableCallbacks.remove(callback);
-            }
+            if (discoverable.compareAndSet(window, null))
+                releaseDiscoverableWindow(window);
 
             return result(
                 OPERATION_FAILED,

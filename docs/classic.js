@@ -195,10 +195,10 @@
  *
  * [[Note: On macOS the RFCOMM channel is found by looking up the service UUID in the device's SDP
  * records, through IOBluetooth: the records cached from pairing when they hold the service,
- * otherwise an SDP query, which fails with ${constant.BluetoothError}.NotFound when the device does
- * not offer the service. The call itself returns 0 with NotFound when macOS cannot resolve the
- * device's address, and with PermissionDenied until ${function.bluetooth_permission_request} has
- * been called.]]
+ * otherwise an SDP query. A device that does not offer the service fails with
+ * ${constant.BluetoothError}.ConnectionFailed, as on every platform. The call itself returns 0 with
+ * NotFound when macOS cannot resolve the device's address, and with PermissionDenied until
+ * ${function.bluetooth_permission_request} has been called.]]
  *
  * [[Note: The connection is a secure (authenticated and encrypted) RFCOMM link, so an unpaired device
  * may show a pairing prompt, which counts toward the timeout. On Android a running Classic scan is
@@ -613,7 +613,11 @@
  * indefinite duration. The callback is called once: with ${constant.BluetoothError}.Ok and the
  * duration granted, with ${constant.BluetoothError}.PermissionDenied when the user declined, or with
  * ${constant.BluetoothError}.NotInitialized when ${function.bluetooth_shutdown} is called first.
- * Turning the radio off ends discoverability, except on Android, which has no call to end it.
+ *
+ * Once the device is discoverable, `on_stopped` is called when discoverability ends without
+ * ${function.bluetooth_classic_discoverable_stop}: with ${constant.BluetoothError}.Ok when its time
+ * runs out or the system ends it early, and with ${constant.BluetoothError}.BluetoothDisabled when
+ * the radio is turned off.
  *
  * The function returns a ${constant.BluetoothError}. When it is not
  * ${constant.BluetoothError}.Ok the callback is never called, and the reason is in
@@ -625,16 +629,22 @@
  * [[Note: On Windows the device becomes discoverable at once, the callback is called straight away
  * with the duration, and discoverability ends when it runs out or on
  * ${function.bluetooth_classic_discoverable_stop}. Incoming connections are also turned on if they
- * were off, and turned back off when discoverability ends. It returns NotSupported when no
- * Bluetooth radio is found.]]
+ * were off, and turned back off when discoverability ends. Windows can also end it early, for
+ * example when the Bluetooth settings page is closed, and `on_stopped` hears it within a second. It
+ * returns NotSupported when no Bluetooth radio is found.]]
  *
  * [[Note: On Android the user is shown a system prompt asking to make the device discoverable, and
- * the callback reports the answer. The permission is the Bluetooth advertise permission.]]
+ * the callback reports the answer. The permission is the Bluetooth advertise permission. Some
+ * Android builds end discoverability again right after granting it (ColorOS did within 50 ms), so
+ * the callback reports Ok and `on_stopped` follows at once. Without the Bluetooth scan permission
+ * the end cannot be watched, and `on_stopped` is called when the granted time runs out.]]
  *
  * [[Note: macOS and iOS have no public API for this, and the function returns NotSupported.]]
  * @param {Real} duration_seconds How long the device stays discoverable (1-3600, in seconds), or 0
  * for 120 seconds.
  * @param {Function} callback The function to call once with the outcome.
+ * @param {Function} [on_stopped] The function to call when discoverability ends without
+ * ${function.bluetooth_classic_discoverable_stop}, or `undefined`.
  * @returns {Enum.BluetoothError} ${constant.BluetoothError}.Ok if the request was made, otherwise the
  * reason it was not.
  * @event callback
@@ -644,6 +654,13 @@
  * discoverable, otherwise the reason it is not.
  * @member {String} message A description of the failure, or an empty string on success.
  * @member {Real} duration_seconds The number of seconds the device stays discoverable.
+ * @event_end
+ * @event callback:on_stopped
+ * @desc Called once, when discoverability that was granted ends without
+ * ${function.bluetooth_classic_discoverable_stop}. It is the last callback of the request.
+ * @member {Enum.BluetoothError} error_code ${constant.BluetoothError}.Ok when the time ran out or the
+ * system ended it, ${constant.BluetoothError}.BluetoothDisabled when the radio was turned off.
+ * @member {String} message A description of why discoverability ended.
  * @event_end
  * @example
  * ```gml
@@ -677,7 +694,8 @@
  * @desc This function ends discoverability early, before the duration given to
  * ${function.bluetooth_classic_discoverable_start} has passed. Use
  * ${function.bluetooth_feature_is_supported} with ${constant.BluetoothFeature}.ClassicDiscoverableStop
- * to check whether the platform can do this.
+ * to check whether the platform can do this. The `on_stopped` callback is not called for a stop you
+ * ask for.
  *
  * The function returns a ${constant.BluetoothError}: NotInitialized before
  * ${function.bluetooth_initialize}, or NotSupported where discoverability cannot be ended early,

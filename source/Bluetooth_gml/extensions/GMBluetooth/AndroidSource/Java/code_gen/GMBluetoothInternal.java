@@ -635,7 +635,15 @@ public abstract class GMBluetoothInternal extends RunnerSocial implements GMBlue
         // field: callback, type: Function
         GMFunction callback = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
 
-        BluetoothError __result = bluetooth_classic_discoverable_start(duration_seconds, callback);
+        // field: on_stopped, type: optional<Function>
+        java.util.Optional<GMFunction> on_stopped = java.util.Optional.empty();
+        if (GMExtWire.readBool(__arg_buffer))
+        {
+            GMFunction __opt_on_stopped = GMExtWire.readGMFunction(__arg_buffer, __dispatch_queue);
+            on_stopped = java.util.Optional.of(__opt_on_stopped);
+        }
+
+        BluetoothError __result = bluetooth_classic_discoverable_start(duration_seconds, callback, on_stopped);
 
         GMExtWire.order(__ret_buffer);
         GMExtWire.IByteWriter __ret_buffer_writer = new GMExtWire.GMBufferWriter(__ret_buffer);

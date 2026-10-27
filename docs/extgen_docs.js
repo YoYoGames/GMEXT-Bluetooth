@@ -279,6 +279,7 @@
  * @function_partial bluetooth_classic_discoverable_start
  * @param {Real} duration_seconds
  * @param {Function} callback
+ * @param {Function} [on_stopped]
  * @returns {Enum.BluetoothError}
  * @function_end
  */

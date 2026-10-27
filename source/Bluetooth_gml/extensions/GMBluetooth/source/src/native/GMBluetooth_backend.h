@@ -322,6 +322,10 @@ namespace gmbluetooth
         // Advertising that started Ok ended without le_advertise_stop: error
         // (never Ok) and message say why.
         LeAdvertiseStopped,
+        // Discoverability that started Ok ended without
+        // classic_discoverable_stop: Ok when its time ran out or the system
+        // withdrew it, with message.
+        ClassicDiscoverableStopped,
         // A read or write request on a local attribute from central:
         // attribute.characteristic is the characteristic's id and
         // attribute.descriptor the descriptor's, 0 for a characteristic

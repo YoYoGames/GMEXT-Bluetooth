@@ -196,6 +196,8 @@ namespace gmbluetooth::win
             event.transport = Transport::LowEnergy;
             event.central = server_central(*le, central, address);
             event.connected = connected;
+            if (!connected)
+                event.message = "Remote device disconnected";
             push_le_event(le, std::move(event));
         }
 

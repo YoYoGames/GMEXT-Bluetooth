@@ -49,7 +49,7 @@ public interface GMBluetoothInterface {
     public BluetoothError bluetooth_classic_server_start(String name, String service_uuid, GMFunction on_connected, GMFunction on_data, GMFunction on_disconnected, java.util.Optional<GMFunction> on_stopped);
     public BluetoothError bluetooth_classic_server_stop();
     public boolean bluetooth_classic_server_is_running();
-    public BluetoothError bluetooth_classic_discoverable_start(int duration_seconds, GMFunction callback);
+    public BluetoothError bluetooth_classic_discoverable_start(int duration_seconds, GMFunction callback, java.util.Optional<GMFunction> on_stopped);
     public BluetoothError bluetooth_classic_discoverable_stop();
     public boolean bluetooth_classic_discoverable_is_running();
     public boolean bluetooth_pairing_is_supported(long device);

@@ -32,6 +32,12 @@ module GMBluetooth;
 // These are checked before anything starts, so they come back from the call itself.
 // A stop while idle is Ok and fires nothing.
 //
+// An outcome the extension recognises reads the same on every platform: the peer
+// closing the link is "Remote device disconnected", and a Classic connect to a service
+// the device does not offer is ConnectionFailed with "The device does not offer service
+// <uuid>, or nothing is listening on it". A failure it cannot classify carries the
+// platform's text, as "<operation> failed (<code>): <system text>".
+//
 // What the game ends fires no event: a stop or a disconnect the game asks for retires
 // its subject in the call, and no on_stopped or on_disconnected fires for it, nor for
 // the centrals bluetooth_le_server_stop retires or the advertising it ends.
@@ -41,8 +47,8 @@ module GMBluetooth;
 // and Classic connection and each server central on_disconnected(BluetoothDisabled), a
 // connect in progress fails with BluetoothDisabled, and each server reports on_stopped
 // after its centrals, the LE server's services and attribute handles gone.
-// Discoverability ends too, except on Android, which has no call to end it. Nothing
-// restarts when the radio comes back.
+// Discoverability ends too, with on_stopped(BluetoothDisabled). Nothing restarts when
+// the radio comes back.
 
 // =============================================================================
 // Constants
@@ -802,8 +808,16 @@ function bluetooth_classic_server_is_running(): bool;
 /// duration granted, PermissionDenied when the user declined, NotInitialized when
 /// bluetooth_shutdown comes first. Windows grants it at once and ends it on a timer;
 /// Android asks the user. macOS and iOS have no API: NotSupported.
+/// on_stopped(error_code, message), when given, is the last event of a window that was
+/// granted: Ok when it ends on its own, at the end of the duration or earlier when the
+/// system withdraws it (some Android builds do within a second), BluetoothDisabled when
+/// the radio turns off. bluetooth_classic_discoverable_stop fires nothing.
 [global, bind = typed_gml, type_hint=`BluetoothError`]
-function bluetooth_classic_discoverable_start(duration_seconds: int32, callback: func): gmval;
+function bluetooth_classic_discoverable_start(
+    duration_seconds: int32,
+    callback: func,
+    [type_hint=`func?`] on_stopped: gmval
+): gmval;
 
 /// Stops discoverability early (ClassicDiscoverableStop): NotSupported on Android,
 /// which has no API to cancel it, and on Apple.

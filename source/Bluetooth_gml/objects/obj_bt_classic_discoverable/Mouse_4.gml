@@ -15,6 +15,10 @@ var _r = bluetooth_classic_discoverable_start(duration, method(callback_ctx, fun
 	if (instance_exists(owner)) {
 		owner.on_discoverable_result(_error_code, _message, _duration_seconds);
 	}
+}), method(callback_ctx, function(_error_code, _message) {
+	if (instance_exists(owner)) {
+		owner.on_discoverable_stopped(_error_code, _message);
+	}
 }));
 show_debug_message($"[GML] bluetooth_classic_discoverable_start({duration}) = {_r}");
 

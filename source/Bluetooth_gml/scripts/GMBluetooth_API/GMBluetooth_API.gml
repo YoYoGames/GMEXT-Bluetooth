@@ -2627,9 +2627,10 @@ function bluetooth_classic_server_stop()
 /**
  * @param {Real} _duration_seconds
  * @param {Function} _callback
+ * @param {Function} _on_stopped
  * @returns {Enum.BluetoothError}
  */
-function bluetooth_classic_discoverable_start(_duration_seconds, _callback)
+function bluetooth_classic_discoverable_start(_duration_seconds, _callback, _on_stopped)
 {
     var __available__ = __GMBluetooth_is_available();
     if (!__available__) return;
@@ -2646,6 +2647,19 @@ function bluetooth_classic_discoverable_start(_duration_seconds, _callback)
     if (!is_callable(_callback)) show_error($"{_GMFUNCTION_} :: _callback expected callable type", true);
     var _callback_handle = __ext_core_function_register(_callback, __dispatcher__);
     buffer_write(__args_buffer__, buffer_u64, _callback_handle);
+
+    // param: _on_stopped, type: optional<Function>
+    if (is_undefined(_on_stopped))
+    {
+        buffer_write(__args_buffer__, buffer_bool, false);
+    }
+    else
+    {
+        buffer_write(__args_buffer__, buffer_bool, true);
+        if (!is_callable(_on_stopped)) show_error($"{_GMFUNCTION_} :: _on_stopped expected callable type", true);
+        var _on_stopped_handle = __ext_core_function_register(_on_stopped, __dispatcher__);
+        buffer_write(__args_buffer__, buffer_u64, _on_stopped_handle);
+    }
 
     var __ret_buffer__ = __ext_core_get_ret_buffer();
 

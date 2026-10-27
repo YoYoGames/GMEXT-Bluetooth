@@ -49,6 +49,21 @@ namespace gmbluetooth::win
             }
         }
 
+        // A connect that did not open is ConnectionFailed, as on Android and
+        // macOS, unless it timed out or was refused permission (R2-15).
+        Error map_connect_wsa_error(int error)
+        {
+            const Error mapped = map_wsa_error(error);
+            return mapped == Error::PermissionDenied || mapped == Error::Timeout ? mapped : Error::ConnectionFailed;
+        }
+
+        // The service is not in the device's SDP record, or nothing listens on
+        // its channel; 10049 is what an Android server that is not listening gives.
+        bool is_missing_service_error(int error)
+        {
+            return error == WSAECONNREFUSED || error == WSAEADDRNOTAVAIL || error == WSASERVICE_NOT_FOUND;
+        }
+
         // At most this much accepted data waits to be sent.
         constexpr std::size_t k_classic_send_cap = 1024 * 1024;
 
@@ -408,6 +423,7 @@ namespace gmbluetooth::win
             const std::shared_ptr<ClassicConnectionState>& state,
             BTH_ADDR address,
             GUID service_guid,
+            const std::string& service_uuid,
             std::chrono::steady_clock::time_point deadline)
         {
             const auto abandon = [&shared, &state]()
@@ -423,7 +439,13 @@ namespace gmbluetooth::win
             };
             const auto fail_wsa = [&](const char* operation, int error)
             {
-                fail(map_wsa_error(error), wsa_message(operation, error));
+                if (is_missing_service_error(error))
+                {
+                    fail(Error::ConnectionFailed, "The device does not offer service " + service_uuid +
+                        ", or nothing is listening on it (" + std::to_string(error) + ")");
+                    return;
+                }
+                fail(map_connect_wsa_error(error), wsa_message(operation, error));
             };
 
             if (state->closing.load() || !shared->alive->load())
@@ -535,7 +557,7 @@ namespace gmbluetooth::win
 
             if (!start_writer(shared, state))
             {
-                fail(Error::OperationFailed, "Could not start a thread for the Classic connection");
+                fail(Error::ConnectionFailed, "Could not start a thread for the Classic connection");
                 return;
             }
 
@@ -1012,9 +1034,9 @@ namespace gmbluetooth::win
 
         const bool started = spawn_detached_worker(
             workers_,
-            [shared, state, address, service_guid, deadline]()
+            [shared, state, address, service_guid, service_uuid, deadline]()
             {
-                run_classic_connect(shared, state, address, service_guid, deadline);
+                run_classic_connect(shared, state, address, service_guid, service_uuid, deadline);
             });
 
         if (!started)
@@ -1410,10 +1432,12 @@ namespace gmbluetooth::win
         BluetoothFindRadioClose(find);
 
         // Incoming connections are a system setting; whatever this turns
-        // on is turned back off by the stop or the expiry (R1-184).
+        // on is turned back off by the stop or the expiry (R1-184). A radio
+        // already connectable is left alone: enabling it again fails with
+        // ERROR_INVALID_PARAMETER once a window has been stopped (R2-155).
         const bool restore_connectable = BluetoothIsConnectable(radio_handle) == FALSE;
 
-        if (!BluetoothEnableIncomingConnections(radio_handle, TRUE))
+        if (restore_connectable && !BluetoothEnableIncomingConnections(radio_handle, TRUE))
         {
             message = system_error_message("BluetoothEnableIncomingConnections", GetLastError());
             CloseHandle(radio_handle);
@@ -1440,24 +1464,48 @@ namespace gmbluetooth::win
         if (duration_seconds > 0)
         {
             // Joined by classic_discoverable_stop (shutdown calls it), so
-            // it never outlives the backend; a stop wakes it at once.
+            // it never outlives the backend; a stop wakes it at once. Windows
+            // can turn discovery off before the end (closing the Bluetooth
+            // settings page does), so it checks once a second (R2-155).
             discoverable_timer_thread_ = spawn_worker(workers_, [this, duration_seconds]()
             {
-                bool stopped = false;
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(duration_seconds);
+                std::string message;
+                for (;;)
                 {
-                    std::unique_lock lock(discoverable_mutex_);
-                    stopped = discoverable_wake_.wait_for(
-                        lock,
-                        std::chrono::seconds(duration_seconds),
-                        [this]() { return classic_discoverable_stop_requested_; });
+                    const auto slice = std::min<std::chrono::steady_clock::duration>(
+                        std::chrono::seconds(1), deadline - std::chrono::steady_clock::now());
+                    {
+                        std::unique_lock lock(discoverable_mutex_);
+                        if (discoverable_wake_.wait_for(lock, slice, [this]() { return classic_discoverable_stop_requested_; }))
+                            return;
+                    }
+                    if (std::chrono::steady_clock::now() >= deadline)
+                    {
+                        message = "The discoverable time ran out";
+                        break;
+                    }
+                    // Radio off is the core's to report, BluetoothDisabled.
+                    if (BluetoothIsDiscoverable(discoverable_radio_) == FALSE &&
+                        current_bluetooth_state() == 5) // PoweredOn
+                    {
+                        message = "The system ended discoverability";
+                        break;
+                    }
                 }
 
-                // Only auto-disable on natural expiry - if a stop was requested,
-                // classic_discoverable_stop() owns disabling/closing the radio.
-                if (!stopped)
+                // A stop that was requested owns disabling and closing the radio.
+                end_discoverable(discoverable_radio_);
+                classic_discoverable_active_.store(false);
+
+                if (hooks_.push_event)
                 {
-                    end_discoverable(discoverable_radio_);
-                    classic_discoverable_active_.store(false);
+                    BackendEvent event;
+                    event.type = BackendEventType::ClassicDiscoverableStopped;
+                    event.transport = Transport::Classic;
+                    event.error = Error::Ok;
+                    event.message = std::move(message);
+                    hooks_.push_event(std::move(event));
                 }
             });
         }
@@ -1490,7 +1538,9 @@ namespace gmbluetooth::win
 
         if (discoverable_radio_)
         {
-            end_discoverable(discoverable_radio_);
+            // An expiry already ended it; the timer is joined, so this holds.
+            if (classic_discoverable_active_.load())
+                end_discoverable(discoverable_radio_);
             CloseHandle(discoverable_radio_);
             discoverable_radio_ = nullptr;
         }

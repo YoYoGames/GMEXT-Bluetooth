@@ -561,7 +561,14 @@ GMEXPORT double __EXT_NATIVE__bluetooth_classic_discoverable_start(char* __arg_b
     // field: callback, type: Function
     gm::wire::GMFunction callback = gm::wire::codec::readFunction(__br, &__dispatch_queue);
 
-    auto&& __result = bluetooth_classic_discoverable_start(duration_seconds, callback);
+    // field: on_stopped, type: optional<Function>
+    std::optional<gm::wire::GMFunction> on_stopped = std::nullopt;
+    if (gm::wire::codec::readValue<bool>(__br))
+    {
+        on_stopped = gm::wire::codec::readFunction(__br, &__dispatch_queue);
+    }
+
+    auto&& __result = bluetooth_classic_discoverable_start(duration_seconds, callback, on_stopped);
     gm::byteio::BufferWriter __bw{__ret_buffer, static_cast<size_t>(__ret_buffer_length)};
 
     // return: __result, type: enum BluetoothError

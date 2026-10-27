@@ -4196,16 +4196,21 @@ namespace
                 classic_pending_sdp_.erase(sdp);
                 if (classic_connections_.find(connection) == classic_connections_.end()) return; // disconnected/cancelled meanwhile
             }
+            // ConnectionFailed, as on Windows and Android, which cannot tell a
+            // missing service from a refusal (R2-167).
             if (status != kIOReturnSuccess)
             {
-                complete_classic_connect(connection, Error::NotFound, "Classic service discovery failed");
+                char text[96];
+                std::snprintf(text, sizeof(text), "Classic service discovery failed (IOReturn 0x%08x)", status);
+                complete_classic_connect(connection, Error::ConnectionFailed, text);
                 return;
             }
 
             BluetoothRFCOMMChannelID channelID = 0;
             if (!classic_find_rfcomm_channel(device, service_uuid, channelID))
             {
-                complete_classic_connect(connection, Error::NotFound, "service " + service_uuid + " not found");
+                complete_classic_connect(connection, Error::ConnectionFailed,
+                    "The device does not offer service " + service_uuid + ", or nothing is listening on it");
                 return;
             }
             classic_open_rfcomm(connection, device, channelID);

@@ -1800,6 +1800,14 @@ namespace
 
     ClassicServerSession g_classic_server;
 
+    struct DiscoverableSession
+    {
+        bool running = false;
+        GMFunction on_stopped;
+    };
+
+    DiscoverableSession g_discoverable;
+
     template <typename Session>
     bool session_running(const Session& session)
     {
@@ -2783,8 +2791,11 @@ namespace
             fire_stopped("classic_server on_stopped", classic_server.on_stopped, error, message);
         }
 
-        if (g_backend && g_backend->classic_discoverable_is_running())
+        const DiscoverableSession discoverable = end_session(g_discoverable);
+        if (g_backend && (discoverable.running || g_backend->classic_discoverable_is_running()))
             g_backend->classic_discoverable_stop(ignored);
+        if (discoverable.running)
+            fire_stopped("classic_discoverable on_stopped", discoverable.on_stopped, error, message);
     }
 
     // BluetoothState raw values from spec.gmidl.
@@ -3018,6 +3029,17 @@ namespace
         fire_stopped("advertise on_stopped", ended.on_stopped, error, event.message);
     }
 
+    void dispatch_classic_discoverable_stopped(const BackendEvent& event)
+    {
+        const DiscoverableSession ended = end_session(g_discoverable);
+        if (!ended.running)
+        {
+            g_dropped_events++;
+            return;
+        }
+        fire_stopped("classic_discoverable on_stopped", ended.on_stopped, event.error, event.message);
+    }
+
     void dispatch_classic_connect_result(const BackendEvent& event)
     {
         // The core knows which device the handle was made for; a backend
@@ -3237,6 +3259,9 @@ namespace
                 case BackendEventType::LeAdvertiseStopped:
                     dispatch_le_advertise_stopped(event);
                     return;
+                case BackendEventType::ClassicDiscoverableStopped:
+                    dispatch_classic_discoverable_stopped(event);
+                    return;
                 case BackendEventType::LeServerReadRequest:
                     dispatch_le_server_read_request(event);
                     return;
@@ -3366,6 +3391,7 @@ void bluetooth_shutdown()
     end_session(g_advertise);
     end_session(g_le_server);
     end_session(g_classic_server);
+    end_session(g_discoverable);
     { std::scoped_lock lock(g_subscriptions_mutex); g_subscriptions.clear(); }
     { std::scoped_lock lock(g_discovery_jobs_mutex); g_discovery_jobs.clear(); }
     g_scan_filters.start({});
@@ -4010,7 +4036,8 @@ bool bluetooth_classic_server_is_running()
     return session_running(g_classic_server);
 }
 
-BluetoothError bluetooth_classic_discoverable_start(std::int32_t duration_seconds, const gm::wire::GMFunction& callback)
+BluetoothError bluetooth_classic_discoverable_start(std::int32_t duration_seconds, const gm::wire::GMFunction& callback,
+    const std::optional<gm::wire::GMFunction>& on_stopped)
 {
     if (!require_backend())
         return to_gm(g_last_error);
@@ -4027,11 +4054,20 @@ BluetoothError bluetooth_classic_discoverable_start(std::int32_t duration_second
     // The same bounds everywhere, Android's (R2-130).
     const std::int32_t granted = duration_seconds <= 0 ? 120 : std::clamp(duration_seconds, 1, 3600);
 
+    // Running before the backend starts, so an end it reports at once finds it.
+    DiscoverableSession session;
+    session.on_stopped = optional_callback(on_stopped);
+    if (!begin_session(g_discoverable, std::move(session)))
+        return fail(Error::Busy, "The device is already discoverable");
+
     std::string message;
     const Error error = g_backend->classic_discoverable_start(granted, message);
     set_last_error(error, message);
     if (error != Error::Ok)
+    {
+        end_session(g_discoverable);
         return to_gm(error);
+    }
 
     // The backends here grant it at once (R2-129).
     // callback(error_code, message, duration_seconds)
@@ -4044,6 +4080,10 @@ BluetoothError bluetooth_classic_discoverable_stop()
 {
     if (!require_backend())
         return to_gm(g_last_error);
+
+    // Retired first: an end the backend reports while the stop joins its timer
+    // finds nothing to fire.
+    end_session(g_discoverable);
 
     std::string message;
     const Error error = g_backend->classic_discoverable_stop(message);

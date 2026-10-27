@@ -33,3 +33,10 @@ on_discoverable_result = function(_error_code, _message, _duration_seconds) {
 		discoverable_until = current_time + _duration_seconds * 1000;
 	}
 };
+
+// The window ended on its own: its time ran out, the system withdrew it (some
+// Android builds do within a second) or the radio turned off.
+on_discoverable_stopped = function(_error_code, _message) {
+	show_debug_message($"[GML] discoverable stopped: {_error_code} {_message}");
+	discoverable_until = 0;
+};

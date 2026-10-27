@@ -635,7 +635,7 @@ gm_enums::BluetoothError bluetooth_classic_send(std::uint64_t connection, gm::wi
 gm_enums::BluetoothError bluetooth_classic_server_start(std::string_view name, std::string_view service_uuid, const gm::wire::GMFunction& on_connected, const gm::wire::GMFunction& on_data, const gm::wire::GMFunction& on_disconnected, const std::optional<gm::wire::GMFunction>& on_stopped);
 gm_enums::BluetoothError bluetooth_classic_server_stop();
 bool bluetooth_classic_server_is_running();
-gm_enums::BluetoothError bluetooth_classic_discoverable_start(std::int32_t duration_seconds, const gm::wire::GMFunction& callback);
+gm_enums::BluetoothError bluetooth_classic_discoverable_start(std::int32_t duration_seconds, const gm::wire::GMFunction& callback, const std::optional<gm::wire::GMFunction>& on_stopped);
 gm_enums::BluetoothError bluetooth_classic_discoverable_stop();
 bool bluetooth_classic_discoverable_is_running();
 bool bluetooth_pairing_is_supported(std::uint64_t device);
