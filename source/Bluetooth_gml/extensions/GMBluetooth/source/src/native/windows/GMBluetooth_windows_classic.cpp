@@ -713,9 +713,9 @@ namespace gmbluetooth::win
             return device;
         }
 
-        // Every device Windows remembers, by address, with its stLastSeen as
-        // it stood before an inquiry; no inquiry runs. nullopt when Windows
-        // could not list them, and the scan then keeps every result.
+        // Every device Windows remembers, by address, with the stLastSeen
+        // Windows stores for it; no inquiry runs. nullopt when Windows could
+        // not list them, and the scan then keeps every result.
         std::optional<std::unordered_map<BTH_ADDR, SYSTEMTIME>> remembered_devices_last_seen()
         {
             BLUETOOTH_DEVICE_SEARCH_PARAMS search{};
@@ -757,16 +757,23 @@ namespace gmbluetooth::win
         }
 
         // A result answered the inquiry when Windows did not remember it
-        // before, or its stLastSeen moved since the snapshot.
+        // before, or its stored stLastSeen moved between the snapshots taken
+        // before and after the inquiry. The result's own stLastSeen is never
+        // read: inside an inquiry Windows stamps every remembered device with
+        // the current time, answered or not (R2-164).
         bool answered_inquiry(
             const std::optional<std::unordered_map<BTH_ADDR, SYSTEMTIME>>& before,
+            const std::optional<std::unordered_map<BTH_ADDR, SYSTEMTIME>>& after,
             const BLUETOOTH_DEVICE_INFO& info)
         {
-            if (!before)
+            if (!before || !after)
                 return true;
-            const auto it = before->find(info.Address.ullLong);
-            return it == before->end() ||
-                std::memcmp(&it->second, &info.stLastSeen, sizeof(SYSTEMTIME)) != 0;
+            const auto was = before->find(info.Address.ullLong);
+            if (was == before->end())
+                return true;
+            const auto now = after->find(info.Address.ullLong);
+            return now != after->end() &&
+                std::memcmp(&was->second, &now->second, sizeof(SYSTEMTIME)) != 0;
         }
 
         void run_classic_inquiry(
@@ -800,10 +807,11 @@ namespace gmbluetooth::win
 
                 // The flags above also return every remembered device, in
                 // range or not, but clearing them would hide a paired device
-                // that did answer (R1-145). What answered has a stLastSeen
-                // newer than before the inquiry; its time base is not
-                // documented, so it is compared only with itself, never with
-                // the clock.
+                // that did answer (R1-145). Only a device that answered moves
+                // the stLastSeen Windows stores, so the results are filtered
+                // against snapshots of it taken before and after the inquiry;
+                // its time base is not documented, so it is compared only
+                // with itself, never with the clock.
                 const auto before = remembered_devices_last_seen();
 
                 HBLUETOOTH_DEVICE_FIND finder =
@@ -811,13 +819,16 @@ namespace gmbluetooth::win
 
                 if (finder)
                 {
+                    // The inquiry runs inside BluetoothFindFirstDevice, so
+                    // holding the results until the second snapshot reports
+                    // nothing later.
+                    std::vector<BLUETOOTH_DEVICE_INFO> results;
                     do
                     {
                         if (!current())
                             break;
 
-                        if (answered_inquiry(before, info) && shared->hooks.upsert_device)
-                            shared->hooks.upsert_device(classic_device(info));
+                        results.push_back(info);
 
                         info = {};
                         info.dwSize = sizeof(info);
@@ -825,6 +836,19 @@ namespace gmbluetooth::win
                     while (BluetoothFindNextDevice(finder, &info));
 
                     BluetoothFindDeviceClose(finder);
+
+                    const auto after = current()
+                        ? remembered_devices_last_seen()
+                        : std::nullopt;
+
+                    for (const BLUETOOTH_DEVICE_INFO& result : results)
+                    {
+                        if (!current())
+                            break;
+
+                        if (answered_inquiry(before, after, result) && shared->hooks.upsert_device)
+                            shared->hooks.upsert_device(classic_device(result));
+                    }
                 }
                 else if (const DWORD find_error = GetLastError(); find_error != ERROR_NO_MORE_ITEMS)
                 {
